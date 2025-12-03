@@ -1,0 +1,435 @@
+openapi: 3.0.3
+info:
+  title: 搜索与生成 API
+  description: 向量搜索和文本生成接口
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: 开发环境
+
+paths:
+  /search:
+    post:
+      summary: 执行向量搜索
+      description: 基于查询文本进行相似度或语义搜索
+      tags:
+        - Search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query_text:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                search_type:
+                  type: string
+                  enum: [similarity, semantic]
+                  default: similarity
+                top_k:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 10
+                filter_conditions:
+                  type: object
+                  description: 可选的过滤条件（如文档ID、日期范围）
+                  properties:
+                    document_ids:
+                      type: array
+                      items:
+                        type: string
+                        format: uuid
+                    date_from:
+                      type: string
+                      format: date-time
+                    date_to:
+                      type: string
+                      format: date-time
+              required:
+                - query_text
+      responses:
+        '200':
+          description: 搜索成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      query_id:
+                        type: string
+                        format: uuid
+                      results:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SearchResult'
+                      total_count:
+                        type: integer
+                      response_time_ms:
+                        type: integer
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /search/queries:
+    get:
+      summary: 获取搜索历史
+      description: 分页获取历史搜索查询
+      tags:
+        - Search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: 成功返回搜索历史
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      queries:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SearchQuery'
+                      total:
+                        type: integer
+
+  /search/queries/{query_id}:
+    get:
+      summary: 获取搜索结果详情
+      description: 获取指定查询的完整结果
+      tags:
+        - Search
+      parameters:
+        - name: query_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 成功返回搜索结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      query:
+                        $ref: '#/components/schemas/SearchQuery'
+                      results:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SearchResultDetail'
+
+  /search/results/export:
+    post:
+      summary: 导出搜索结果
+      description: 将搜索结果导出为JSON或CSV格式
+      tags:
+        - Search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query_id:
+                  type: string
+                  format: uuid
+                format:
+                  type: string
+                  enum: [json, csv]
+                  default: json
+              required:
+                - query_id
+      responses:
+        '200':
+          description: 导出成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      download_url:
+                        type: string
+
+  /generation/tasks:
+    post:
+      summary: 创建文本生成任务
+      description: 基于上下文创建文本生成任务
+      tags:
+        - Generation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                context_chunks:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: 上下文分块ID数组
+                prompt:
+                  type: string
+                  description: 生成提示词
+                model_provider:
+                  type: string
+                  enum: [ollama, huggingface]
+                  default: ollama
+                model_name:
+                  type: string
+                  description: 模型名称
+                parameters:
+                  type: object
+                  properties:
+                    temperature:
+                      type: number
+                      minimum: 0
+                      maximum: 2
+                      default: 0.7
+                    max_tokens:
+                      type: integer
+                      minimum: 1
+                      maximum: 4000
+                      default: 1000
+                    top_p:
+                      type: number
+                      minimum: 0
+                      maximum: 1
+                      default: 1.0
+              required:
+                - context_chunks
+                - prompt
+                - model_provider
+      responses:
+        '202':
+          description: 任务已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      task_id:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                  message:
+                    type: string
+
+  /generation/tasks/{task_id}:
+    get:
+      summary: 获取生成任务状态
+      description: 查询生成任务的状态和结果
+      tags:
+        - Generation
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 成功返回任务状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/GenerationTask'
+
+  /generation/tasks/{task_id}/output:
+    get:
+      summary: 获取生成结果
+      description: 获取已完成任务的生成输出
+      tags:
+        - Generation
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 成功返回生成结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      output:
+                        type: string
+                      metadata:
+                        type: object
+        '404':
+          description: 任务未完成或不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    SearchResult:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        content_preview:
+          type: string
+          description: 分块内容预览
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+        rank:
+          type: integer
+        metadata:
+          type: object
+    
+    SearchResultDetail:
+      allOf:
+        - $ref: '#/components/schemas/SearchResult'
+        - type: object
+          properties:
+            full_content:
+              type: string
+            document_info:
+              type: object
+              properties:
+                filename:
+                  type: string
+                format:
+                  type: string
+    
+    SearchQuery:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        query_text:
+          type: string
+        search_type:
+          type: string
+        top_k:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        response_time_ms:
+          type: integer
+    
+    GenerationTask:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        context_chunks:
+          type: array
+          items:
+            type: string
+            format: uuid
+        prompt:
+          type: string
+        model_provider:
+          type: string
+        model_name:
+          type: string
+        parameters:
+          type: object
+        output:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        error_message:
+          type: string
+    
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object

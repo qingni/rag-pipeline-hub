@@ -1,0 +1,240 @@
+openapi: 3.0.3
+info:
+  title: 文档管理 API
+  description: 文档上传、查询和管理相关接口
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: 开发环境
+
+paths:
+  /documents:
+    get:
+      summary: 获取文档列表
+      description: 分页获取已上传的文档列表
+      tags:
+        - Documents
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [uploaded, processing, ready, error]
+      responses:
+        '200':
+          description: 成功返回文档列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      documents:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Document'
+                      total:
+                        type: integer
+                      page:
+                        type: integer
+                      page_size:
+                        type: integer
+    
+    post:
+      summary: 上传文档
+      description: 上传新文档，限制50MB
+      tags:
+        - Documents
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 文档文件
+      responses:
+        '201':
+          description: 文档上传成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Document'
+                  message:
+                    type: string
+        '400':
+          description: 文件大小超限或格式不支持
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /documents/{document_id}:
+    get:
+      summary: 获取文档详情
+      tags:
+        - Documents
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 成功返回文档详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Document'
+        '404':
+          description: 文档不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    
+    delete:
+      summary: 删除文档
+      description: 删除文档及其所有处理结果
+      tags:
+        - Documents
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /documents/{document_id}/preview:
+    get:
+      summary: 预览文档
+      description: 获取文档预览内容（前几页或摘要）
+      tags:
+        - Documents
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: pages
+          in: query
+          description: 预览页数
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 3
+      responses:
+        '200':
+          description: 成功返回预览内容
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      preview_text:
+                        type: string
+                      page_count:
+                        type: integer
+
+components:
+  schemas:
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        format:
+          type: string
+          enum: [pdf, doc, docx, txt]
+        size_bytes:
+          type: integer
+        upload_time:
+          type: string
+          format: date-time
+        storage_path:
+          type: string
+        content_hash:
+          type: string
+        status:
+          type: string
+          enum: [uploaded, processing, ready, error]
+      required:
+        - id
+        - filename
+        - format
+        - size_bytes
+        - upload_time
+        - status
+    
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object

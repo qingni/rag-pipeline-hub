@@ -1,0 +1,342 @@
+openapi: 3.0.3
+info:
+  title: 文档处理 API
+  description: 文档加载、解析、分块、嵌入和索引接口
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: 开发环境
+
+paths:
+  /processing/load:
+    post:
+      summary: 加载文档
+      description: 使用指定加载器加载文档内容
+      tags:
+        - Processing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document_id:
+                  type: string
+                  format: uuid
+                loader_type:
+                  type: string
+                  enum: [pymupdf, pypdf, unstructured]
+                  default: pymupdf
+              required:
+                - document_id
+      responses:
+        '200':
+          description: 加载成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingResponse'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /processing/parse:
+    post:
+      summary: 解析文档
+      description: 按指定选项解析文档内容
+      tags:
+        - Processing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document_id:
+                  type: string
+                  format: uuid
+                parse_option:
+                  type: string
+                  enum: [full_text, by_page, by_heading, mixed]
+                  default: full_text
+                include_tables:
+                  type: boolean
+                  default: true
+              required:
+                - document_id
+      responses:
+        '200':
+          description: 解析成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingResponse'
+
+  /processing/chunk:
+    post:
+      summary: 分块文档
+      description: 按指定策略将文档分块
+      tags:
+        - Processing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document_id:
+                  type: string
+                  format: uuid
+                strategy:
+                  type: string
+                  enum: [paragraph, fixed, semantic, sliding_window]
+                  default: paragraph
+                chunk_size:
+                  type: integer
+                  minimum: 100
+                  maximum: 5000
+                  default: 1000
+                chunk_overlap:
+                  type: integer
+                  minimum: 0
+                  maximum: 1000
+                  default: 200
+              required:
+                - document_id
+      responses:
+        '200':
+          description: 分块成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ProcessingResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          chunk_count:
+                            type: integer
+                          chunks:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/ChunkPreview'
+
+  /processing/embed:
+    post:
+      summary: 向量嵌入
+      description: 为文档分块生成向量嵌入
+      tags:
+        - Processing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document_id:
+                  type: string
+                  format: uuid
+                provider:
+                  type: string
+                  enum: [openai, bedrock, huggingface]
+                  default: openai
+                model_name:
+                  type: string
+                  description: 嵌入模型名称
+                batch_size:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 10
+              required:
+                - document_id
+                - provider
+      responses:
+        '202':
+          description: 嵌入任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingResponse'
+
+  /processing/index:
+    post:
+      summary: 创建向量索引
+      description: 将向量嵌入存储到向量数据库
+      tags:
+        - Processing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document_id:
+                  type: string
+                  format: uuid
+                vector_store:
+                  type: string
+                  enum: [milvus, pinecone]
+                  default: milvus
+                collection_name:
+                  type: string
+                  description: 集合/索引名称
+              required:
+                - document_id
+                - vector_store
+      responses:
+        '200':
+          description: 索引创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingResponse'
+
+  /processing/results/{document_id}:
+    get:
+      summary: 获取处理结果列表
+      description: 获取指定文档的所有处理结果
+      tags:
+        - Processing
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: processing_type
+          in: query
+          schema:
+            type: string
+            enum: [load, parse, chunk, embed, index, generate]
+      responses:
+        '200':
+          description: 成功返回处理结果列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProcessingResult'
+
+  /processing/results/{result_id}:
+    get:
+      summary: 获取处理结果详情
+      description: 获取指定处理结果的完整数据
+      tags:
+        - Processing
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 成功返回处理结果详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/ProcessingResult'
+
+components:
+  schemas:
+    ProcessingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            result_id:
+              type: string
+              format: uuid
+            document_id:
+              type: string
+              format: uuid
+            processing_type:
+              type: string
+            status:
+              type: string
+            result_path:
+              type: string
+        message:
+          type: string
+    
+    ProcessingResult:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        processing_type:
+          type: string
+          enum: [load, parse, chunk, embed, index, generate]
+        provider:
+          type: string
+        result_path:
+          type: string
+        metadata:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        error_message:
+          type: string
+    
+    ChunkPreview:
+      type: object
+      properties:
+        chunk_index:
+          type: integer
+        content_preview:
+          type: string
+          description: 前100个字符
+        char_count:
+          type: integer
+    
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
