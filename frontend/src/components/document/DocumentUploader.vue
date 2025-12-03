@@ -10,7 +10,7 @@
       <input
         ref="fileInput"
         type="file"
-        accept=".pdf,.doc,.docx,.txt"
+        accept=".pdf,.doc,.docx,.txt,.md,.markdown"
         class="hidden"
         @change="handleFileSelect"
       />
@@ -28,7 +28,7 @@
           选择文件
         </button>
         <p class="text-xs text-gray-500 mt-4">
-          支持格式: PDF, DOC, DOCX, TXT (最大50MB)
+          支持格式: PDF, DOC, DOCX, TXT, Markdown (最大50MB)
         </p>
       </div>
       
@@ -68,7 +68,7 @@ const emit = defineEmits(['upload-complete'])
 const MAX_FILE_SIZE = 52428800 // 50MB
 
 function validateFile(file) {
-  const allowedExtensions = ['.pdf', '.doc', '.docx', '.txt']
+  const allowedExtensions = ['.pdf', '.doc', '.docx', '.txt', '.md', '.markdown']
   const fileExt = '.' + file.name.split('.').pop().toLowerCase()
   
   if (!allowedExtensions.includes(fileExt)) {
@@ -81,6 +81,14 @@ function validateFile(file) {
   
   if (file.size === 0) {
     throw new Error('文件为空')
+  }
+  
+  // Check for duplicate filename
+  const existingDoc = documentStore.documents.find(
+    doc => doc.filename === file.name
+  )
+  if (existingDoc) {
+    throw new Error(`文件"${file.name}"已存在，请勿重复上传`)
   }
 }
 
@@ -120,7 +128,7 @@ function handleDrop(event) {
 }
 
 // Watch upload progress
-documentStore.$subscribe((mutation, state) => {
+documentStore.$subscribe((_mutation, state) => {
   progress.value = state.uploadProgress
 })
 </script>

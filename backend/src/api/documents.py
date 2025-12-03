@@ -31,6 +31,15 @@ async def upload_document(
     # Validate file
     validate_file_upload(file.file, file.filename)
     
+    # Check for duplicate filename
+    existing_doc = db.query(Document).filter(
+        Document.filename == file.filename
+    ).first()
+    
+    if existing_doc:
+        from ..utils.error_handlers import ValidationError
+        raise ValidationError(f"文件 '{file.filename}' 已存在，请勿重复上传")
+    
     # Save file
     storage_path, content_hash = file_storage.save_upload(file.file, file.filename)
     
@@ -132,9 +141,12 @@ async def preview_document(
     """
     Get document preview.
     
+    Supports multiple document formats:
+    - PDF, DOCX, DOC, TXT, Markdown
+    
     Args:
         document_id: Document identifier
-        pages: Number of pages to preview
+        pages: Number of pages to preview (for multi-page documents)
         db: Database session
         
     Returns:
@@ -144,12 +156,24 @@ async def preview_document(
     if not document:
         raise NotFoundError("Document", document_id)
     
-    # For now, return basic info
-    # In production, you'd extract preview text from the document
-    from ..providers.loaders.pymupdf_loader import pymupdf_loader
+    # Get appropriate loader based on file format
+    from ..services.loading_service import loading_service
+    
+    file_format = document.format.lower()
+    loader_type = loading_service.get_loader_for_format(file_format)
+    
+    if not loader_type:
+        return success_response(
+            data={
+                "preview_text": f"Preview not available for {file_format} format",
+                "page_count": 0
+            }
+        )
     
     try:
-        result = pymupdf_loader.extract_text(document.storage_path)
+        loader = loading_service.loaders.get(loader_type)
+        result = loader.extract_text(document.storage_path)
+        
         if result.get("success"):
             preview_pages = result.get("pages", [])[:pages]
             preview_text = "\n\n".join([p["text"][:500] for p in preview_pages])
@@ -157,20 +181,23 @@ async def preview_document(
             return success_response(
                 data={
                     "preview_text": preview_text,
-                    "page_count": len(preview_pages)
+                    "page_count": len(preview_pages),
+                    "total_pages": result.get("total_pages", 0),
+                    "total_chars": result.get("total_chars", 0),
+                    "loader_used": loader_type
                 }
             )
         else:
             return success_response(
                 data={
-                    "preview_text": "Preview not available",
+                    "preview_text": f"Preview not available: {result.get('error', 'Unknown error')}",
                     "page_count": 0
                 }
             )
-    except Exception:
+    except Exception as e:
         return success_response(
             data={
-                "preview_text": "Preview generation failed",
+                "preview_text": f"Preview generation failed: {str(e)}",
                 "page_count": 0
             }
         )

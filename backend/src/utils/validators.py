@@ -6,7 +6,7 @@ from ..config import settings
 
 
 # Allowed file extensions
-ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
+ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md", ".markdown"}
 
 # Max file size (50MB)
 MAX_FILE_SIZE = settings.MAX_UPLOAD_SIZE

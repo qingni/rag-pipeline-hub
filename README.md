@@ -56,11 +56,15 @@ npm run dev
 
 ### ✅ 已实现 (User Story 1 - MVP) - **100% 完成**
 
-- **文档上传**: 支持 PDF, DOC, DOCX, TXT 格式，最大50MB
+- **文档上传**: 支持 PDF, DOC, DOCX, TXT, Markdown 格式，最大50MB
 - **文档加载**: 
   - PyMuPDF (推荐) - 高性能PDF处理
   - PyPDF - 轻量级PDF处理
   - Unstructured - 高级文档结构理解
+  - **🆕 DOCX Loader** - Word 2007+ 文档处理
+  - **🆕 DOC Loader** - 旧版 Word 文档处理
+  - **🆕 Text Loader** - TXT 和 Markdown 文件处理
+  - **🆕 智能加载器自动选择** - 根据文件格式自动选择最佳加载器
 - **文档解析**:
   - 全文解析
   - 分页解析
@@ -197,9 +201,23 @@ npm run test
 
 - **后端**: FastAPI, SQLAlchemy, Pydantic
 - **前端**: Vue 3, Vite, TailwindCSS, Pinia
-- **文档处理**: PyMuPDF, PyPDF2, Unstructured
+- **文档处理**: PyMuPDF, PyPDF2, Unstructured, python-docx, textract
 - **AI/ML**: OpenAI, HuggingFace, Ollama (计划)
 - **向量数据库**: Milvus, Pinecone (计划)
+
+## 🆕 最近更新
+
+### 2025-12-03 (下午): UI/UX 优化
+- ✨ 智能加载器自动切换 - 根据文档格式自动选择最佳加载器
+- 📊 文档列表表格视图 - 紧凑布局，空间利用率提升50%
+- 🗑️ 文档删除功能 - 支持直接删除文档，包含确认对话框
+- 📖 详见: [UI优化说明](UI_OPTIMIZATION_UPDATE.md)
+
+### 2025-12-03 (上午): 文档加载功能增强
+- ✨ 新增 DOCX、DOC、Markdown 格式支持
+- ✨ 智能加载器自动选择功能
+- ✨ 统一的加载结果格式
+- 📖 详见: [快速开始指南](QUICK_START_NEW_LOADERS.md) | [变更总结](CHANGES_SUMMARY.md)
 
 ## 📝 许可证
 

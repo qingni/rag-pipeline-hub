@@ -6,6 +6,9 @@ from ..models.processing_result import ProcessingResult
 from ..providers.loaders.pymupdf_loader import pymupdf_loader
 from ..providers.loaders.pypdf_loader import pypdf_loader
 from ..providers.loaders.unstructured_loader import unstructured_loader
+from ..providers.loaders.text_loader import text_loader
+from ..providers.loaders.docx_loader import docx_loader
+from ..providers.loaders.doc_loader import doc_loader
 from ..storage.json_storage import json_storage
 from ..utils.error_handlers import NotFoundError, ProcessingError
 import logging
@@ -18,31 +21,53 @@ class LoadingService:
     
     def __init__(self):
         """Initialize loading service with available loaders."""
+        # PDF loaders
         self.loaders = {
             "pymupdf": pymupdf_loader,
             "pypdf": pypdf_loader,
-            "unstructured": unstructured_loader
+            "unstructured": unstructured_loader,
+            "text": text_loader,
+            "docx": docx_loader,
+            "doc": doc_loader
+        }
+        
+        # Format to default loader mapping
+        self.format_loader_map = {
+            "pdf": "pymupdf",
+            "txt": "text",
+            "md": "text",
+            "markdown": "text",
+            "docx": "docx",
+            "doc": "doc"
         }
     
     def load_document(
         self,
         db: Session,
         document_id: str,
-        loader_type: str = "pymupdf"
+        loader_type: Optional[str] = None
     ) -> ProcessingResult:
         """
-        Load and parse document using specified loader.
+        Load and parse document using specified or auto-selected loader.
         
-        Supports parsing PDF documents into processable text data with:
-        - Page-by-page text extraction
+        Supports parsing multiple document formats into processable text data with:
+        - Page-by-page text extraction (for multi-page formats)
         - Metadata extraction
         - Character and page counting
         - Error handling and status tracking
+        - Auto-detection of best loader based on file format
+        
+        Supported formats:
+        - PDF: pymupdf, pypdf, unstructured
+        - DOCX: docx
+        - DOC: doc
+        - TXT: text
+        - Markdown: text
         
         Args:
             db: Database session
             document_id: Document identifier
-            loader_type: Type of loader to use (pymupdf, pypdf, unstructured)
+            loader_type: Type of loader to use. If None, auto-selects based on file format.
             
         Returns:
             ProcessingResult instance with loading results
@@ -56,12 +81,20 @@ class LoadingService:
         if not document:
             raise NotFoundError("Document", document_id)
         
+        file_format = document.format.lower()
+        
         # Validate file format
-        if document.format.lower() not in ["pdf", "txt"]:
+        supported_formats = ["pdf", "txt", "md", "markdown", "docx", "doc"]
+        if file_format not in supported_formats:
             raise ProcessingError(
                 f"Unsupported file format: {document.format}",
-                {"supported_formats": ["pdf", "txt"]}
+                {"supported_formats": supported_formats}
             )
+        
+        # Auto-select loader if not specified
+        if not loader_type:
+            loader_type = self.format_loader_map.get(file_format, "text")
+            logger.info(f"Auto-selected loader '{loader_type}' for format '{file_format}'")
         
         # Get loader
         loader = self.loaders.get(loader_type)
@@ -199,6 +232,27 @@ class LoadingService:
             List of loader names
         """
         return list(self.loaders.keys())
+    
+    def get_supported_formats(self) -> List[str]:
+        """
+        Get list of supported file formats.
+        
+        Returns:
+            List of supported file extensions
+        """
+        return list(self.format_loader_map.keys())
+    
+    def get_loader_for_format(self, file_format: str) -> Optional[str]:
+        """
+        Get default loader for a specific file format.
+        
+        Args:
+            file_format: File format/extension (e.g., 'pdf', 'docx')
+            
+        Returns:
+            Loader name or None if format not supported
+        """
+        return self.format_loader_map.get(file_format.lower())
 
 
 # Global instance
