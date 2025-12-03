@@ -32,13 +32,11 @@ class ProcessingResult(Base):
     
     # Relationships
     document = relationship("Document", back_populates="processing_results")
-    chunks = relationship("DocumentChunk", back_populates="processing_result")
-    embeddings = relationship("VectorEmbedding", back_populates="processing_result")
     
     # Indexes
     __table_args__ = (
-        Index('idx_document_id', 'document_id'),
-        Index('idx_document_type_time', 'document_id', 'processing_type', 'created_at'),
+        Index('idx_result_document_id', 'document_id'),
+        Index('idx_result_document_type_time', 'document_id', 'processing_type', 'created_at'),
     )
     
     def __repr__(self):

@@ -25,9 +25,19 @@ class Document(Base):
     # Status
     status = Column(String(20), nullable=False, default="uploaded")  # uploaded, processing, ready, error
     
-    # Relationships
-    processing_results = relationship("ProcessingResult", back_populates="document", cascade="all, delete-orphan")
-    chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
+    # Relationships - use string references to avoid circular imports
+    processing_results = relationship(
+        "ProcessingResult",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        lazy="select"
+    )
+    chunks = relationship(
+        "DocumentChunk",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        lazy="select"
+    )
     
     # Indexes
     __table_args__ = (
