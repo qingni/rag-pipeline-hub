@@ -184,6 +184,7 @@ const loading = computed(() => documentStore.loading)
 const currentPage = computed(() => documentStore.currentPage)
 const totalDocuments = computed(() => documentStore.totalDocuments)
 const pageSize = computed(() => documentStore.pageSize)
+const currentDocument = computed(() => documentStore.currentDocument)
 
 const totalPages = computed(() => Math.ceil(totalDocuments.value / pageSize.value))
 
@@ -197,14 +198,33 @@ onMounted(async () => {
   }
 })
 
-// 监听文档列表变化，当上传新文档后自动选中
+// 监听 store 中的 currentDocument 变化，同步 selectedId
+watch(currentDocument, (newDoc) => {
+  if (newDoc) {
+    selectedId.value = newDoc.id
+    console.log('同步选中文档:', newDoc.filename, newDoc.id)
+  }
+}, { immediate: true })
+
+// 监听文档列表变化，智能选中文档
 watch(documents, (newDocs, oldDocs) => {
-  // 如果文档列表有内容且当前没有选中任何文档
-  if (newDocs.length > 0 && !selectedId.value) {
+  if (newDocs.length === 0) {
+    // 如果列表为空，清空选中状态
+    selectedId.value = null
+    return
+  }
+  
+  // 检查当前选中的文档是否在新列表中
+  const currentSelectedInList = selectedId.value && newDocs.some(doc => doc.id === selectedId.value)
+  
+  // 如果当前选中的文档不在新列表中（切换页面、删除等），自动选中第一个
+  if (!currentSelectedInList) {
+    console.log('当前选中文档不在列表中，自动选中第一个文档')
     selectDocument(newDocs[0])
   }
-  // 如果是上传新文档后（总数增加），自动选中第一个（最新的）
-  else if (newDocs.length > 0 && oldDocs && newDocs.length > oldDocs.length) {
+  // 如果是上传新文档（列表长度增加且在第一页），自动选中第一个
+  else if (oldDocs && newDocs.length > oldDocs.length && currentPage.value === 1) {
+    console.log('检测到新上传文档，自动选中')
     selectDocument(newDocs[0])
   }
 }, { deep: true })
@@ -219,6 +239,7 @@ function refresh() {
 }
 
 function goToPage(page) {
+  console.log('切换到第', page, '页')
   documentStore.fetchDocuments(page)
 }
 
