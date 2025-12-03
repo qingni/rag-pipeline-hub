@@ -131,10 +131,12 @@ watch(selectedDocument, (newDoc) => {
 
 function handleUploadComplete(document) {
   selectedDocument.value = document
+  console.log('上传完成，已选中文档:', document.filename)
 }
 
 function handleSelectDocument(document) {
   selectedDocument.value = document
+  console.log('选中文档:', document.filename)
   // 重置状态
   status.value = 'idle'
   error.value = null

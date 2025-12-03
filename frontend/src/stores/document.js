@@ -15,7 +15,7 @@ export const useDocumentStore = defineStore('document', () => {
   
   // Pagination
   const currentPage = ref(1)
-  const pageSize = ref(20)
+  const pageSize = ref(4)  // 每页显示4个文档
   const totalDocuments = ref(0)
   
   // Actions
@@ -30,10 +30,13 @@ export const useDocumentStore = defineStore('document', () => {
       })
       
       if (response.success) {
-        currentDocument.value = response.data
-        // Add to documents list
-        documents.value.unshift(response.data)
-        return response.data
+        const uploadedDoc = response.data
+        currentDocument.value = uploadedDoc
+        
+        // 刷新文档列表到第一页，确保新文档显示
+        await fetchDocuments(1)
+        
+        return uploadedDoc
       }
     } catch (err) {
       error.value = err.message

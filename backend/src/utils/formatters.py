@@ -1,6 +1,6 @@
 """Response formatting utilities."""
 from typing import Any, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def success_response(
@@ -20,13 +20,13 @@ def success_response(
         Formatted response dictionary
     """
     if timestamp is None:
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
     
     return {
         "success": True,
         "data": data,
         "message": message,
-        "timestamp": timestamp.isoformat() + "Z"
+        "timestamp": timestamp.isoformat()
     }
 
 
@@ -67,12 +67,24 @@ def document_to_dict(document: Any) -> Dict[str, Any]:
     Returns:
         Dictionary representation
     """
+    # 确保时间以UTC格式返回
+    upload_time = None
+    if document.upload_time:
+        # 如果datetime是naive（没有时区信息），假设它是UTC
+        if document.upload_time.tzinfo is None:
+            # 将naive datetime视为UTC，并添加时区信息
+            utc_time = document.upload_time.replace(tzinfo=timezone.utc)
+            upload_time = utc_time.isoformat()
+        else:
+            # 如果已有时区信息，转换为UTC
+            upload_time = document.upload_time.astimezone(timezone.utc).isoformat()
+    
     return {
         "id": document.id,
         "filename": document.filename,
         "format": document.format,
         "size_bytes": document.size_bytes,
-        "upload_time": document.upload_time.isoformat() if document.upload_time else None,
+        "upload_time": upload_time,
         "storage_path": document.storage_path,
         "content_hash": document.content_hash,
         "status": document.status
@@ -89,6 +101,18 @@ def processing_result_to_dict(result: Any) -> Dict[str, Any]:
     Returns:
         Dictionary representation
     """
+    # 确保时间以UTC格式返回
+    created_at = None
+    if result.created_at:
+        # 如果datetime是naive（没有时区信息），假设它是UTC
+        if result.created_at.tzinfo is None:
+            # 将naive datetime视为UTC，并添加时区信息
+            utc_time = result.created_at.replace(tzinfo=timezone.utc)
+            created_at = utc_time.isoformat()
+        else:
+            # 如果已有时区信息，转换为UTC
+            created_at = result.created_at.astimezone(timezone.utc).isoformat()
+    
     return {
         "id": result.id,
         "document_id": result.document_id,
@@ -96,7 +120,7 @@ def processing_result_to_dict(result: Any) -> Dict[str, Any]:
         "provider": result.provider,
         "result_path": result.result_path,
         "metadata": result.extra_metadata,
-        "created_at": result.created_at.isoformat() if result.created_at else None,
+        "created_at": created_at,
         "status": result.status,
         "error_message": result.error_message
     }

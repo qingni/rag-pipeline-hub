@@ -55,8 +55,24 @@ defineProps({
 })
 
 function formatDate(dateString) {
+  if (!dateString) return '-'
+  
+  // 解析 ISO 8601 格式的UTC时间字符串
   const date = new Date(dateString)
-  return date.toLocaleString('zh-CN')
+  
+  // 检查是否是有效日期
+  if (isNaN(date.getTime())) return dateString
+  
+  // 使用本地时区格式化显示
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
 }
 
 function getStatusClass(status) {

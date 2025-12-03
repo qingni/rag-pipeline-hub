@@ -169,7 +169,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useDocumentStore } from '../../stores/document'
 
 const documentStore = useDocumentStore()
@@ -189,9 +189,25 @@ const totalPages = computed(() => Math.ceil(totalDocuments.value / pageSize.valu
 
 const emit = defineEmits(['select', 'delete'])
 
-onMounted(() => {
-  documentStore.fetchDocuments()
+onMounted(async () => {
+  await documentStore.fetchDocuments()
+  // 页面初始化时，默认选中第一个文档
+  if (documents.value.length > 0) {
+    selectDocument(documents.value[0])
+  }
 })
+
+// 监听文档列表变化，当上传新文档后自动选中
+watch(documents, (newDocs, oldDocs) => {
+  // 如果文档列表有内容且当前没有选中任何文档
+  if (newDocs.length > 0 && !selectedId.value) {
+    selectDocument(newDocs[0])
+  }
+  // 如果是上传新文档后（总数增加），自动选中第一个（最新的）
+  else if (newDocs.length > 0 && oldDocs && newDocs.length > oldDocs.length) {
+    selectDocument(newDocs[0])
+  }
+}, { deep: true })
 
 function selectDocument(doc) {
   selectedId.value = doc.id
@@ -228,13 +244,26 @@ async function deleteDocument() {
     // 通知父组件
     emit('delete', docId)
     
+    // 清空选中状态
+    if (selectedId.value === docId) {
+      selectedId.value = null
+      // 如果还有其他文档，选中第一个
+      if (documents.value.length > 0) {
+        selectDocument(documents.value[0])
+      }
+    }
+    
     // 关闭对话框
     showDeleteConfirm.value = false
     documentToDelete.value = null
     
     // 如果当前页没有文档了，返回上一页
     if (documents.value.length === 0 && currentPage.value > 1) {
-      goToPage(currentPage.value - 1)
+      await documentStore.fetchDocuments(currentPage.value - 1)
+      // 切换页面后，选中第一个文档
+      if (documents.value.length > 0) {
+        selectDocument(documents.value[0])
+      }
     }
   } catch (err) {
     console.error('删除文档失败:', err)
@@ -265,7 +294,14 @@ function formatFileSize(bytes) {
 }
 
 function formatDate(dateString) {
+  if (!dateString) return '-'
+  
+  // 解析 ISO 8601 格式的UTC时间字符串
   const date = new Date(dateString)
+  
+  // 检查是否是有效日期
+  if (isNaN(date.getTime())) return dateString
+  
   const now = new Date()
   const diffMs = now - date
   const diffMins = Math.floor(diffMs / 60000)
@@ -275,12 +311,14 @@ function formatDate(dateString) {
   if (diffMins < 1440) return `${Math.floor(diffMins / 60)}小时前`
   if (diffMins < 43200) return `${Math.floor(diffMins / 1440)}天前`
   
+  // 使用本地时区格式化显示
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
+    hour12: false
   })
 }
 
