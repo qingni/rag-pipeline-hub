@@ -1,43 +1,109 @@
 <template>
-  <nav class="sidebar w-64 flex flex-col">
-    <div class="p-6 border-b border-gray-200">
-      <h1 class="text-xl font-bold text-primary-600">文档处理系统</h1>
+  <aside class="sidebar">
+    <!-- 标题区域 -->
+    <div class="sidebar-header">
+      <h1 class="sidebar-title">
+        <FileText class="inline-block mr-2" :size="24" />
+        文档处理系统
+      </h1>
     </div>
     
-    <div class="flex-1 p-4">
-      <div class="space-y-2">
-        <router-link
-          v-for="item in navItems"
-          :key="item.path"
-          :to="item.path"
-          class="block px-4 py-3 rounded-lg hover:bg-gray-100 transition-colors"
-          active-class="bg-primary-100 text-primary-700 font-semibold"
-        >
-          <div class="flex items-center">
-            <span class="mr-3">{{ item.icon }}</span>
-            <span>{{ item.label }}</span>
-          </div>
-        </router-link>
-      </div>
-    </div>
+    <!-- 导航菜单 -->
+    <t-menu 
+      :value="currentPath"
+      theme="light"
+      class="sidebar-menu"
+    >
+      <t-menu-item
+        v-for="item in navItems"
+        :key="item.path"
+        :value="item.path"
+        @click="handleNavigate(item.path)"
+      >
+        <template #icon>
+          <component :is="item.iconComponent" :size="18" />
+        </template>
+        {{ item.label }}
+      </t-menu-item>
+    </t-menu>
     
-    <div class="p-4 border-t border-gray-200">
-      <div class="text-sm text-gray-500">
+    <!-- 底部信息 -->
+    <div class="sidebar-footer">
+      <t-divider />
+      <div class="version-info">
+        <Info :size="14" class="inline-block mr-1" />
         版本 v1.0.0
       </div>
     </div>
-  </nav>
+  </aside>
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { 
+  Home, FileText, FileCode, Scissors, Hash, 
+  Database, Search, Sparkles, Info 
+} from 'lucide-vue-next'
+
+const router = useRouter()
+const route = useRoute()
+
+const currentPath = computed(() => route.path)
+
 const navItems = [
-  { path: '/', label: '首页', icon: '🏠' },
-  { path: '/documents/load', label: '文档加载', icon: '📄' },
-  { path: '/documents/parse', label: '文档解析', icon: '📝' },
-  { path: '/documents/chunk', label: '文档分块', icon: '✂️' },
-  { path: '/embeddings', label: '向量嵌入', icon: '🔢' },
-  { path: '/index', label: '向量索引', icon: '📇' },
-  { path: '/search', label: '搜索查询', icon: '🔍' },
-  { path: '/generation', label: '文本生成', icon: '✨' }
+  { path: '/', label: '首页', iconComponent: Home },
+  { path: '/documents/load', label: '文档加载', iconComponent: FileText },
+  { path: '/documents/parse', label: '文档解析', iconComponent: FileCode },
+  { path: '/documents/chunk', label: '文档分块', iconComponent: Scissors },
+  { path: '/embeddings', label: '向量嵌入', iconComponent: Hash },
+  { path: '/index', label: '向量索引', iconComponent: Database },
+  { path: '/search', label: '搜索查询', iconComponent: Search },
+  { path: '/generation', label: '文本生成', iconComponent: Sparkles }
 ]
+
+function handleNavigate(path) {
+  router.push(path)
+}
 </script>
+
+<style scoped>
+.sidebar {
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  border-right: 1px solid #e5e7eb;
+  background-color: #ffffff;
+}
+
+.sidebar-header {
+  padding: 24px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.sidebar-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+.sidebar-menu {
+  flex: 1;
+  padding: 12px 8px;
+  overflow-y: auto;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+}
+
+.version-info {
+  font-size: 12px;
+  color: #6b7280;
+  padding: 8px 24px;
+}
+</style>

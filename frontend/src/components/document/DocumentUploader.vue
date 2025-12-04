@@ -1,71 +1,91 @@
 <template>
   <div class="document-uploader">
-    <div 
-      class="upload-area border-2 border-dashed rounded-lg p-8 text-center"
-      :class="isDragging ? 'border-primary-500 bg-primary-50' : 'border-gray-300'"
-      @dragover.prevent="isDragging = true"
-      @dragleave.prevent="isDragging = false"
-      @drop.prevent="handleDrop"
+    <t-upload
+      v-model="files"
+      :auto-upload="false"
+      :draggable="true"
+      :accept="acceptedFormats"
+      :max="1"
+      :size-limit="{ size: MAX_FILE_SIZE, unit: 'B' }"
+      :before-upload="handleBeforeUpload"
+      @change="handleFileChange"
+      theme="file"
     >
-      <input
-        ref="fileInput"
-        type="file"
-        accept=".pdf,.doc,.docx,.txt,.md,.markdown"
-        class="hidden"
-        @change="handleFileSelect"
-      />
-      
-      <div v-if="!uploading">
-        <div class="text-4xl mb-4">📄</div>
-        <p class="text-lg font-semibold mb-2">上传文档</p>
-        <p class="text-sm text-gray-600 mb-4">
-          拖拽文件到这里或点击选择文件
-        </p>
-        <button 
-          class="btn-primary"
-          @click="$refs.fileInput.click()"
-        >
-          选择文件
-        </button>
-        <p class="text-xs text-gray-500 mt-4">
-          支持格式: PDF, DOC, DOCX, TXT, Markdown (最大50MB)
-        </p>
-      </div>
-      
-      <div v-else class="upload-progress">
-        <div class="spinner mx-auto mb-4"></div>
-        <p class="text-lg font-semibold mb-2">上传中...</p>
-        <div class="w-full bg-gray-200 rounded-full h-2 mb-2">
-          <div 
-            class="bg-primary-600 h-2 rounded-full transition-all"
-            :style="{ width: progress + '%' }"
-          ></div>
+      <template #drag-content>
+        <div class="upload-area">
+          <UploadCloudIcon :size="32" class="upload-icon" />
+          <p class="upload-text">点击上传 / 拖拽到此区域</p>
         </div>
-        <p class="text-sm text-gray-600">{{ progress }}%</p>
-      </div>
+      </template>
+    </t-upload>
+    
+    <!-- 文件格式提示 -->
+    <div class="upload-tips">
+      <p class="tips-text">支持格式: PDF, DOC, DOCX, TXT, Markdown (最大50MB)</p>
     </div>
     
-    <div v-if="error" class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-      <p class="text-red-800">{{ error }}</p>
+    <!-- 上传进度 -->
+    <div v-if="uploading" class="mt-3">
+      <t-progress 
+        :percentage="progress" 
+        :status="uploadStatus"
+      />
+      <p class="text-xs text-gray-500 mt-1 text-center">{{ uploadLabel }}</p>
     </div>
+    
+    <!-- 错误提示 -->
+    <t-alert 
+      v-if="error" 
+      theme="error" 
+      :message="error"
+      class="mt-3"
+      close
+      @close="error = null"
+    />
+    
+    <!-- 成功提示 -->
+    <t-alert 
+      v-if="uploadSuccess" 
+      theme="success" 
+      message="文档上传成功"
+      class="mt-3"
+      close
+      @close="uploadSuccess = false"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useDocumentStore } from '../../stores/document'
+import { UploadCloud as UploadCloudIcon } from 'lucide-vue-next'
 
 const documentStore = useDocumentStore()
 
-const fileInput = ref(null)
-const isDragging = ref(false)
+const files = ref([])
 const uploading = ref(false)
 const progress = ref(0)
 const error = ref(null)
+const uploadSuccess = ref(false)
 
 const emit = defineEmits(['upload-complete'])
 
 const MAX_FILE_SIZE = 52428800 // 50MB
+const acceptedFormats = '.pdf,.doc,.docx,.txt,.md,.markdown'
+
+const uploadStatus = computed(() => {
+  if (error.value) return 'error'
+  if (uploadSuccess.value) return 'success'
+  if (uploading.value) return 'active'
+  return 'default'
+})
+
+const uploadLabel = computed(() => {
+  if (uploading.value) {
+    return `上传中... ${progress.value}%`
+  }
+  return null
+})
 
 function validateFile(file) {
   const allowedExtensions = ['.pdf', '.doc', '.docx', '.txt', '.md', '.markdown']
@@ -90,45 +110,103 @@ function validateFile(file) {
   if (existingDoc) {
     throw new Error(`文件"${file.name}"已存在，请勿重复上传`)
   }
+  
+  return true
 }
 
-async function uploadFile(file) {
+function handleBeforeUpload(file) {
   try {
-    validateFile(file)
-    
-    uploading.value = true
+    validateFile(file.raw)
+    return true
+  } catch (err) {
+    error.value = err.message
+    return false
+  }
+}
+
+async function handleFileChange(fileList) {
+  if (fileList.length === 0) return
+  
+  const file = fileList[0].raw
+  
+  try {
     error.value = null
+    uploadSuccess.value = false
+    uploading.value = true
     progress.value = 0
     
     const document = await documentStore.uploadDocument(file)
     
+    uploadSuccess.value = true
     emit('upload-complete', document)
+    
+    // 清空文件列表
+    setTimeout(() => {
+      files.value = []
+    }, 1000)
     
   } catch (err) {
     error.value = err.message || '上传失败'
   } finally {
     uploading.value = false
-    progress.value = 0
-    isDragging.value = false
-  }
-}
-
-function handleFileSelect(event) {
-  const file = event.target.files[0]
-  if (file) {
-    uploadFile(file)
-  }
-}
-
-function handleDrop(event) {
-  const file = event.dataTransfer.files[0]
-  if (file) {
-    uploadFile(file)
   }
 }
 
 // Watch upload progress
 documentStore.$subscribe((_mutation, state) => {
-  progress.value = state.uploadProgress
+  if (uploading.value) {
+    progress.value = state.uploadProgress
+  }
 })
 </script>
+
+<style scoped>
+.document-uploader {
+  width: 100%;
+}
+
+.upload-area {
+  padding: 24px 16px;
+  text-align: center;
+  min-height: 100px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.upload-icon {
+  margin: 0 auto 12px;
+  color: #9ca3af;
+  display: block;
+}
+
+.upload-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  margin: 0;
+  display: block;
+}
+
+.upload-tips {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.tips-text {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin: 0;
+  display: block;
+  white-space: pre-line;
+}
+</style>

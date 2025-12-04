@@ -11,7 +11,10 @@
     "vue": "^3.3.8",
     "vue-router": "^4.2.5",
     "pinia": "^2.1.7",
-    "axios": "^1.6.2"
+    "axios": "^1.6.2",
+    "tdesign-vue-next": "^1.13.1",
+    "tdesign-icons-vue-next": "^0.3.6",
+    "lucide-vue-next": "^0.468.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.5.0",

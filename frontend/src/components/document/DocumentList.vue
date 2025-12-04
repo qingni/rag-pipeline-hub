@@ -1,168 +1,136 @@
 <template>
   <div class="document-list">
+    <!-- 标题和操作栏 -->
     <div class="flex justify-between items-center mb-4">
-      <h3 class="text-lg font-semibold">
-        文档列表 
-        <span class="text-sm text-gray-500 font-normal ml-2">
-          (共 {{ totalDocuments }} 个文档)
-        </span>
-      </h3>
-      <button 
-        class="btn-secondary text-sm"
+      <div>
+        <h3 class="text-lg font-semibold">
+          文档列表
+          <t-tag theme="default" variant="light" class="ml-2">
+            共 {{ totalDocuments }} 个文档
+          </t-tag>
+        </h3>
+      </div>
+      <t-button 
+        variant="outline"
+        size="small"
         @click="refresh"
-        :disabled="loading"
+        :loading="loading"
       >
-        <span v-if="!loading">刷新</span>
-        <span v-else class="spinner inline-block w-4 h-4"></span>
-      </button>
+        <template #icon>
+          <RefreshCwIcon :size="16" />
+        </template>
+        刷新
+      </t-button>
     </div>
     
-    <div v-if="loading && documents.length === 0" class="text-center py-8">
-      <div class="spinner mx-auto mb-2"></div>
-      <p class="text-gray-600">加载中...</p>
+    <!-- 加载状态 -->
+    <div v-if="loading && documents.length === 0" class="text-center py-12">
+      <t-loading size="large" text="加载中..." />
     </div>
     
-    <div v-else-if="documents.length === 0" class="text-center py-8 bg-gray-50 rounded-lg">
-      <p class="text-gray-600">暂无文档，请上传文档</p>
-    </div>
+    <!-- 空状态 -->
+    <t-empty 
+      v-else-if="documents.length === 0" 
+      description="暂无文档，请上传文档"
+    >
+      <template #image>
+        <FileIcon :size="64" class="text-gray-300" />
+      </template>
+    </t-empty>
     
-    <!-- 表格视图 -->
-    <div v-else class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
-          <tr>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              文档名称
-            </th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              格式
-            </th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              大小
-            </th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              状态
-            </th>
-            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              上传时间
-            </th>
-            <th scope="col" class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-              操作
-            </th>
-          </tr>
-        </thead>
-        <tbody class="bg-white divide-y divide-gray-200">
-          <tr
-            v-for="doc in documents"
-            :key="doc.id"
-            class="hover:bg-gray-50 transition-colors cursor-pointer"
-            :class="{ 'bg-blue-50': selectedId === doc.id }"
-            @click="selectDocument(doc)"
-          >
-            <td class="px-4 py-3 whitespace-nowrap">
-              <div class="flex items-center">
-                <div class="flex-shrink-0 h-8 w-8 flex items-center justify-center bg-gray-100 rounded">
-                  <span class="text-lg">{{ getFileIcon(doc.format) }}</span>
-                </div>
-                <div class="ml-3">
-                  <div class="text-sm font-medium text-gray-900 truncate max-w-xs" :title="doc.filename">
-                    {{ doc.filename }}
-                  </div>
-                </div>
-              </div>
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap">
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                {{ doc.format.toUpperCase() }}
-              </span>
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-              {{ formatFileSize(doc.size_bytes) }}
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap">
-              <span
-                class="px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full"
-                :class="getStatusClass(doc.status)"
-              >
-                {{ getStatusText(doc.status) }}
-              </span>
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-              {{ formatDate(doc.upload_time) }}
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
-              <button
-                @click.stop="confirmDelete(doc)"
-                class="text-red-600 hover:text-red-900 transition-colors"
-                :disabled="deleting === doc.id"
-                title="删除文档"
-              >
-                <span v-if="deleting === doc.id" class="spinner inline-block w-4 h-4"></span>
-                <span v-else>删除</span>
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    
-    <!-- Pagination -->
-    <div v-if="totalPages > 1" class="flex justify-between items-center mt-4 px-4">
-      <div class="text-sm text-gray-600">
-        显示第 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, totalDocuments) }} 条，共 {{ totalDocuments }} 条
-      </div>
-      <div class="flex items-center gap-2">
-        <button
-          class="btn-secondary text-sm px-3 py-1"
-          :disabled="currentPage === 1"
-          @click="goToPage(currentPage - 1)"
-        >
-          上一页
-        </button>
+    <!-- 文档表格 -->
+    <div v-else>
+      <t-table
+        :data="documents"
+        :columns="columns"
+        :hover="true"
+        row-key="id"
+        :selected-row-keys="selectedId ? [selectedId] : []"
+        :row-class-name="getRowClassName"
+        @select-change="handleSelectChange"
+        @row-click="handleRowClick"
+        size="medium"
+        table-layout="auto"
+        class="document-table"
+      >
+        <!-- 文档名称列 -->
+        <template #filename="{ row }">
+          <div class="flex items-center">
+            <div class="flex-shrink-0 mr-3">
+              <component :is="getFileIconComponent(row.format)" :size="20" class="text-blue-500" />
+            </div>
+            <div class="truncate max-w-xs" :title="row.filename">
+              <span class="font-medium">{{ row.filename }}</span>
+            </div>
+          </div>
+        </template>
         
-        <span class="text-sm text-gray-600 px-2">
-          {{ currentPage }} / {{ totalPages }}
-        </span>
+        <!-- 格式列 -->
+        <template #format="{ row }">
+          <t-tag theme="primary" variant="light" size="small">
+            {{ row.format.toUpperCase() }}
+          </t-tag>
+        </template>
         
-        <button
-          class="btn-secondary text-sm px-3 py-1"
-          :disabled="currentPage === totalPages"
-          @click="goToPage(currentPage + 1)"
-        >
-          下一页
-        </button>
-      </div>
-    </div>
-    
-    <!-- 删除确认对话框 -->
-    <div v-if="showDeleteConfirm" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-        <h3 class="text-lg font-semibold mb-4">确认删除</h3>
-        <p class="text-gray-600 mb-6">
-          确定要删除文档 <span class="font-semibold">{{ documentToDelete?.filename }}</span> 吗？
-          <br>
-          <span class="text-sm text-red-600">此操作不可撤销，将同时删除所有相关的处理结果。</span>
-        </p>
-        <div class="flex justify-end gap-3">
-          <button
-            class="btn-secondary"
-            @click="cancelDelete"
-            :disabled="deleting"
+        <!-- 大小列 -->
+        <template #size="{ row }">
+          <span class="text-sm text-gray-600">
+            {{ formatFileSize(row.size_bytes) }}
+          </span>
+        </template>
+        
+        <!-- 状态列 -->
+        <template #status="{ row }">
+          <t-tag 
+            :theme="getStatusTheme(row.status)"
+            variant="light"
+            size="small"
           >
-            取消
-          </button>
-          <button
-            class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
-            @click="deleteDocument"
-            :disabled="deleting"
-          >
-            <span v-if="deleting" class="flex items-center">
-              <span class="spinner inline-block w-4 h-4 mr-2"></span>
-              删除中...
-            </span>
-            <span v-else>确认删除</span>
-          </button>
-        </div>
+            {{ getStatusText(row.status) }}
+          </t-tag>
+        </template>
+        
+        <!-- 时间列 -->
+        <template #upload_time="{ row }">
+          <span class="text-sm text-gray-600">
+            {{ formatDate(row.upload_time) }}
+          </span>
+        </template>
+        
+        <!-- 操作列 -->
+        <template #operation="{ row }">
+          <t-space>
+            <t-popconfirm
+              content="确定要删除此文档吗？此操作不可撤销，将同时删除所有相关的处理结果。"
+              theme="warning"
+              @confirm="handleDelete(row)"
+            >
+              <t-button
+                theme="danger"
+                variant="text"
+                size="small"
+                :loading="deleting === row.id"
+              >
+                <template #icon>
+                  <Trash2Icon :size="14" />
+                </template>
+                删除
+              </t-button>
+            </t-popconfirm>
+          </t-space>
+        </template>
+      </t-table>
+      
+      <!-- 分页 -->
+      <div v-if="totalPages > 1" class="mt-4 flex justify-end">
+        <t-pagination
+          v-model="currentPageModel"
+          :total="totalDocuments"
+          :page-size="pageSize"
+          :show-page-size="false"
+          show-jumper
+          @change="handlePageChange"
+        />
       </div>
     </div>
   </div>
@@ -171,12 +139,18 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useDocumentStore } from '../../stores/document'
+import { 
+  RefreshCw as RefreshCwIcon, 
+  File as FileIcon,
+  FileText,
+  FileCode,
+  FileType,
+  Trash2 as Trash2Icon
+} from 'lucide-vue-next'
 
 const documentStore = useDocumentStore()
 
 const selectedId = ref(null)
-const showDeleteConfirm = ref(false)
-const documentToDelete = ref(null)
 const deleting = ref(null)
 
 const documents = computed(() => documentStore.documents)
@@ -185,125 +159,154 @@ const currentPage = computed(() => documentStore.currentPage)
 const totalDocuments = computed(() => documentStore.totalDocuments)
 const pageSize = computed(() => documentStore.pageSize)
 const currentDocument = computed(() => documentStore.currentDocument)
-
 const totalPages = computed(() => Math.ceil(totalDocuments.value / pageSize.value))
+
+const currentPageModel = ref(currentPage.value)
 
 const emit = defineEmits(['select', 'delete'])
 
+// 表格列配置
+const columns = [
+  {
+    colKey: 'filename',
+    title: '文档名称',
+    width: 300,
+    ellipsis: true
+  },
+  {
+    colKey: 'format',
+    title: '格式',
+    width: 100,
+    align: 'center'
+  },
+  {
+    colKey: 'size',
+    title: '大小',
+    width: 120,
+    align: 'right'
+  },
+  {
+    colKey: 'status',
+    title: '状态',
+    width: 100,
+    align: 'center'
+  },
+  {
+    colKey: 'upload_time',
+    title: '上传时间',
+    width: 180
+  },
+  {
+    colKey: 'operation',
+    title: '操作',
+    width: 100,
+    align: 'center',
+    fixed: 'right'
+  }
+]
+
 onMounted(async () => {
   await documentStore.fetchDocuments()
-  // 页面初始化时，默认选中第一个文档
   if (documents.value.length > 0) {
     selectDocument(documents.value[0])
   }
 })
 
-// 监听 store 中的 currentDocument 变化，同步 selectedId
 watch(currentDocument, (newDoc) => {
   if (newDoc) {
     selectedId.value = newDoc.id
-    console.log('同步选中文档:', newDoc.filename, newDoc.id)
   }
 }, { immediate: true })
 
-// 监听文档列表变化，智能选中文档
 watch(documents, (newDocs, oldDocs) => {
   if (newDocs.length === 0) {
-    // 如果列表为空，清空选中状态
     selectedId.value = null
     return
   }
   
-  // 检查当前选中的文档是否在新列表中
   const currentSelectedInList = selectedId.value && newDocs.some(doc => doc.id === selectedId.value)
   
-  // 如果当前选中的文档不在新列表中（切换页面、删除等），自动选中第一个
   if (!currentSelectedInList) {
-    console.log('当前选中文档不在列表中，自动选中第一个文档')
     selectDocument(newDocs[0])
-  }
-  // 如果是上传新文档（列表长度增加且在第一页），自动选中第一个
-  else if (oldDocs && newDocs.length > oldDocs.length && currentPage.value === 1) {
-    console.log('检测到新上传文档，自动选中')
+  } else if (oldDocs && newDocs.length > oldDocs.length && currentPage.value === 1) {
     selectDocument(newDocs[0])
   }
 }, { deep: true })
 
+watch(currentPage, (newPage) => {
+  currentPageModel.value = newPage
+})
+
 function selectDocument(doc) {
   selectedId.value = doc.id
+  console.log('选中文档:', doc.filename, '文档ID:', doc.id, 'selectedId:', selectedId.value)
   emit('select', doc)
+}
+
+function getRowClassName({ row }) {
+  return row.id === selectedId.value ? 'selected-row' : ''
+}
+
+function handleRowClick({ row }) {
+  selectDocument(row)
+}
+
+function handleSelectChange(selectedRowKeys) {
+  // 当用户通过表格选择功能选择行时触发
+  if (selectedRowKeys.length > 0) {
+    const selectedDoc = documents.value.find(doc => doc.id === selectedRowKeys[0])
+    if (selectedDoc) {
+      selectDocument(selectedDoc)
+    }
+  }
 }
 
 function refresh() {
   documentStore.fetchDocuments(currentPage.value)
 }
 
-function goToPage(page) {
-  console.log('切换到第', page, '页')
-  documentStore.fetchDocuments(page)
+function handlePageChange(pageInfo) {
+  documentStore.fetchDocuments(pageInfo.current)
 }
 
-function confirmDelete(doc) {
-  documentToDelete.value = doc
-  showDeleteConfirm.value = true
-}
-
-function cancelDelete() {
-  showDeleteConfirm.value = false
-  documentToDelete.value = null
-}
-
-async function deleteDocument() {
-  if (!documentToDelete.value) return
-  
-  const docId = documentToDelete.value.id
+async function handleDelete(doc) {
+  const docId = doc.id
   deleting.value = docId
   
   try {
     await documentStore.deleteDocument(docId)
-    
-    // 通知父组件
     emit('delete', docId)
     
-    // 清空选中状态
     if (selectedId.value === docId) {
       selectedId.value = null
-      // 如果还有其他文档，选中第一个
       if (documents.value.length > 0) {
         selectDocument(documents.value[0])
       }
     }
     
-    // 关闭对话框
-    showDeleteConfirm.value = false
-    documentToDelete.value = null
-    
-    // 如果当前页没有文档了，返回上一页
     if (documents.value.length === 0 && currentPage.value > 1) {
       await documentStore.fetchDocuments(currentPage.value - 1)
-      // 切换页面后，选中第一个文档
       if (documents.value.length > 0) {
         selectDocument(documents.value[0])
       }
     }
   } catch (err) {
     console.error('删除文档失败:', err)
-    alert('删除文档失败: ' + err.message)
   } finally {
     deleting.value = null
   }
 }
 
-function getFileIcon(format) {
-  const icons = {
-    pdf: '📄',
-    doc: '📝',
-    docx: '📝',
-    txt: '📃',
-    md: '📋',
-    markdown: '📋'
+function getFileIconComponent(format) {
+  const iconMap = {
+    pdf: FileText,
+    doc: FileCode,
+    docx: FileCode,
+    txt: FileType,
+    md: FileType,
+    markdown: FileType
   }
-  return icons[format.toLowerCase()] || '📄'
+  return iconMap[format?.toLowerCase()] || FileIcon
 }
 
 function formatFileSize(bytes) {
@@ -317,10 +320,7 @@ function formatFileSize(bytes) {
 function formatDate(dateString) {
   if (!dateString) return '-'
   
-  // 解析 ISO 8601 格式的UTC时间字符串
   const date = new Date(dateString)
-  
-  // 检查是否是有效日期
   if (isNaN(date.getTime())) return dateString
   
   const now = new Date()
@@ -332,7 +332,6 @@ function formatDate(dateString) {
   if (diffMins < 1440) return `${Math.floor(diffMins / 60)}小时前`
   if (diffMins < 43200) return `${Math.floor(diffMins / 1440)}天前`
   
-  // 使用本地时区格式化显示
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -343,41 +342,70 @@ function formatDate(dateString) {
   })
 }
 
-function getStatusClass(status) {
-  const classes = {
-    uploaded: 'bg-blue-100 text-blue-800',
-    processing: 'bg-yellow-100 text-yellow-800',
-    ready: 'bg-green-100 text-green-800',
-    error: 'bg-red-100 text-red-800'
+function getStatusTheme(status) {
+  const themeMap = {
+    uploaded: 'primary',
+    processing: 'warning',
+    ready: 'success',
+    error: 'danger'
   }
-  return classes[status] || 'bg-gray-100 text-gray-800'
+  return themeMap[status] || 'default'
 }
 
 function getStatusText(status) {
-  const texts = {
+  const textMap = {
     uploaded: '已上传',
     processing: '处理中',
     ready: '就绪',
     error: '错误'
   }
-  return texts[status] || status
+  return textMap[status] || status
 }
 </script>
 
 <style scoped>
-/* 确保表格滚动时表头固定 */
-.overflow-x-auto {
-  max-height: 600px;
-  overflow-y: auto;
+.document-list {
+  padding: 0;
 }
 
-/* 优化表格行的hover效果 */
-tbody tr {
-  transition: background-color 0.15s ease;
+/* 移除默认的斑马纹背景 */
+:deep(.t-table__body tr) {
+  background-color: #ffffff !important;
+  transition: background-color 0.2s ease;
 }
 
-/* 选中行的样式 */
-tbody tr.bg-blue-50:hover {
-  background-color: rgb(219 234 254) !important;
+/* 自定义选中行的背景色 */
+:deep(.t-table__body tr.selected-row) {
+  background-color: #f3f4f6 !important;
+}
+
+/* TDesign 内置选中样式（备用） */
+:deep(.t-table__body tr.t-table-row--selected),
+:deep(.t-table__body tr.t-is-selected),
+:deep(.t-table__body tr[aria-selected="true"]) {
+  background-color: #f3f4f6 !important;
+}
+
+/* hover 效果 - 非选中行 */
+:deep(.t-table__body tr:hover:not(.selected-row)) {
+  background-color: #f9fafb !important;
+}
+
+/* 选中行的 hover 效果 */
+:deep(.t-table__body tr.selected-row:hover),
+:deep(.t-table__body tr.t-table-row--selected:hover),
+:deep(.t-table__body tr.t-is-selected:hover),
+:deep(.t-table__body tr[aria-selected="true"]:hover) {
+  background-color: #e5e7eb !important;
+}
+
+/* 确保单元格背景透明，使用行背景 */
+:deep(.t-table__body tr td) {
+  background-color: transparent !important;
+}
+
+/* 点击时的视觉反馈 */
+:deep(.t-table__body tr:active) {
+  background-color: #e5e7eb !important;
 }
 </style>
