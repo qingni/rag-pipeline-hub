@@ -93,26 +93,48 @@
           />
         </t-card>
         
-        <!-- 文档预览 -->
-        <t-card v-if="selectedDocument" title="文档预览" :bordered="false" class="content-card">
-          <DocumentPreview :document-id="selectedDocument.id" />
-        </t-card>
-        
-        <!-- 加载结果 -->
-        <t-card v-if="loadResult" title="加载结果" :bordered="false" class="content-card">
-          <template #actions>
-            <t-button 
-              variant="text" 
-              size="small"
-              @click="downloadResult"
-            >
-              <template #icon>
-                <DownloadIcon :size="16" />
+        <!-- 文档预览和加载结果 - Tab 切换 -->
+        <t-card v-if="selectedDocument" :bordered="false" class="content-card preview-card">
+          <t-tabs v-model="activeTab" size="medium" class="preview-tabs">
+            <t-tab-panel value="preview">
+              <template #label>
+                <div class="tab-label">
+                  <FileTextIcon :size="16" />
+                  <span>文档预览</span>
+                </div>
               </template>
-              下载结果
-            </t-button>
-          </template>
-          <ResultPreview :result="loadResult" />
+              <div class="tab-content">
+                <DocumentPreview :document-id="selectedDocument.id" />
+              </div>
+            </t-tab-panel>
+            <t-tab-panel 
+              value="result" 
+              :disabled="!loadResult"
+            >
+              <template #label>
+                <div class="tab-label">
+                  <component :is="loadResult ? CheckCircleIcon : CircleIcon" :size="16" />
+                  <span>{{ loadResult ? '加载结果' : '加载结果（无）' }}</span>
+                </div>
+              </template>
+              <div v-if="loadResult" class="tab-content">
+                <ResultPreview :result="loadResult">
+                  <template #actions>
+                    <t-button 
+                      variant="outline" 
+                      size="small"
+                      @click="downloadResult"
+                    >
+                      <template #icon>
+                        <DownloadIcon :size="16" />
+                      </template>
+                      下载结果
+                    </t-button>
+                  </template>
+                </ResultPreview>
+              </div>
+            </t-tab-panel>
+          </t-tabs>
         </t-card>
       </div>
     </div>
@@ -122,10 +144,13 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useProcessingStore } from '../stores/processing'
+import { useDocumentStore } from '../stores/document'
 import { 
   FileText as FileTextIcon,
   Play as PlayIcon,
-  Download as DownloadIcon
+  Download as DownloadIcon,
+  CheckCircle as CheckCircleIcon,
+  Circle as CircleIcon
 } from 'lucide-vue-next'
 import DocumentUploader from '../components/document/DocumentUploader.vue'
 import DocumentList from '../components/document/DocumentList.vue'
@@ -134,6 +159,7 @@ import ProcessingProgress from '../components/processing/ProcessingProgress.vue'
 import ResultPreview from '../components/processing/ResultPreview.vue'
 
 const processingStore = useProcessingStore()
+const documentStore = useDocumentStore()
 
 const selectedDocument = ref(null)
 const loaderType = ref('')
@@ -141,6 +167,7 @@ const loading = ref(false)
 const status = ref('idle')
 const error = ref(null)
 const loadResult = ref(null)
+const activeTab = ref('preview') // Tab 切换状态
 
 const formatLoaderMap = {
   'pdf': 'pymupdf',
@@ -187,12 +214,35 @@ function handleUploadComplete(document) {
   console.log('上传完成，已选中文档:', document.filename)
 }
 
-function handleSelectDocument(document) {
+async function handleSelectDocument(document) {
   selectedDocument.value = document
-  console.log('选中文档:', document.filename)
+  console.log('选中文档:', document.filename, '状态:', document.status)
   status.value = 'idle'
   error.value = null
   loadResult.value = null
+  activeTab.value = 'preview' // 切换到文档预览 tab
+  
+  // 如果文档状态为就绪，自动加载最新的加载结果
+  if (document.status === 'ready') {
+    try {
+      const results = await processingStore.fetchResults(document.id, 'load')
+      // 获取最新的加载结果
+      if (results && results.length > 0) {
+        const latestResult = results[0]
+        // 通过结果ID获取完整的结果数据（包含result_data）
+        const fullResult = await processingStore.fetchResultById(latestResult.id)
+        if (fullResult) {
+          // fullResult 包含 processing_result 的所有字段 + result_data
+          loadResult.value = fullResult
+          status.value = 'completed'
+          console.log('已加载处理结果:', fullResult)
+        }
+      }
+    } catch (err) {
+      console.error('加载处理结果失败:', err)
+      // 不显示错误，只是不显示结果
+    }
+  }
 }
 
 function handleDeleteDocument(documentId) {
@@ -220,6 +270,18 @@ async function loadDocument() {
     
     loadResult.value = result
     status.value = 'completed'
+    
+    // 刷新文档列表以更新状态
+    await documentStore.fetchDocuments(documentStore.currentPage)
+    
+    // 更新选中的文档信息
+    const updatedDoc = documentStore.documents.find(d => d.id === selectedDocument.value.id)
+    if (updatedDoc) {
+      selectedDocument.value = updatedDoc
+    }
+    
+    // 自动切换到加载结果 tab
+    activeTab.value = 'result'
   } catch (err) {
     error.value = err.message
     status.value = 'failed'
@@ -322,6 +384,85 @@ function downloadResult() {
 
 .content-card {
   margin-bottom: 20px;
+}
+
+.content-card:last-child {
+  margin-bottom: 0;
+}
+
+/* Tab 样式优化 */
+.preview-card {
+  overflow: hidden;
+}
+
+.preview-tabs {
+  margin: -24px -24px 0 -24px;
+}
+
+.preview-tabs :deep(.t-tabs__nav-container) {
+  padding: 0 24px;
+  background-color: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.preview-tabs :deep(.t-tabs__nav) {
+  background-color: transparent;
+  justify-content: flex-start;
+}
+
+.preview-tabs :deep(.t-tabs__nav-item) {
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #6b7280;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  flex-shrink: 0;
+}
+
+.preview-tabs :deep(.t-tabs__nav-item:first-child) {
+  margin-left: 0;
+}
+
+.preview-tabs :deep(.t-tabs__nav-item:hover) {
+  color: #374151;
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+.preview-tabs :deep(.t-tabs__nav-item.t-is-active) {
+  color: #3b82f6;
+  font-weight: 600;
+  border-bottom-color: #3b82f6;
+}
+
+.preview-tabs :deep(.t-tabs__nav-item.t-is-disabled) {
+  color: #d1d5db;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* 移除 TDesign 默认的激活指示器 */
+.preview-tabs :deep(.t-tabs__nav-item-wrapper) {
+  border: none !important;
+}
+
+.preview-tabs :deep(.t-tabs__bar) {
+  display: none !important;
+}
+
+.preview-tabs :deep(.t-tabs__content) {
+  padding: 0;
+}
+
+.tab-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-content {
+  padding: 0px 24px 24px;
 }
 
 .content-card:last-child {
