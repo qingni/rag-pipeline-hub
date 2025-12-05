@@ -275,7 +275,7 @@ onUnmounted(() => {
 .tab-panel-content {
   height: 100%;
   overflow-y: auto;
-  padding: 24px;
+  padding: 0px 24px 24px;
 }
 
 /* 当前任务容器 */
@@ -287,11 +287,11 @@ onUnmounted(() => {
 /* 结果头部信息 */
 .result-header {
   margin-bottom: 16px;
-  padding: 12px 0;
+  padding: 12px 0 0;
 }
 
 .result-header :deep(.t-card__body) {
-  padding: 16px 24px;
+  padding: 16px 24px 0px 24px;
 }
 
 /* 结果行样式 */

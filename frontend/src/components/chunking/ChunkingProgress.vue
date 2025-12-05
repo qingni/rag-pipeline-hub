@@ -30,10 +30,10 @@
               <span>{{ formatTime(task.completed_at) }}</span>
             </div>
 
-            <div v-if="task.total_chunks" class="info-item">
+            <div v-if="displayTotalChunks" class="info-item">
               <span class="label">生成块数：</span>
               <t-tag theme="success" variant="light">
-                {{ task.total_chunks }} 个
+                {{ displayTotalChunks }} 个
               </t-tag>
             </div>
           </t-space>
@@ -88,6 +88,9 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useChunkingStore } from '@/stores/chunkingStore'
+
+const chunkingStore = useChunkingStore()
 
 const props = defineProps({
   task: {
@@ -137,7 +140,12 @@ const statusText = computed(() => {
 const completionMessage = computed(() => {
   if (!props.task) return '分块完成'
   if (props.task.status === 'completed') {
-    return `成功生成 ${props.task.total_chunks || 0} 个文本块`
+    // Try to get total_chunks from multiple sources
+    const totalChunks = props.task.total_chunks 
+      || chunkingStore.currentResult?.total_chunks 
+      || chunkingStore.chunksTotalCount 
+      || 0
+    return `成功生成 ${totalChunks} 个文本块`
   }
   if (props.task.status === 'failed') {
     return '分块失败'
@@ -148,6 +156,14 @@ const completionMessage = computed(() => {
 const isCompleted = computed(() => props.task?.status === 'completed')
 const isProcessing = computed(() => ['pending', 'processing'].includes(props.task?.status))
 const isFailed = computed(() => props.task?.status === 'failed')
+
+// Compute total chunks from multiple sources
+const displayTotalChunks = computed(() => {
+  return props.task?.total_chunks 
+    || chunkingStore.currentResult?.total_chunks 
+    || chunkingStore.chunksTotalCount 
+    || 0
+})
 
 const formatTime = (time) => {
   if (!time) return '-'
