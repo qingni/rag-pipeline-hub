@@ -160,15 +160,14 @@ export const useChunkingStore = defineStore('chunking', {
           // Load the full result with chunks
           await this.loadChunkingResult(response.data.result_id)
           
-          // If we have a matching strategy, also select it
-          if (strategyType && this.strategies.length > 0) {
-            const matchingStrategy = this.strategies.find(s => s.type === strategyType)
-            if (matchingStrategy) {
-              this.selectStrategy(matchingStrategy)
-              // Update parameters to match the result
-              if (parameters) {
-                this.strategyParameters = { ...parameters }
-              }
+          // Only update strategy/parameters if not explicitly provided (avoid circular calls)
+          // This happens when we're just selecting a document without specifying strategy
+          if (!strategyType && !parameters && this.strategies.length > 0) {
+            const matchingStrategy = this.strategies.find(s => s.type === response.data.strategy_type)
+            if (matchingStrategy && matchingStrategy.type !== this.selectedStrategy?.type) {
+              // Update strategy without triggering loadLatestResultForDocument again
+              this.selectedStrategy = matchingStrategy
+              this.strategyParameters = { ...response.data.parameters }
             }
           }
         } else {
@@ -218,12 +217,13 @@ export const useChunkingStore = defineStore('chunking', {
      * Select chunking strategy
      */
     selectStrategy(strategy) {
+      const previousStrategy = this.selectedStrategy?.type
       this.selectedStrategy = strategy
       // Initialize parameters with defaults
       this.strategyParameters = { ...strategy.default_parameters }
       
-      // If a document is already selected, load latest result for this strategy
-      if (this.selectedDocument) {
+      // If a document is already selected and strategy changed, load latest result for this strategy
+      if (this.selectedDocument && previousStrategy !== strategy.type) {
         this.loadLatestResultForDocument(this.selectedDocument.id, strategy.type)
       }
     },
@@ -234,14 +234,9 @@ export const useChunkingStore = defineStore('chunking', {
     updateParameters(params) {
       this.strategyParameters = { ...this.strategyParameters, ...params }
       
-      // If both document and strategy are selected, try to load result with matching parameters
-      if (this.selectedDocument && this.selectedStrategy) {
-        this.loadLatestResultForDocument(
-          this.selectedDocument.id,
-          this.selectedStrategy.type,
-          this.strategyParameters
-        )
-      }
+      // Note: We don't automatically load results on parameter change to avoid excessive API calls
+      // Users can manually trigger chunking if they want to see results with new parameters
+      // Or we can add a debounced search feature in the future
     },
 
     /**
