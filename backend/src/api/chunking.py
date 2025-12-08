@@ -1,6 +1,7 @@
 """Chunking API endpoints."""
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from ..storage.database import get_db
@@ -39,6 +40,10 @@ class ChunkingTaskResponse(BaseModel):
 async def get_parsed_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None, description="Search by filename"),
+    format: Optional[str] = Query(None, description="Filter by file format"),
+    sort_by: str = Query("upload_time", regex="^(filename|upload_time|size_bytes)$"),
+    sort_order: str = Query("desc", regex="^(asc|desc)$"),
     db: Session = Depends(get_db)
 ):
     """
@@ -48,13 +53,17 @@ async def get_parsed_documents(
     Args:
         page: Page number
         page_size: Items per page
+        search: Search query for filename
+        format: Filter by file format (e.g., 'pdf', 'docx', 'txt')
+        sort_by: Sort field (filename, upload_time, size_bytes)
+        sort_order: Sort order (asc, desc)
         db: Database session
         
     Returns:
         Paginated list of loaded documents with their processing results
     """
     from ..models.processing_result import ProcessingResult
-    from sqlalchemy import and_, or_
+    from sqlalchemy import and_, or_, desc, asc
     
     # Query documents that have either load or parse results (both can be chunked)
     query = db.query(Document).join(
@@ -73,9 +82,24 @@ async def get_parsed_documents(
         )
     ).distinct()
     
+    # Apply search filter
+    if search:
+        query = query.filter(Document.filename.ilike(f"%{search}%"))
+    
+    # Apply format filter
+    if format:
+        query = query.filter(Document.format == format.lower())
+    
+    # Apply sorting
+    sort_field = getattr(Document, sort_by)
+    if sort_order == "desc":
+        query = query.order_by(desc(sort_field))
+    else:
+        query = query.order_by(asc(sort_field))
+    
     total = query.count()
     offset = (page - 1) * page_size
-    documents = query.order_by(Document.upload_time.desc()).offset(offset).limit(page_size).all()
+    documents = query.offset(offset).limit(page_size).all()
     
     # For each document, get its latest processing result (prefer parse over load)
     items = []
@@ -164,13 +188,18 @@ async def get_chunking_strategies(
 @router.post("/chunk")
 async def create_chunking_task(
     request: ChunkingRequest,
+    overwrite_mode: str = Query("auto", regex="^(auto|always|never)$", description="Overwrite mode: auto (smart), always (force overwrite), never (always create new)"),
     db: Session = Depends(get_db)
 ):
     """
-    Create a new chunking task.
+    Create a new chunking task with intelligent version management.
     
     Args:
         request: Chunking request
+        overwrite_mode: Overwrite strategy
+            - auto: Smart detection (minor changes overwrite, major changes create new)
+            - always: Always overwrite existing result for same strategy
+            - never: Always create new result (maintain full history)
         db: Database session
         
     Returns:
@@ -223,7 +252,122 @@ async def create_chunking_task(
         request.parameters
     )
     
-    # Create task
+    # Import version helper
+    from ..utils.chunking_version_helper import ChunkingVersionHelper
+    
+    # Check for existing results with same document + strategy
+    import json
+    from ..models.chunking_result import ChunkingResult, ResultStatus
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    params_json = json.dumps(validated_params, sort_keys=True)
+    logger.info(f"Creating chunking task - Document: {request.document_id}, Strategy: {strategy_enum.value}, Params: {params_json}, OverwriteMode: {overwrite_mode}")
+    
+    # Query all completed results for this document + strategy (active only)
+    existing_results = db.query(ChunkingResult).join(
+        ChunkingTask,
+        ChunkingResult.task_id == ChunkingTask.task_id
+    ).filter(
+        ChunkingTask.source_document_id == request.document_id,
+        ChunkingTask.chunking_strategy == strategy_enum,
+        ChunkingResult.status == ResultStatus.COMPLETED,
+        ChunkingResult.is_active == True
+    ).order_by(ChunkingResult.created_at.desc()).all()
+    
+    # Decision logic based on overwrite_mode
+    should_overwrite = False
+    overwrite_reason = None
+    existing_result_to_replace = None
+    
+    if existing_results:
+        latest_result = existing_results[0]
+        existing_params_json = json.dumps(latest_result.chunking_params, sort_keys=True)
+        
+        logger.info(f"Found {len(existing_results)} existing active result(s)")
+        logger.info(f"Latest result ID: {latest_result.result_id}, Params: {existing_params_json}")
+        
+        # Check if parameters are exactly the same
+        if existing_params_json == params_json:
+            logger.info(f"Parameters match exactly, reusing existing result: {latest_result.result_id}")
+            # Return existing result info
+            existing_task = db.query(ChunkingTask).filter(
+                ChunkingTask.task_id == latest_result.task_id
+            ).first()
+            
+            return success_response(
+                data={
+                    "task_id": existing_task.task_id,
+                    "status": existing_task.status.value,
+                    "document_id": existing_task.source_document_id,
+                    "strategy_type": existing_task.chunking_strategy.value,
+                    "parameters": existing_task.chunking_params,
+                    "queue_position": existing_task.queue_position,
+                    "result_id": latest_result.result_id,
+                    "total_chunks": latest_result.total_chunks,
+                    "version": latest_result.version,
+                    "is_active": latest_result.is_active,
+                    "created_at": existing_task.created_at.isoformat() if existing_task.created_at else None
+                },
+                message="Using existing chunking result (identical parameters)"
+            )
+        
+        # Parameters differ - apply overwrite mode logic
+        if overwrite_mode == "always":
+            should_overwrite = True
+            overwrite_reason = "Manual override: always overwrite mode"
+            existing_result_to_replace = latest_result
+            logger.info(f"Overwrite mode 'always': will replace result {latest_result.result_id}")
+        
+        elif overwrite_mode == "auto":
+            # Intelligent detection
+            is_minor, reason = ChunkingVersionHelper.is_minor_param_change(
+                latest_result.chunking_params,
+                validated_params
+            )
+            
+            if is_minor:
+                should_overwrite = True
+                overwrite_reason = f"Auto-optimization: {reason}"
+                existing_result_to_replace = latest_result
+                logger.info(f"Auto mode detected minor change: will replace result {latest_result.result_id}. Reason: {reason}")
+            else:
+                should_overwrite = False
+                logger.info(f"Auto mode detected major change: will create new result. Reason: {reason}")
+        
+        elif overwrite_mode == "never":
+            should_overwrite = False
+            logger.info("Overwrite mode 'never': creating new result")
+    
+    # Handle overwrite: deactivate old result
+    new_version = 1
+    previous_version_id = None
+    
+    if should_overwrite and existing_result_to_replace:
+        # Calculate version
+        max_version = db.query(func.max(ChunkingResult.version)).filter(
+            ChunkingResult.document_id == request.document_id,
+            ChunkingResult.chunking_strategy == strategy_enum
+        ).scalar() or 0
+        
+        new_version = max_version + 1
+        previous_version_id = existing_result_to_replace.result_id
+        
+        # Deactivate old result
+        existing_result_to_replace.is_active = False
+        db.flush()
+        logger.info(f"Deactivated result {existing_result_to_replace.result_id}, new version: {new_version}")
+    else:
+        # Calculate version for new result
+        max_version = db.query(func.max(ChunkingResult.version)).filter(
+            ChunkingResult.document_id == request.document_id,
+            ChunkingResult.chunking_strategy == strategy_enum
+        ).scalar() or 0
+        
+        new_version = max_version + 1
+        logger.info(f"Creating new result version {new_version}")
+    
+    # Create task (but don't commit yet - wait for processing to succeed)
     task = ChunkingTask(
         source_document_id=request.document_id,
         source_file_path=document.storage_path,
@@ -234,16 +378,58 @@ async def create_chunking_task(
     )
     
     db.add(task)
-    db.commit()
-    db.refresh(task)
+    db.flush()  # Flush to get task_id without committing
     
     # Process task immediately (queue management will be added in Phase 5)
     try:
-        result = chunking_service.process_chunking_task(task.task_id, db)
+        result = chunking_service.process_chunking_task(
+            task.task_id, 
+            db, 
+            version=new_version,
+            previous_version_id=previous_version_id,
+            replacement_reason=overwrite_reason
+        )
         db.refresh(task)
+        
+        # Only commit if processing succeeded
+        if task.status == TaskStatus.COMPLETED:
+            db.commit()
+            
+            message = "Chunking task created and completed successfully"
+            if should_overwrite:
+                message = f"Chunking completed (replaced version {existing_result_to_replace.version})"
+            
+            return success_response(
+                data={
+                    "task_id": task.task_id,
+                    "status": task.status.value,
+                    "document_id": task.source_document_id,
+                    "strategy_type": task.chunking_strategy.value,
+                    "parameters": task.chunking_params,
+                    "queue_position": task.queue_position,
+                    "result_id": result.result_id if result else None,
+                    "total_chunks": result.total_chunks if result else 0,
+                    "version": result.version if result else new_version,
+                    "is_active": result.is_active if result else True,
+                    "previous_version_id": result.previous_version_id if result else None,
+                    "replacement_reason": result.replacement_reason if result else None,
+                    "created_at": task.created_at.isoformat() if task.created_at else None
+                },
+                message=message
+            )
+        else:
+            # Task failed, rollback to avoid creating failed task record
+            db.rollback()
+            raise ValidationError(
+                f"Chunking task failed: {task.error_message or 'Unknown error'}"
+            )
     except Exception as e:
-        # Task status already updated in service
-        pass
+        # Rollback transaction to avoid creating failed task record
+        db.rollback()
+        error_msg = str(e)
+        if hasattr(e, 'message'):
+            error_msg = e.message
+        raise ValidationError(f"Failed to process chunking task: {error_msg}")
     
     return success_response(
         data={
@@ -306,6 +492,92 @@ async def get_chunking_task(
         response_data["total_chunks"] = result.total_chunks
     
     return success_response(data=response_data)
+
+
+# Get latest chunking result for a document (optionally filtered by strategy and parameters)
+@router.get("/result/latest/{document_id}")
+async def get_latest_result_for_document(
+    document_id: str,
+    strategy_type: Optional[str] = Query(None, description="Filter by strategy type"),
+    parameters: Optional[str] = Query(None, description="Filter by parameters (JSON string)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the latest active chunking result for a document.
+    Can optionally filter by strategy type and/or parameters.
+    
+    Args:
+        document_id: Document ID
+        strategy_type: Optional strategy type filter
+        parameters: Optional parameters filter (JSON string)
+        db: Database session
+        
+    Returns:
+        Latest chunking result or null if none exists
+    """
+    from ..models.chunking_result import ResultStatus
+    
+    # Start with base query for this document
+    query = db.query(ChunkingResult).join(
+        ChunkingTask,
+        ChunkingResult.task_id == ChunkingTask.task_id
+    ).filter(
+        ChunkingTask.source_document_id == document_id,
+        ChunkingResult.status == ResultStatus.COMPLETED,
+        ChunkingResult.is_active == True
+    )
+    
+    # Apply strategy filter if provided
+    if strategy_type:
+        try:
+            strategy_enum = StrategyType[strategy_type.upper()]
+            query = query.filter(ChunkingTask.chunking_strategy == strategy_enum)
+        except KeyError:
+            raise ValidationError(f"Invalid strategy type: {strategy_type}")
+    
+    # Apply parameters filter if provided
+    if parameters:
+        try:
+            import json
+            params_dict = json.loads(parameters)
+            params_json = json.dumps(params_dict, sort_keys=True)
+            
+            # Filter by exact parameter match
+            query = query.filter(
+                func.json_extract(ChunkingResult.chunking_params, '$') == params_json
+            )
+        except json.JSONDecodeError:
+            raise ValidationError("Invalid parameters JSON")
+    
+    # Get the most recent result
+    result = query.order_by(ChunkingResult.created_at.desc()).first()
+    
+    if not result:
+        return success_response(
+            data=None,
+            message="No chunking results found for this document"
+        )
+    
+    # Get associated task info
+    task = db.query(ChunkingTask).filter(ChunkingTask.task_id == result.task_id).first()
+    
+    return success_response(
+        data={
+            "result_id": result.result_id,
+            "task_id": result.task_id,
+            "document_id": result.document_id,
+            "document_name": result.document_name,
+            "strategy_type": result.chunking_strategy.value,
+            "parameters": result.chunking_params,
+            "status": result.status.value,
+            "total_chunks": result.total_chunks,
+            "statistics": result.statistics,
+            "version": result.version,
+            "is_active": result.is_active,
+            "processing_time": result.processing_time,
+            "created_at": result.created_at.isoformat() if result.created_at else None
+        }
+    )
 
 
 # T030: GET /api/chunking/result/{result_id} - Get chunking result
@@ -380,3 +652,89 @@ async def get_chunking_result(
         )
     
     return success_response(data=response_data)
+
+
+# Get latest chunking result for a document (optionally filtered by strategy and parameters)
+@router.get("/result/latest/{document_id}")
+async def get_latest_result_for_document(
+    document_id: str,
+    strategy_type: Optional[str] = Query(None, description="Filter by strategy type"),
+    parameters: Optional[str] = Query(None, description="Filter by parameters (JSON string)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the latest active chunking result for a document.
+    Can optionally filter by strategy type and/or parameters.
+    
+    Args:
+        document_id: Document ID
+        strategy_type: Optional strategy type filter
+        parameters: Optional parameters filter (JSON string)
+        db: Database session
+        
+    Returns:
+        Latest chunking result or null if none exists
+    """
+    from ..models.chunking_result import ResultStatus
+    
+    # Start with base query for this document
+    query = db.query(ChunkingResult).join(
+        ChunkingTask,
+        ChunkingResult.task_id == ChunkingTask.task_id
+    ).filter(
+        ChunkingTask.source_document_id == document_id,
+        ChunkingResult.status == ResultStatus.COMPLETED,
+        ChunkingResult.is_active == True
+    )
+    
+    # Apply strategy filter if provided
+    if strategy_type:
+        try:
+            strategy_enum = StrategyType[strategy_type.upper()]
+            query = query.filter(ChunkingTask.chunking_strategy == strategy_enum)
+        except KeyError:
+            raise ValidationError(f"Invalid strategy type: {strategy_type}")
+    
+    # Apply parameters filter if provided
+    if parameters:
+        try:
+            import json
+            params_dict = json.loads(parameters)
+            params_json = json.dumps(params_dict, sort_keys=True)
+            
+            # Filter by exact parameter match
+            query = query.filter(
+                func.json_extract(ChunkingResult.chunking_params, '$') == params_json
+            )
+        except json.JSONDecodeError:
+            raise ValidationError("Invalid parameters JSON")
+    
+    # Get the most recent result
+    result = query.order_by(ChunkingResult.created_at.desc()).first()
+    
+    if not result:
+        return success_response(
+            data=None,
+            message="No chunking results found for this document"
+        )
+    
+    # Get associated task info
+    task = db.query(ChunkingTask).filter(ChunkingTask.task_id == result.task_id).first()
+    
+    return success_response(
+        data={
+            "result_id": result.result_id,
+            "task_id": result.task_id,
+            "document_id": result.document_id,
+            "document_name": result.document_name,
+            "strategy_type": result.chunking_strategy.value,
+            "parameters": result.chunking_params,
+            "status": result.status.value,
+            "total_chunks": result.total_chunks,
+            "statistics": result.statistics,
+            "version": result.version,
+            "is_active": result.is_active,
+            "processing_time": result.processing_time,
+            "created_at": result.created_at.isoformat() if result.created_at else None
+        }
+    )

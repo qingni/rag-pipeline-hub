@@ -7,9 +7,16 @@ class ChunkingService {
   /**
    * Get list of parsed documents ready for chunking
    */
-  async getParsedDocuments(page = 1, pageSize = 20) {
+  async getParsedDocuments(page = 1, pageSize = 20, filters = {}) {
     const response = await api.get('/chunking/documents/parsed', {
-      params: { page, page_size: pageSize }
+      params: { 
+        page, 
+        page_size: pageSize,
+        search: filters.search || undefined,
+        format: filters.format || undefined,
+        sort_by: filters.sortBy || 'upload_time',
+        sort_order: filters.sortOrder || 'desc'
+      }
     })
     return response
   }
@@ -114,6 +121,23 @@ class ChunkingService {
       strategy_type: strategyType,
       parameters
     })
+    return response
+  }
+
+  /**
+   * Get latest chunking result for a document
+   * Can optionally filter by strategy and parameters
+   */
+  async getLatestResultForDocument(documentId, strategyType = null, parameters = null) {
+    const params = {
+      strategy_type: strategyType
+    }
+    
+    if (parameters) {
+      params.parameters = JSON.stringify(parameters)
+    }
+    
+    const response = await api.get(`/chunking/result/latest/${documentId}`, { params })
     return response
   }
 }

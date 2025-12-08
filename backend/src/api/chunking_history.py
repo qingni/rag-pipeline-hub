@@ -23,6 +23,7 @@ async def get_chunking_history(
     status: Optional[str] = Query(None, description="Filter by status"),
     date_from: Optional[str] = Query(None, description="Filter from date (ISO format)"),
     date_to: Optional[str] = Query(None, description="Filter to date (ISO format)"),
+    active_only: bool = Query(True, description="Show only active versions"),
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
     db: Session = Depends(get_db)
@@ -38,6 +39,7 @@ async def get_chunking_history(
         status: Filter by result status
         date_from: Filter from date
         date_to: Filter to date
+        active_only: Show only active versions (default: True)
         sort_by: Sort field
         sort_order: Sort order
         db: Database session
@@ -58,6 +60,9 @@ async def get_chunking_history(
     if status:
         from ..models.chunking_result import ResultStatus
         query = query.filter(ChunkingResult.status == ResultStatus[status.upper()])
+    
+    if active_only:
+        query = query.filter(ChunkingResult.is_active == True)
     
     if date_from:
         try:
@@ -90,6 +95,11 @@ async def get_chunking_history(
     # Format results
     items = []
     for result in results:
+        # Enrich statistics with parameters if not present
+        stats = result.statistics or {}
+        if 'parameters' not in stats and result.chunking_params:
+            stats['parameters'] = result.chunking_params
+        
         items.append({
             "result_id": result.result_id,
             "document_id": result.document_id,
@@ -99,7 +109,11 @@ async def get_chunking_history(
             "total_chunks": result.total_chunks,
             "processing_time": result.processing_time,
             "file_size": result.file_size,
-            "statistics": result.statistics,
+            "statistics": stats,
+            "version": result.version,
+            "is_active": result.is_active,
+            "previous_version_id": result.previous_version_id,
+            "replacement_reason": result.replacement_reason,
             "created_at": result.created_at.isoformat() if result.created_at else None
         })
     
@@ -110,6 +124,118 @@ async def get_chunking_history(
             page=page,
             page_size=page_size
         )
+    )
+
+
+@router.get("/versions/{document_id}/{strategy_type}")
+async def get_version_history(
+    document_id: str,
+    strategy_type: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get version history for a specific document and strategy combination.
+    
+    Args:
+        document_id: Document ID
+        strategy_type: Strategy type (character/paragraph/heading/semantic)
+        db: Database session
+        
+    Returns:
+        List of all versions (active and inactive) ordered by version number
+    """
+    from ..models.chunking_task import StrategyType
+    
+    try:
+        strategy_enum = StrategyType[strategy_type.upper()]
+    except KeyError:
+        from ..utils.error_handlers import ValidationError
+        raise ValidationError(f"Invalid strategy type: {strategy_type}")
+    
+    # Query all versions for this document + strategy
+    versions = db.query(ChunkingResult).filter(
+        ChunkingResult.document_id == document_id,
+        ChunkingResult.chunking_strategy == strategy_enum
+    ).order_by(ChunkingResult.version.desc()).all()
+    
+    if not versions:
+        return success_response(
+            data={
+                "document_id": document_id,
+                "strategy_type": strategy_type,
+                "versions": []
+            },
+            message="No versions found"
+        )
+    
+    # Format version history
+    version_list = []
+    for ver in versions:
+        version_list.append({
+            "result_id": ver.result_id,
+            "version": ver.version,
+            "is_active": ver.is_active,
+            "total_chunks": ver.total_chunks,
+            "parameters": ver.chunking_params,
+            "processing_time": ver.processing_time,
+            "statistics": ver.statistics,
+            "previous_version_id": ver.previous_version_id,
+            "replacement_reason": ver.replacement_reason,
+            "created_at": ver.created_at.isoformat() if ver.created_at else None
+        })
+    
+    return success_response(
+        data={
+            "document_id": document_id,
+            "strategy_type": strategy_type,
+            "total_versions": len(version_list),
+            "active_version": next((v for v in version_list if v["is_active"]), None),
+            "versions": version_list
+        }
+    )
+
+
+@router.post("/versions/{result_id}/activate")
+async def activate_version(
+    result_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Activate a specific version (deactivate current active version).
+    
+    Args:
+        result_id: Result ID to activate
+        db: Database session
+        
+    Returns:
+        Success message
+    """
+    # Find the result to activate
+    result = db.query(ChunkingResult).filter(
+        ChunkingResult.result_id == result_id
+    ).first()
+    
+    if not result:
+        raise NotFoundError("ChunkingResult", result_id)
+    
+    # Deactivate all other versions for same document + strategy
+    db.query(ChunkingResult).filter(
+        ChunkingResult.document_id == result.document_id,
+        ChunkingResult.chunking_strategy == result.chunking_strategy,
+        ChunkingResult.result_id != result_id
+    ).update({"is_active": False})
+    
+    # Activate this version
+    result.is_active = True
+    db.commit()
+    
+    return success_response(
+        data={
+            "result_id": result_id,
+            "version": result.version,
+            "is_active": True
+        },
+        message=f"Version {result.version} activated successfully"
     )
 
 

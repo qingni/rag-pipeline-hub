@@ -32,12 +32,6 @@ class Document(Base):
         cascade="all, delete-orphan",
         lazy="select"
     )
-    chunks = relationship(
-        "DocumentChunk",
-        back_populates="document",
-        cascade="all, delete-orphan",
-        lazy="select"
-    )
     
     # Indexes
     __table_args__ = (

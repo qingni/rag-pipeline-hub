@@ -115,13 +115,23 @@ class ChunkingService:
         from ..providers.chunkers import get_chunker
         return get_chunker(strategy_type, **parameters)
     
-    def process_chunking_task(self, task_id: str, db: Session) -> ChunkingResult:
+    def process_chunking_task(
+        self, 
+        task_id: str, 
+        db: Session,
+        version: int = 1,
+        previous_version_id: str = None,
+        replacement_reason: str = None
+    ) -> ChunkingResult:
         """
         Process a chunking task.
         
         Args:
             task_id: Task ID to process
             db: Database session
+            version: Version number for this result
+            previous_version_id: ID of previous version (if replacing)
+            replacement_reason: Reason for replacing previous version
             
         Returns:
             ChunkingResult
@@ -169,7 +179,10 @@ class ChunkingService:
                 strategy_type=task.chunking_strategy.value,
                 parameters=params,
                 chunks=chunks,
-                db=db
+                db=db,
+                version=version,
+                previous_version_id=previous_version_id,
+                replacement_reason=replacement_reason
             )
             
             # Update task status
@@ -195,7 +208,10 @@ class ChunkingService:
         strategy_type: str,
         parameters: Dict[str, Any],
         chunks: List[Dict[str, Any]],
-        db: Session
+        db: Session,
+        version: int = 1,
+        previous_version_id: str = None,
+        replacement_reason: str = None
     ) -> ChunkingResult:
         """
         Save chunking result to database and file.
@@ -208,6 +224,9 @@ class ChunkingService:
             parameters: Chunking parameters used
             chunks: List of chunk data
             db: Session
+            version: Version number
+            previous_version_id: Previous version ID (if replacing)
+            replacement_reason: Reason for replacement
             
         Returns:
             Created ChunkingResult
@@ -267,7 +286,11 @@ class ChunkingService:
             processing_time=processing_time,
             statistics=statistics,
             json_file_path=file_path,
-            file_size=file_size
+            file_size=file_size,
+            version=version,
+            previous_version_id=previous_version_id,
+            is_active=True,
+            replacement_reason=replacement_reason
         )
         
         db.add(result)

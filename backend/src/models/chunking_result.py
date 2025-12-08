@@ -1,5 +1,5 @@
 """ChunkingResult model."""
-from sqlalchemy import Column, String, Integer, Float, DateTime, JSON, Enum as SQLEnum, ForeignKey, Index
+from sqlalchemy import Column, String, Integer, Float, DateTime, JSON, Enum as SQLEnum, ForeignKey, Index, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import uuid
@@ -51,6 +51,12 @@ class ChunkingResult(Base):
     json_file_path = Column(String(500), nullable=False)
     file_size = Column(Integer, nullable=False)
     
+    # Version management (Phase 1 optimization)
+    version = Column(Integer, default=1, nullable=False)
+    previous_version_id = Column(String(36), nullable=True)  # Link to previous version
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    replacement_reason = Column(String(200), nullable=True)  # Why this replaced previous version
+    
     # Relationships
     task = relationship(
         "ChunkingTask",
@@ -68,6 +74,7 @@ class ChunkingResult(Base):
     # Indexes
     __table_args__ = (
         Index('idx_doc_strategy_time', 'document_name', 'chunking_strategy', 'created_at'),
+        Index('idx_doc_strategy_active', 'document_id', 'chunking_strategy', 'is_active'),
     )
     
     def __repr__(self):

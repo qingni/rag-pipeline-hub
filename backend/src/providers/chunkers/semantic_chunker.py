@@ -14,11 +14,11 @@ class SemanticChunker(BaseChunker):
         Raises:
             ValueError: If parameters are invalid
         """
-        threshold = self.params.get('similarity_threshold', 0.7)
-        min_size = self.params.get('min_chunk_size', 200)
+        threshold = self.params.get('similarity_threshold', 0.3)  # 降低默认阈值
+        min_size = self.params.get('min_chunk_size', 300)
         
-        if not isinstance(threshold, (int, float)) or threshold < 0.3 or threshold > 0.9:
-            raise ValueError("similarity_threshold must be between 0.3 and 0.9")
+        if not isinstance(threshold, (int, float)) or threshold < 0.1 or threshold > 0.9:
+            raise ValueError("similarity_threshold must be between 0.1 and 0.9")
         
         if not isinstance(min_size, int) or min_size <= 0:
             raise ValueError("min_chunk_size must be a positive integer")
@@ -34,32 +34,36 @@ class SemanticChunker(BaseChunker):
         Returns:
             List of chunk dictionaries
         """
-        threshold = self.params.get('similarity_threshold', 0.7)
-        min_size = self.params.get('min_chunk_size', 200)
+        threshold = self.params.get('similarity_threshold', 0.3)  # 降低默认阈值
+        min_size = self.params.get('min_chunk_size', 300)
+        max_size = self.params.get('max_chunk_size', 1200)
         
         if not text or len(text) == 0:
             return []
         
         # Try semantic chunking, fallback if it fails
         try:
-            return self._semantic_chunk(text, threshold, min_size)
-        except Exception:
+            return self._semantic_chunk(text, threshold, min_size, max_size)
+        except Exception as e:
             # Fallback to sentence-based chunking
+            print(f"Semantic chunking failed: {e}, falling back to sentence-based")
             return self._fallback_to_sentences(text, min_size)
     
     def _semantic_chunk(
         self,
         text: str,
         threshold: float,
-        min_size: int
+        min_size: int,
+        max_size: int
     ) -> List[Dict[str, Any]]:
         """
         Perform semantic chunking using TF-IDF similarity.
         
         Args:
             text: Input text
-            threshold: Similarity threshold
-            min_size: Minimum chunk size
+            threshold: Similarity threshold (0-1)
+            min_size: Minimum chunk size in characters
+            max_size: Maximum chunk size in characters
         
         Returns:
             List of chunks
@@ -85,45 +89,60 @@ class SemanticChunker(BaseChunker):
             similarity = self._cosine_similarity(vectors[i-1], vectors[i])
             
             current_length = sum(len(s) for s in current_chunk_sentences)
+            next_length = current_length + len(sentences[i])
             
-            # Decide whether to continue current chunk or start new one
-            if similarity >= threshold and current_length < 2000:
-                # Continue current chunk
+            # 决策逻辑优化：
+            # 1. 如果相似度高 且 不会超过最大长度 → 合并
+            # 2. 如果当前块太小（< min_size） → 强制合并（除非会超过 max_size）
+            # 3. 否则 → 切分新块
+            
+            should_merge = False
+            
+            if similarity >= threshold and next_length <= max_size:
+                # 高相似度且不超过最大长度 → 合并
+                should_merge = True
+            elif current_length < min_size and next_length <= max_size * 1.5:
+                # 当前块太小，强制合并（允许适当超出 max_size）
+                should_merge = True
+            
+            if should_merge:
+                # 继续合并到当前块
                 current_chunk_sentences.append(sentences[i])
             else:
-                # Start new chunk if current meets min size
-                if current_length >= min_size:
-                    content = ' '.join(current_chunk_sentences)
-                    chunk = self._create_chunk(
-                        content=content,
-                        index=chunk_index,
-                        start_pos=text.find(current_chunk_sentences[0], current_start),
-                        end_pos=text.find(current_chunk_sentences[-1], current_start) + len(current_chunk_sentences[-1]),
-                        strategy="semantic",
-                        sentence_count=len(current_chunk_sentences),
-                        avg_similarity=threshold
-                    )
-                    chunks.append(chunk)
-                    chunk_index += 1
-                    current_start = text.find(sentences[i], current_start)
-                
-                current_chunk_sentences = [sentences[i]]
-        
-        # Add final chunk
-        if current_chunk_sentences:
-            current_length = sum(len(s) for s in current_chunk_sentences)
-            if current_length >= min_size or not chunks:
+                # 保存当前块并开始新块
                 content = ' '.join(current_chunk_sentences)
                 chunk = self._create_chunk(
                     content=content,
                     index=chunk_index,
                     start_pos=text.find(current_chunk_sentences[0], current_start),
-                    end_pos=len(text),
+                    end_pos=text.find(current_chunk_sentences[-1], current_start) + len(current_chunk_sentences[-1]),
                     strategy="semantic",
                     sentence_count=len(current_chunk_sentences),
-                    avg_similarity=threshold
+                    avg_similarity=similarity
                 )
                 chunks.append(chunk)
+                chunk_index += 1
+                current_start = text.find(sentences[i], current_start)
+                current_chunk_sentences = [sentences[i]]
+        
+        # 添加最后一块（总是添加，不检查 min_size）
+        if current_chunk_sentences:
+            content = ' '.join(current_chunk_sentences)
+            chunk = self._create_chunk(
+                content=content,
+                index=chunk_index,
+                start_pos=text.find(current_chunk_sentences[0], current_start),
+                end_pos=len(text),
+                strategy="semantic",
+                sentence_count=len(current_chunk_sentences),
+                avg_similarity=threshold
+            )
+            chunks.append(chunk)
+        
+        # 如果只生成了1个块且文档很长，尝试按长度强制切分
+        if len(chunks) == 1 and len(text) > max_size * 1.5:
+            print(f"Warning: Only 1 chunk generated for long text ({len(text)} chars), trying fallback")
+            return self._fallback_to_sentences(text, min_size)
         
         return chunks
     

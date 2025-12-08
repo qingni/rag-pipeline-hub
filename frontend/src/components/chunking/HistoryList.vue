@@ -44,7 +44,12 @@
           @page-change="handlePageChange"
         >
           <template #strategy_type="{ row }">
-            <t-tag theme="primary" variant="light">{{ getStrategyLabel(row.strategy_type) }}</t-tag>
+            <t-space align="center" :size="4">
+              <t-tag theme="primary" variant="light">{{ getStrategyLabel(row.strategy_type) }}</t-tag>
+              <t-tooltip :content="formatParams(row)" placement="top" max-width="400">
+                <t-icon name="info-circle" style="cursor: pointer; color: var(--td-gray-color-6);" />
+              </t-tooltip>
+            </t-space>
           </template>
 
           <template #status="{ row }">
@@ -169,23 +174,26 @@ const handleView = (row) => {
   emit('view', row.result_id)
 }
 
-const handleDelete = async (row) => {
-  const confirmed = await DialogPlugin.confirm({
+const handleDelete = (row) => {
+  DialogPlugin.confirm({
     header: '确认删除',
-    body: `确定要删除 "${row.document_name}" 的分块结果吗？`,
-    confirmBtn: '删除',
-    cancelBtn: '取消'
-  })
-
-  if (confirmed) {
-    try {
-      await chunkingStore.deleteResult(row.result_id)
-      MessagePlugin.success('删除成功')
-      loadHistory()
-    } catch (error) {
-      MessagePlugin.error('删除失败')
+    body: `确定要删除 "${row.document_name}" 的分块结果吗？此操作将删除数据库记录和文件，无法恢复。`,
+    theme: 'warning',
+    confirmBtn: {
+      content: '删除',
+      theme: 'danger'
+    },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await chunkingStore.deleteResult(row.result_id)
+        MessagePlugin.success('删除成功')
+        await loadHistory()
+      } catch (error) {
+        MessagePlugin.error(error.message || '删除失败')
+      }
     }
-  }
+  })
 }
 
 const handleExport = async (row, format) => {
@@ -249,6 +257,73 @@ const getStatusLabel = (status) => {
 const formatTime = (time) => {
   if (!time) return '-'
   return new Date(time).toLocaleString('zh-CN')
+}
+
+const formatParams = (row) => {
+  if (!row.statistics || !row.statistics.parameters) {
+    return '无参数信息'
+  }
+  
+  const params = row.statistics.parameters
+  const strategy = row.strategy_type
+  
+  // 根据不同策略格式化参数
+  let paramLines = []
+  
+  switch (strategy) {
+    case 'character':
+      paramLines = [
+        `块大小: ${params.chunk_size || '-'} 字符`,
+        `重叠: ${params.overlap || 0} 字符`
+      ]
+      break
+      
+    case 'paragraph':
+      paramLines = [
+        `最大块大小: ${params.max_chunk_size || '-'} 字符`,
+        `合并小段落: ${params.merge_small_paragraphs ? '是' : '否'}`
+      ]
+      if (params.min_paragraph_length) {
+        paramLines.push(`最小段落长度: ${params.min_paragraph_length} 字符`)
+      }
+      break
+      
+    case 'heading':
+      paramLines = [
+        `最大块大小: ${params.max_chunk_size || '-'} 字符`,
+        `保留标题层级: ${params.preserve_hierarchy ? '是' : '否'}`
+      ]
+      if (params.max_heading_level) {
+        paramLines.push(`最大标题级别: H${params.max_heading_level}`)
+      }
+      break
+      
+    case 'semantic':
+      paramLines = [
+        `相似度阈值: ${params.similarity_threshold || '-'}`,
+        `最小块大小: ${params.min_chunk_size || '-'} 字符`
+      ]
+      if (params.max_chunk_size) {
+        paramLines.push(`最大块大小: ${params.max_chunk_size} 字符`)
+      }
+      break
+      
+    default:
+      // 通用参数显示
+      Object.entries(params).forEach(([key, value]) => {
+        paramLines.push(`${key}: ${value}`)
+      })
+  }
+  
+  // 添加版本信息
+  if (row.version && row.version > 1) {
+    paramLines.unshift(`版本: v${row.version}`)
+    if (row.replacement_reason) {
+      paramLines.push(`变更原因: ${row.replacement_reason}`)
+    }
+  }
+  
+  return paramLines.join('\n')
 }
 
 onMounted(() => {

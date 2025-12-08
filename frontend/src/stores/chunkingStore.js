@@ -10,6 +10,15 @@ export const useChunkingStore = defineStore('chunking', {
     parsedDocuments: [],
     selectedDocument: null,
     documentsLoading: false,
+    documentsPage: 1,
+    documentsPageSize: 50,
+    documentsTotalCount: 0,
+    documentsFilters: {
+      search: '',
+      format: null,
+      sortBy: 'upload_time',
+      sortOrder: 'desc'
+    },
 
     // Strategy selection
     strategies: [],
@@ -77,34 +86,54 @@ export const useChunkingStore = defineStore('chunking', {
     /**
      * Load parsed documents
      */
-    async loadParsedDocuments(page = 1, pageSize = 20) {
+    async loadParsedDocuments(page = 1, filters = null) {
       this.documentsLoading = true
       try {
-        const response = await chunkingService.getParsedDocuments(page, pageSize)
+        // Use provided filters or default to stored filters
+        const appliedFilters = filters || this.documentsFilters
+        
+        const response = await chunkingService.getParsedDocuments(
+          page, 
+          this.documentsPageSize,
+          appliedFilters
+        )
         console.log('API Response:', response)
         if (response.success && response.data) {
           // Check if data has items (paginated response)
           if (response.data.items) {
             this.parsedDocuments = response.data.items
+            this.documentsTotalCount = response.data.total || 0
+            this.documentsPage = page
           } else if (Array.isArray(response.data)) {
             // Direct array response
             this.parsedDocuments = response.data
+            this.documentsTotalCount = response.data.length
           } else {
             console.error('Unexpected data structure:', response.data)
             this.parsedDocuments = []
+            this.documentsTotalCount = 0
           }
           console.log('Parsed documents set to:', this.parsedDocuments.length, this.parsedDocuments)
         } else {
           console.error('API returned success=false or no data:', response)
           this.parsedDocuments = []
+          this.documentsTotalCount = 0
         }
       } catch (error) {
         console.error('Failed to load parsed documents:', error)
         this.parsedDocuments = []
+        this.documentsTotalCount = 0
         throw error
       } finally {
         this.documentsLoading = false
       }
+    },
+    
+    /**
+     * Update document filters
+     */
+    updateDocumentFilters(filters) {
+      this.documentsFilters = { ...this.documentsFilters, ...filters }
     },
 
     /**
@@ -112,6 +141,46 @@ export const useChunkingStore = defineStore('chunking', {
      */
     selectDocument(document) {
       this.selectedDocument = document
+      // Load latest chunking result for this document
+      this.loadLatestResultForDocument(document.id)
+    },
+
+    /**
+     * Load latest chunking result for selected document
+     */
+    async loadLatestResultForDocument(documentId, strategyType = null, parameters = null) {
+      try {
+        const response = await chunkingService.getLatestResultForDocument(
+          documentId,
+          strategyType,
+          parameters
+        )
+        
+        if (response.success && response.data) {
+          // Load the full result with chunks
+          await this.loadChunkingResult(response.data.result_id)
+          
+          // If we have a matching strategy, also select it
+          if (strategyType && this.strategies.length > 0) {
+            const matchingStrategy = this.strategies.find(s => s.type === strategyType)
+            if (matchingStrategy) {
+              this.selectStrategy(matchingStrategy)
+              // Update parameters to match the result
+              if (parameters) {
+                this.strategyParameters = { ...parameters }
+              }
+            }
+          }
+        } else {
+          // No existing result, clear current result
+          this.currentResult = null
+          this.chunks = []
+          this.selectedChunk = null
+        }
+      } catch (error) {
+        console.error('Failed to load latest result for document:', error)
+        // Don't throw - it's okay if there's no existing result
+      }
     },
 
     /**
@@ -152,6 +221,11 @@ export const useChunkingStore = defineStore('chunking', {
       this.selectedStrategy = strategy
       // Initialize parameters with defaults
       this.strategyParameters = { ...strategy.default_parameters }
+      
+      // If a document is already selected, load latest result for this strategy
+      if (this.selectedDocument) {
+        this.loadLatestResultForDocument(this.selectedDocument.id, strategy.type)
+      }
     },
 
     /**
@@ -159,6 +233,15 @@ export const useChunkingStore = defineStore('chunking', {
      */
     updateParameters(params) {
       this.strategyParameters = { ...this.strategyParameters, ...params }
+      
+      // If both document and strategy are selected, try to load result with matching parameters
+      if (this.selectedDocument && this.selectedStrategy) {
+        this.loadLatestResultForDocument(
+          this.selectedDocument.id,
+          this.selectedStrategy.type,
+          this.strategyParameters
+        )
+      }
     },
 
     /**
@@ -235,6 +318,10 @@ export const useChunkingStore = defineStore('chunking', {
               // Auto-select first chunk for preview
               if (this.chunks.length > 0) {
                 this.selectChunk(this.chunks[0])
+              }
+              // Refresh history list to show the new result
+              if (this.historyList.length > 0) {
+                await this.loadHistory(this.historyPage, this.historyFilters)
               }
             }
           }

@@ -51,7 +51,7 @@ def init_default_strategies(db: Session):
             "strategy_type": StrategyType.SEMANTIC,
             "description": "使用语义相似度算法识别语义边界进行分块",
             "default_params": {
-                "similarity_threshold": 0.6,
+                "similarity_threshold": 0.3,
                 "min_chunk_size": 300,
                 "max_chunk_size": 1200
             },
