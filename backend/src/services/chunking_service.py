@@ -242,13 +242,17 @@ class ChunkingService:
         # Calculate statistics
         statistics = ChunkStatistics.calculate_statistics(chunks)
         
-        # Create result directory if needed
-        result_dir = "results/chunking"
-        os.makedirs(result_dir, exist_ok=True)
+        # Create result directory if needed (relative to backend directory)
+        from pathlib import Path
+        from ..config import settings
+        
+        # RESULTS_DIR now points to ./results (backend/results)
+        result_dir = Path(settings.RESULTS_DIR) / "chunking"
+        result_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate result file path
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_path = os.path.join(result_dir, f"{document_id}_{strategy_type}_{timestamp}.json")
+        file_path = result_dir / f"{document_id}_{strategy_type}_{timestamp}.json"
         
         # Save JSON result
         result_data = {
@@ -266,6 +270,9 @@ class ChunkingService:
             json.dump(result_data, f, ensure_ascii=False, indent=2)
         
         file_size = os.path.getsize(file_path)
+        
+        # Store relative path in database (relative to backend directory)
+        relative_path = f"results/chunking/{file_path.name}"
         
         # Get task for timing
         task = db.query(ChunkingTask).filter(ChunkingTask.task_id == task_id).first()
@@ -285,7 +292,7 @@ class ChunkingService:
             status=ResultStatus.COMPLETED,
             processing_time=processing_time,
             statistics=statistics,
-            json_file_path=file_path,
+            json_file_path=relative_path,
             file_size=file_size,
             version=version,
             previous_version_id=previous_version_id,

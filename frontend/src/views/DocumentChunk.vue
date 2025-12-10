@@ -2,7 +2,7 @@
   <div class="chunking-view">
     <t-layout>
       <!-- Left Panel: Configuration (Always Visible) -->
-      <t-aside width="420px" class="left-panel">
+      <t-aside width="380px" class="left-panel">
         <div class="panel-content">
           <t-space direction="vertical" size="medium" style="width: 100%">
             <!-- Document Selection -->
@@ -84,10 +84,24 @@
                 </t-row>
               </template>
 
-              <!-- Empty State -->
-              <t-card v-else-if="!currentTask" :bordered="false" class="empty-state-card">
-                <t-empty description="请在左侧配置并开始分块操作，或在历史记录中查看已完成的分块结果" />
-              </t-card>
+              <!-- Empty State - 保持与有数据时相同的布局结构 -->
+              <template v-else-if="!currentTask">
+                <t-row :gutter="16" class="results-row">
+                  <!-- 左侧空状态 - 占据分块列表的位置 -->
+                  <t-col :span="12">
+                    <t-card :bordered="false" class="empty-state-card">
+                      <t-empty description="请在左侧配置并开始分块操作，或在历史记录中查看已完成的分块结果" />
+                    </t-card>
+                  </t-col>
+
+                  <!-- 右侧空状态 - 占据分块详情的位置 -->
+                  <t-col :span="12">
+                    <t-card :bordered="false" class="empty-state-card">
+                      <t-empty description="暂无分块详情" />
+                    </t-card>
+                  </t-col>
+                </t-row>
+              </template>
             </div>
           </t-tab-panel>
 
@@ -243,10 +257,15 @@ onUnmounted(() => {
   border-right: 1px solid var(--td-component-border);
   overflow-y: auto;
   height: 100vh;
+  flex-shrink: 0; /* 防止侧边栏被压缩 */
+  min-width: 380px; /* 最小宽度 */
+  max-width: 380px; /* 最大宽度 */
 }
 
 .panel-content {
   padding: 20px 16px;
+  width: 100%; /* 确保内容不超出宽度 */
+  box-sizing: border-box;
 }
 
 .main-content {
@@ -302,10 +321,16 @@ onUnmounted(() => {
 /* 空状态卡片 */
 .empty-state-card {
   min-height: 400px;
-  max-width: 1400px;
-  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.empty-state-card :deep(.t-card__body) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 400px;
 }
 </style>

@@ -47,8 +47,13 @@ git checkout 002-doc-chunking  # Already created
 ```bash
 cd backend
 
-# Create chunking directories
-mkdir -p results/chunking
+# Chunking directories already exist in backend/results/
+# Verify structure:
+ls -la results/chunking
+ls -la results/load
+ls -la results/parse
+
+# Create chunkers directory if not exists
 mkdir -p src/providers/chunkers
 
 # Verify dependencies
@@ -140,7 +145,7 @@ touch src/services/chunking_service.py
 **Start with**: `chunking_service.py`
 - Create `ChunkingService` class
 - Implement `load_source_document()` method
-- Test with existing JSON file from results/load
+- Test with existing JSON file from backend/results/load
 
 #### Day 2: Chunking Strategies
 ```bash
@@ -191,6 +196,8 @@ curl -X POST http://localhost:8000/api/chunking/chunk \
     "chunking_params": {"chunk_size": 1000, "chunk_overlap": 100}
   }'
 ```
+
+**Note**: The `source_file_path` is now relative to the `backend/` directory since `results/` has been moved under `backend/`.
 
 ---
 

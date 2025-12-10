@@ -262,12 +262,28 @@ onMounted(async () => {
 <style scoped>
 .document-selector {
   margin-bottom: 20px;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden; /* 防止内容溢出 */
+}
+
+.document-selector :deep(.t-card) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.document-selector :deep(.t-card__body) {
+  padding: 16px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .filter-bar {
   padding: 16px 0;
   border-bottom: 1px solid var(--td-border-level-1-color);
   margin-bottom: 12px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .info-bar {
@@ -323,6 +339,8 @@ onMounted(async () => {
   width: 100%;
   line-height: 1.4;
   min-width: 0;
+  max-width: 100%; /* 限制最大宽度 */
+  overflow: hidden; /* 防止溢出 */
 }
 
 .doc-header {
@@ -330,6 +348,8 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .doc-name {
@@ -340,6 +360,8 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.5;
+  min-width: 0; /* 允许flex缩小 */
+  max-width: 100%;
 }
 
 .doc-meta {

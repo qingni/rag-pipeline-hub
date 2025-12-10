@@ -125,6 +125,10 @@ cat QUICKSTART_US1.md
 │   │   ├── services/    # 业务逻辑
 │   │   ├── api/         # API路由
 │   │   └── providers/   # 提供商适配器
+│   ├── results/         # 处理结果JSON
+│   │   ├── load/        # 文档加载结果
+│   │   ├── parse/       # 文档解析结果
+│   │   └── chunking/    # 文档分块结果
 │   └── requirements.txt
 ├── frontend/            # Vue3前端
 │   ├── src/
@@ -134,7 +138,6 @@ cat QUICKSTART_US1.md
 │   │   └── services/    # API服务
 │   └── package.json
 ├── uploads/             # 上传文件存储
-├── results/             # 处理结果JSON
 └── specs/              # 功能规范和任务
 ```
 

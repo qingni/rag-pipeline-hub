@@ -338,11 +338,21 @@ async def delete_result(
         raise NotFoundError("ChunkingResult", result_id)
     
     # Delete JSON file
-    if result.json_file_path and os.path.exists(result.json_file_path):
-        try:
-            os.remove(result.json_file_path)
-        except Exception as e:
-            print(f"Failed to delete file {result.json_file_path}: {e}")
+    if result.json_file_path:
+        from pathlib import Path
+        from ..config import settings
+        
+        # Handle relative paths (relative to backend directory)
+        file_path = Path(result.json_file_path)
+        if not file_path.is_absolute():
+            # Path is relative to backend directory, resolve via RESULTS_DIR
+            file_path = Path(settings.RESULTS_DIR).parent / result.json_file_path
+        
+        if file_path.exists():
+            try:
+                file_path.unlink()
+            except Exception as e:
+                print(f"Failed to delete file {file_path}: {e}")
     
     # Delete database record (cascades to chunks)
     db.delete(result)
@@ -385,9 +395,18 @@ async def export_result(
     
     if format == "json":
         # Return existing JSON file
-        if os.path.exists(result.json_file_path):
+        from pathlib import Path
+        from ..config import settings
+        
+        # Handle relative paths (relative to backend directory)
+        file_path = Path(result.json_file_path)
+        if not file_path.is_absolute():
+            # Resolve relative to backend directory
+            file_path = Path(settings.RESULTS_DIR).parent / result.json_file_path
+        
+        if file_path.exists():
             return FileResponse(
-                result.json_file_path,
+                str(file_path),
                 media_type="application/json",
                 filename=f"{result.document_name}_{result.chunking_strategy.value}.json"
             )
