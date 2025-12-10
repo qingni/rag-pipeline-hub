@@ -1,0 +1,677 @@
+openapi: 3.0.3
+info:
+  title: Document Chunking API
+  description: API for document chunking functionality in RAG framework
+  version: 1.0.0
+  contact:
+    name: RAG Framework Team
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+
+tags:
+  - name: Chunking
+    description: Document chunking operations
+  - name: Strategy
+    description: Chunking strategy management
+  - name: History
+    description: Chunking history and results
+
+paths:
+  /documents/parsed:
+    get:
+      tags: [Chunking]
+      summary: Get list of parsed documents available for chunking
+      description: Returns documents from results/load and results/parse directories
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ParsedDocument'
+                  total:
+                    type: integer
+
+  /chunking/strategies:
+    get:
+      tags: [Strategy]
+      summary: Get available chunking strategies
+      description: Returns all enabled chunking strategies with their default parameters
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  strategies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChunkingStrategy'
+
+  /chunking/chunk:
+    post:
+      tags: [Chunking]
+      summary: Create a new chunking task
+      description: Submit a document for chunking with specified strategy and parameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChunkingRequest'
+      responses:
+        '202':
+          description: Task created and queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Source document not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /chunking/task/{task_id}:
+    get:
+      tags: [Chunking]
+      summary: Get task status and result
+      description: Poll task status and retrieve result when completed
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Task information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatus'
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /chunking/queue:
+    get:
+      tags: [Chunking]
+      summary: Get current queue status
+      description: Returns currently running and queued tasks
+      responses:
+        '200':
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatus'
+
+  /chunking/history:
+    get:
+      tags: [History]
+      summary: Get chunking history with pagination and filtering
+      description: Returns paginated list of chunking results with filtering and sorting
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: document_name
+          in: query
+          description: Filter by document name (partial match)
+          schema:
+            type: string
+        - name: strategy
+          in: query
+          description: Filter by chunking strategy
+          schema:
+            type: string
+            enum: [character, paragraph, heading, semantic]
+        - name: sort_by
+          in: query
+          description: Sort field
+          schema:
+            type: string
+            enum: [created_at, document_name, total_chunks, processing_time]
+            default: created_at
+        - name: sort_order
+          in: query
+          description: Sort order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Paginated history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedHistory'
+
+  /chunking/result/{result_id}:
+    get:
+      tags: [History]
+      summary: Get chunking result details
+      description: Returns full chunking result including all chunks
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: include_chunks
+          in: query
+          description: Whether to include full chunk content
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Chunking result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkingResultDetail'
+        '404':
+          description: Result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [History]
+      summary: Delete a chunking result
+      description: Deletes the result from database and removes JSON file
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Successfully deleted
+        '404':
+          description: Result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /chunking/compare:
+    post:
+      tags: [History]
+      summary: Compare two chunking results
+      description: Returns side-by-side comparison of two results' statistics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [result_id_1, result_id_2]
+              properties:
+                result_id_1:
+                  type: string
+                  format: uuid
+                result_id_2:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Comparison result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComparisonResult'
+        '404':
+          description: One or both results not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /chunking/export/{result_id}:
+    get:
+      tags: [History]
+      summary: Export chunking result
+      description: Download result in JSON or CSV format
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [json, csv]
+      responses:
+        '200':
+          description: File download
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkingResultJSON'
+            text/csv:
+              schema:
+                type: string
+        '404':
+          description: Result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /chunking/preview:
+    post:
+      tags: [Chunking]
+      summary: Preview chunking without saving
+      description: Returns estimated chunk count and sample chunks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChunkingRequest'
+      responses:
+        '200':
+          description: Preview result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkingPreview'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ParsedDocument:
+      type: object
+      required: [document_id, document_name, file_path, created_at, file_size]
+      properties:
+        document_id:
+          type: string
+        document_name:
+          type: string
+        file_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        file_size:
+          type: integer
+        page_count:
+          type: integer
+        char_count:
+          type: integer
+
+    ChunkingStrategy:
+      type: object
+      required: [strategy_id, strategy_name, description, default_params, requires_structure]
+      properties:
+        strategy_id:
+          type: string
+          enum: [character, paragraph, heading, semantic]
+        strategy_name:
+          type: string
+        strategy_type:
+          type: string
+          enum: [character, paragraph, heading, semantic]
+        description:
+          type: string
+        default_params:
+          type: object
+        is_enabled:
+          type: boolean
+        requires_structure:
+          type: boolean
+
+    ChunkingRequest:
+      type: object
+      required: [source_file_path, chunking_strategy, chunking_params]
+      properties:
+        source_file_path:
+          type: string
+          description: Path to parsed document JSON file
+        chunking_strategy:
+          type: string
+          enum: [character, paragraph, heading, semantic]
+        chunking_params:
+          type: object
+          properties:
+            chunk_size:
+              type: integer
+              minimum: 50
+              maximum: 5000
+            chunk_overlap:
+              type: integer
+              minimum: 0
+              maximum: 500
+            min_chunk_size:
+              type: integer
+              description: For semantic strategy
+            max_chunk_size:
+              type: integer
+              description: For semantic strategy
+            similarity_threshold:
+              type: number
+              description: For semantic strategy
+
+    TaskResponse:
+      type: object
+      required: [task_id, status, queue_position, created_at]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running]
+        queue_position:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        message:
+          type: string
+
+    TaskStatus:
+      type: object
+      required: [task_id, status, created_at]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running, completed, partial, failed, cancelled]
+        queue_position:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        result_id:
+          type: string
+          format: uuid
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        progress:
+          type: object
+          properties:
+            current:
+              type: integer
+            total:
+              type: integer
+            percentage:
+              type: number
+
+    QueueStatus:
+      type: object
+      required: [running_tasks, queued_tasks, max_concurrent]
+      properties:
+        running_tasks:
+          type: array
+          items:
+            type: object
+            properties:
+              task_id:
+                type: string
+                format: uuid
+              document_name:
+                type: string
+              started_at:
+                type: string
+                format: date-time
+        queued_tasks:
+          type: array
+          items:
+            type: object
+            properties:
+              task_id:
+                type: string
+                format: uuid
+              document_name:
+                type: string
+              queue_position:
+                type: integer
+        max_concurrent:
+          type: integer
+
+    PaginatedHistory:
+      type: object
+      required: [results, total, page, per_page, total_pages]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChunkingResultSummary'
+        total:
+          type: integer
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total_pages:
+          type: integer
+
+    ChunkingResultSummary:
+      type: object
+      required: [result_id, document_name, chunking_strategy, total_chunks, status, created_at, file_size]
+      properties:
+        result_id:
+          type: string
+          format: uuid
+        document_name:
+          type: string
+        chunking_strategy:
+          type: string
+        total_chunks:
+          type: integer
+        status:
+          type: string
+          enum: [completed, partial, failed]
+        created_at:
+          type: string
+          format: date-time
+        processing_time:
+          type: number
+        file_size:
+          type: integer
+        statistics:
+          $ref: '#/components/schemas/Statistics'
+
+    ChunkingResultDetail:
+      allOf:
+        - $ref: '#/components/schemas/ChunkingResultSummary'
+        - type: object
+          properties:
+            document_id:
+              type: string
+            source_file:
+              type: string
+            chunking_params:
+              type: object
+            error_info:
+              type: object
+              nullable: true
+            chunks:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentChunk'
+
+    DocumentChunk:
+      type: object
+      required: [content, metadata]
+      properties:
+        content:
+          type: string
+        metadata:
+          type: object
+          required: [chunk_id, chunk_index, char_count, word_count, start_position, end_position]
+          properties:
+            chunk_id:
+              type: string
+              format: uuid
+            chunk_index:
+              type: integer
+            char_count:
+              type: integer
+            word_count:
+              type: integer
+            page_number:
+              type: integer
+              nullable: true
+            start_position:
+              type: integer
+            end_position:
+              type: integer
+            headings:
+              type: array
+              items:
+                type: string
+            paragraph_count:
+              type: integer
+            is_fallback:
+              type: boolean
+
+    Statistics:
+      type: object
+      required: [avg_chunk_size, max_chunk_size, min_chunk_size, total_characters]
+      properties:
+        avg_chunk_size:
+          type: number
+        max_chunk_size:
+          type: integer
+        min_chunk_size:
+          type: integer
+        total_characters:
+          type: integer
+
+    ComparisonResult:
+      type: object
+      required: [result_1, result_2, comparison]
+      properties:
+        result_1:
+          $ref: '#/components/schemas/ChunkingResultSummary'
+        result_2:
+          $ref: '#/components/schemas/ChunkingResultSummary'
+        comparison:
+          type: object
+          properties:
+            chunk_count_diff:
+              type: integer
+            avg_size_diff:
+              type: number
+            processing_time_diff:
+              type: number
+
+    ChunkingPreview:
+      type: object
+      required: [estimated_chunks, estimated_avg_size, sample_chunks]
+      properties:
+        estimated_chunks:
+          type: integer
+        estimated_avg_size:
+          type: number
+        sample_chunks:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+
+    ChunkingResultJSON:
+      type: object
+      required: [document_id, document_name, source_file, total_chunks, chunking_strategy, chunking_params, status, created_at, processing_time, statistics, chunks]
+      properties:
+        document_id:
+          type: string
+        document_name:
+          type: string
+        source_file:
+          type: string
+        total_chunks:
+          type: integer
+        chunking_strategy:
+          type: string
+        chunking_params:
+          type: object
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        processing_time:
+          type: number
+        error_info:
+          type: object
+          nullable: true
+        statistics:
+          $ref: '#/components/schemas/Statistics'
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentChunk'
+
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object

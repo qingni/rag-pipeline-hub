@@ -12,10 +12,19 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 
 # Create engine
+# For SQLite, add timeout and enable write access
+connect_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {
+        "check_same_thread": False,
+        "timeout": 30  # Wait up to 30 seconds for database lock
+    }
+
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
-    echo=False
+    connect_args=connect_args,
+    echo=False,
+    pool_pre_ping=True  # Verify connections before using them
 )
 
 # Create SessionLocal class

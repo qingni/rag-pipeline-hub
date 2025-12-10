@@ -74,6 +74,7 @@ coverage/
 # Application specific
 uploads/
 results/
+backend/results/
 
 # Temporary files
 *.tmp

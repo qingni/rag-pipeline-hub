@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     
     # File Storage
     UPLOAD_DIR: str = "../uploads"
-    RESULTS_DIR: str = "../results"
+    RESULTS_DIR: str = "./results"
     MAX_UPLOAD_SIZE: int = 52428800  # 50MB in bytes
     
     # OpenAI

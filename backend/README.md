@@ -65,6 +65,10 @@ backend/
 │   ├── api/                 # API路由
 │   ├── storage/             # 存储管理
 │   └── utils/               # 工具函数
+├── results/                 # 处理结果存储
+│   ├── load/                # 文档加载结果
+│   ├── parse/               # 文档解析结果
+│   └── chunking/            # 文档分块结果
 ├── tests/                   # 测试
 ├── requirements.txt         # Python依赖
 └── .env.example            # 环境变量示例
