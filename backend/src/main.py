@@ -1,8 +1,10 @@
 """FastAPI application entry point."""
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from .config import settings
+from .middleware.api_key_middleware import EmbeddingAPIKeyMiddleware
 from .utils.error_handlers import (
     AppException,
     app_exception_handler,
@@ -47,14 +49,24 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+frontend_origins_env = os.getenv("FRONTEND_ALLOWED_ORIGINS", "")
+allowed_origins = [
+    origin.strip()
+    for origin in frontend_origins_env.split(",")
+    if origin.strip()
+] or ["http://localhost:5173", "http://localhost:4173"]
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Configure properly for production
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Embedding API key middleware (only active when EMBEDDING_CLIENT_API_KEY is set)
+app.add_middleware(EmbeddingAPIKeyMiddleware)
 
 # Register exception handlers
 app.add_exception_handler(AppException, app_exception_handler)
@@ -86,6 +98,7 @@ async def health_check():
 # Import and register API routers
 from .api import documents, loading, parsing, processing, chunking
 from .api import chunking_preview, chunking_history
+from .api import embedding_routes
 
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
 app.include_router(loading.router, prefix="/api/v1/processing", tags=["Processing - Load"])
@@ -94,8 +107,9 @@ app.include_router(processing.router, prefix="/api/v1/processing", tags=["Proces
 app.include_router(chunking.router, prefix="/api/v1/chunking", tags=["Chunking"])
 app.include_router(chunking_preview.router, prefix="/api/v1/chunking", tags=["Chunking - Preview"])
 app.include_router(chunking_history.router, prefix="/api/v1/chunking", tags=["Chunking - History"])
+app.include_router(embedding_routes.router, prefix="/api/v1", tags=["Embedding"])
 
-# More routers will be added for embedding, indexing, search, generation
+# More routers will be added for indexing, search, generation
 
 
 if __name__ == "__main__":
