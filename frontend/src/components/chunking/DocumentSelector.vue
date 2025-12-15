@@ -312,6 +312,7 @@ onMounted(async () => {
   overflow: hidden;
   max-height: 500px;
   overflow-y: auto;
+  min-width: 600px; /* 增加最小宽度，确保文件名不换行 */
 }
 
 .doc-item-wrapper {
@@ -320,6 +321,7 @@ onMounted(async () => {
   cursor: pointer;
   transition: all 0.2s ease;
   background: var(--td-bg-color-container);
+  min-width: 0;
 }
 
 .doc-item-wrapper:last-child {
@@ -339,8 +341,6 @@ onMounted(async () => {
   width: 100%;
   line-height: 1.4;
   min-width: 0;
-  max-width: 100%; /* 限制最大宽度 */
-  overflow: hidden; /* 防止溢出 */
 }
 
 .doc-header {
@@ -349,7 +349,7 @@ onMounted(async () => {
   gap: 8px;
   margin-bottom: 8px;
   width: 100%;
-  max-width: 100%;
+  min-width: 0;
 }
 
 .doc-name {
@@ -360,8 +360,7 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.5;
-  min-width: 0; /* 允许flex缩小 */
-  max-width: 100%;
+  min-width: 200px; /* 增加最小宽度，确保文件名有足够空间显示 */
 }
 
 .doc-meta {
