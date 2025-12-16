@@ -1,604 +1,559 @@
 # Quickstart: Vector Embedding Module
 
 **Feature**: 003-vector-embedding  
-**Audience**: Developers implementing or using the embedding service  
-**Prerequisites**: Python 3.11+, FastAPI, API access credentials
+**Date**: 2025-12-15  
+**Purpose**: Developer quickstart guide for implementing and using the vector embedding module
 
-## 🚀 Quick Start (5 minutes)
+---
 
-### 1. Installation
+## Prerequisites
 
+### Environment Setup
+
+**Backend Requirements**:
 ```bash
+# Python 3.9+
+python --version  # Should be >= 3.9
+
 # Install dependencies
-pip install -r backend/requirements.txt
+cd backend
+pip install -r requirements.txt
 
-# Verify embedding service exists
-ls backend/src/services/embedding_service.py
+# Required environment variables
+export EMBEDDING_API_KEY="your-api-key-here"
+export EMBEDDING_API_BASE_URL="http://dev.fit-ai.woa.com/api/llmproxy"  # Optional, has default
+export EMBEDDING_RESULTS_DIR="results/embedding"  # Optional, has default
 ```
 
-### 2. Configuration
-
-Create or update `backend/.env`:
-
+**Frontend Requirements**:
 ```bash
-# API Configuration
-EMBEDDING_API_KEY=your-api-key-here
-EMBEDDING_API_BASE_URL=http://dev.fit-ai.woa.com/api/llmproxy
-EMBEDDING_DEFAULT_MODEL=qwen3-embedding-8b
+# Node.js 16+
+node --version  # Should be >= 16
 
-# Retry Configuration
-EMBEDDING_MAX_RETRIES=3
-EMBEDDING_TIMEOUT=60
-EMBEDDING_INITIAL_DELAY=1
-EMBEDDING_MAX_DELAY=32
-
-# Storage Configuration
-EMBEDDING_RESULTS_DIR=results/embedding
+# Install dependencies
+cd frontend
+npm install
 ```
 
-### 3. Start the Service
+**Database Setup**:
+```bash
+# Apply database migrations (chunking tables must exist)
+cd backend
+alembic upgrade head
+```
+
+---
+
+## Quick Start (5 minutes)
+
+### Step 1: Start Backend Server
 
 ```bash
-# Terminal 1: Start backend
 cd backend
 uvicorn src.main:app --reload --port 8000
+```
 
-# Terminal 2: Start frontend (optional)
+**Verify health check**:
+```bash
+curl http://localhost:8000/embedding/health
+# Expected: {"status": "healthy", "api_connectivity": true, ...}
+```
+
+### Step 2: Start Frontend Server
+
+```bash
 cd frontend
 npm run dev
 ```
 
-### 4. Test Single Text Vectorization
+**Open browser**: http://localhost:5173
 
-```bash
-curl -X POST http://localhost:8000/api/v1/embedding/single \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
-  -d '{
-    "text": "人工智能是什么",
+### Step 3: Use Unified Embedding Interface
+
+1. Navigate to **"文档向量化"** in left sidebar
+2. Select a document from dropdown (only documents with chunking results appear)
+3. Select an embedding model (e.g., "Qwen3-Embedding-8B · 1536维 · 通义千问模型")
+4. Click **"开始向量化"** button
+5. View results in right panel (vectors, metadata, processing time)
+
+---
+
+## API Usage Examples
+
+### Example 1: Embed from Chunking Result (Primary Use Case)
+
+**Scenario**: You have a completed chunking result and want to vectorize all chunks.
+
+```python
+import requests
+
+# Prepare request
+payload = {
+    "result_id": "your-chunking-result-id",
+    "document_id": "your-document-id",  # Optional, for display
     "model": "qwen3-embedding-8b"
-  }'
-```
-
-**Expected Response**:
-```json
-{
-  "request_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "SUCCESS",
-  "vector": {
-    "index": 0,
-    "vector": [0.123, -0.456, ...],
-    "dimension": 1536,
-    "text_length": 18
-  },
-  "metadata": {
-    "model": "qwen3-embedding-8b",
-    "processing_time_ms": 245.7
-  },
-  "timestamp": "2025-12-10T10:30:45.123Z"
 }
+
+# Call API
+response = requests.post(
+    "http://localhost:8000/embedding/from-chunking-result",
+    json=payload,
+    headers={"X-API-Key": "your-api-key"}
+)
+
+# Parse response
+result = response.json()
+print(f"Status: {result['status']}")
+print(f"Vectors: {len(result['vectors'])}")
+print(f"Failures: {len(result['failures'])}")
+print(f"Processing time: {result['metadata']['processing_time_ms']}ms")
+
+# Access individual vectors
+for vector_data in result['vectors']:
+    index = vector_data['index']
+    vector = vector_data['vector']  # Array of floats
+    dimension = vector_data['dimension']  # e.g., 1536
+    print(f"Chunk {index}: {dimension}-dim vector")
 ```
 
-### 5. Test Batch Vectorization
-
+**cURL Example**:
 ```bash
-curl -X POST http://localhost:8000/api/v1/embedding/batch \
+curl -X POST http://localhost:8000/embedding/from-chunking-result \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{
-    "texts": ["人工智能", "机器学习", "深度学习"],
-    "model": "qwen3-embedding-8b"
+    "result_id": "result-abc-123",
+    "model": "bge-m3"
   }'
 ```
 
 ---
 
-## 📚 Common Use Cases
+### Example 2: Embed from Document (Automatic Latest Result)
 
-### Use Case 1: Single Query Vectorization (RAG Search)
+**Scenario**: You want to vectorize a document's latest chunking result without knowing the result ID.
 
 ```python
-from src.services.embedding_service import EmbeddingService
+import requests
 
-# Initialize service
-service = EmbeddingService(
-    api_key="your-api-key",
-    model="qwen3-embedding-8b",
-    base_url="http://dev.fit-ai.woa.com/api/llmproxy"
+payload = {
+    "document_id": "your-document-id",
+    "model": "bge-m3"
+}
+
+response = requests.post(
+    "http://localhost:8000/embedding/from-document",
+    json=payload
 )
 
-# Vectorize user query
-query = "什么是机器学习?"
-vector = service.embed_query(query)
-
-print(f"Vector dimension: {len(vector)}")
-print(f"First 5 values: {vector[:5]}")
-
-# Use vector for similarity search
-# results = vector_db.search(vector, top_k=5)
+result = response.json()
+print(f"Used chunking result: {result['metadata']['config']}")
+print(f"Generated {len(result['vectors'])} vectors")
 ```
 
-### Use Case 2: Batch Document Processing
-
+**With Strategy Filter**:
 ```python
-from src.services.embedding_service import EmbeddingService
-import json
-
-# Initialize service
-service = EmbeddingService(
-    api_key="your-api-key",
-    model="bge-m3",  # 1024-dim for smaller storage
-    base_url="http://dev.fit-ai.woa.com/api/llmproxy"
-)
-
-# Process document chunks
-documents = [
-    "第一章：人工智能简介",
-    "第二章：机器学习基础",
-    "第三章：深度学习框架",
-    # ... up to 1000 docs
-]
-
-# Batch vectorize
-vectors = service.embed_documents(documents)
-
-# Save results (JSON persistence per constitution)
-result = {
-    "document_count": len(documents),
-    "model": service.model,
-    "dimension": service.model_info["dimension"],
-    "vectors": [
-        {
-            "index": i,
-            "text_preview": doc[:50],
-            "vector": vec
-        }
-        for i, (doc, vec) in enumerate(zip(documents, vectors))
-    ]
-}
-
-with open("results/embedding/batch_result.json", "w") as f:
-    json.dump(result, f, ensure_ascii=False, indent=2)
-```
-
-### Use Case 3: Multi-Model Comparison
-
-```python
-from src.services.embedding_service import EmbeddingService
-
-# List available models
-models = EmbeddingService.list_available_models()
-for name, info in models.items():
-    print(f"{name}: {info['dimension']}维, {info['description']}")
-
-# Compare same text with different models
-text = "自然语言处理技术"
-
-for model_name in ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]:
-    service = EmbeddingService(
-        api_key="your-api-key",
-        model=model_name
-    )
-    
-    import time
-    start = time.time()
-    vector = service.embed_query(text)
-    duration = time.time() - start
-    
-    print(f"{model_name}:")
-    print(f"  Dimension: {len(vector)}")
-    print(f"  Latency: {duration*1000:.2f}ms")
-    print(f"  First 3: {vector[:3]}")
-    print()
-```
-
-### Use Case 4: Error Handling & Retries
-
-```python
-from src.services.embedding_service import EmbeddingService
-import logging
-
-logging.basicConfig(level=logging.INFO)
-
-service = EmbeddingService(
-    api_key="your-api-key",
-    model="qwen3-embedding-8b",
-    max_retries=5,        # Increase retries
-    request_timeout=30    # Shorter timeout
-)
-
-texts = ["valid text", "", "another valid text"]  # Contains empty text
-
-try:
-    vectors = service.embed_documents(texts)
-    print(f"Success: {len(vectors)} vectors generated")
-except Exception as e:
-    print(f"Error: {e}")
-    # Check logs for retry attempts and failure details
-```
-
----
-
-## 🔧 API Endpoints Reference
-
-### Single Text Vectorization
-
-**Endpoint**: `POST /api/v1/embedding/single`
-
-**Request**:
-```json
-{
-  "text": "要向量化的文本",
-  "model": "qwen3-embedding-8b",
-  "max_retries": 3,
-  "timeout": 60
-}
-```
-
-**Response (Success)**:
-```json
-{
-  "request_id": "uuid",
-  "status": "SUCCESS",
-  "vector": {
-    "index": 0,
-    "vector": [0.1, 0.2, ...],
-    "dimension": 1536,
-    "text_length": 21
-  },
-  "metadata": {
-    "model": "qwen3-embedding-8b",
-    "processing_time_ms": 245.7
-  },
-  "timestamp": "2025-12-10T10:30:45Z"
-}
-```
-
-### Batch Vectorization
-
-**Endpoint**: `POST /api/v1/embedding/batch`
-
-**Request**:
-```json
-{
-  "texts": ["文本1", "文本2", "文本3"],
-  "model": "bge-m3",
-  "max_retries": 3,
-  "timeout": 60
-}
-```
-
-**Response (Partial Success)**:
-```json
-{
-  "request_id": "uuid",
-  "status": "PARTIAL_SUCCESS",
-  "vectors": [
-    {
-      "index": 0,
-      "vector": [0.1, 0.2, ...],
-      "dimension": 1024,
-      "text_length": 9
-    },
-    {
-      "index": 2,
-      "vector": [0.3, 0.4, ...],
-      "dimension": 1024,
-      "text_length": 9
-    }
-  ],
-  "failures": [
-    {
-      "index": 1,
-      "text_preview": "   ",
-      "error_type": "INVALID_TEXT_ERROR",
-      "error_message": "Text contains only whitespace",
-      "retry_recommended": false,
-      "retry_count": 0
-    }
-  ],
-  "metadata": {
+payload = {
+    "document_id": "your-document-id",
     "model": "bge-m3",
-    "batch_size": 3,
-    "successful_count": 2,
-    "failed_count": 1,
-    "processing_time_ms": 512.3
-  },
-  "timestamp": "2025-12-10T10:30:46Z"
-}
-```
-
-### List Models
-
-**Endpoint**: `GET /api/v1/models`
-
-**Response**:
-```json
-{
-  "models": [
-    {
-      "name": "qwen3-embedding-8b",
-      "dimension": 1536,
-      "description": "通义千问 Embedding 模型,8B 参数",
-      "provider": "qwen",
-      "supports_multilingual": true
-    },
-    ...
-  ],
-  "count": 4
-}
-```
-
-### Get Model Info
-
-**Endpoint**: `GET /api/v1/models/{model_name}`
-
-**Response**:
-```json
-{
-  "name": "bge-m3",
-  "dimension": 1024,
-  "description": "BGE-M3 多语言模型,支持中英文,性能优秀",
-  "provider": "bge",
-  "supports_multilingual": true,
-  "max_batch_size": 1000
+    "strategy_type": "SEMANTIC"  # Only use semantic chunking results
 }
 ```
 
 ---
 
-## 🧪 Testing
+### Example 3: Single Text Embedding (Backend-only)
 
-### Run Unit Tests
+**Scenario**: Ad-hoc query vectorization for testing or API integration.
+
+```python
+import requests
+
+payload = {
+    "text": "人工智能是什么?",
+    "model": "qwen3-embedding-8b"
+}
+
+response = requests.post(
+    "http://localhost:8000/embedding/single",
+    json=payload
+)
+
+result = response.json()
+vector = result['vector']['vector']
+print(f"Generated {len(vector)}-dimensional vector")
+print(f"Text hash: {result['vector']['text_hash']}")
+```
+
+---
+
+### Example 4: Batch Text Embedding (Backend-only)
+
+**Scenario**: Vectorize multiple arbitrary texts without chunking.
+
+```python
+import requests
+
+payload = {
+    "texts": [
+        "First document content",
+        "Second document content",
+        "Third document content"
+    ],
+    "model": "hunyuan-embedding",
+    "max_retries": 5,
+    "timeout": 120
+}
+
+response = requests.post(
+    "http://localhost:8000/embedding/batch",
+    json=payload
+)
+
+result = response.json()
+
+# Handle partial success
+if result['status'] == 'partial_success':
+    print(f"Successful: {result['metadata']['successful_count']}")
+    print(f"Failed: {result['metadata']['failed_count']}")
+    
+    # Process failures
+    for failure in result['failures']:
+        print(f"Index {failure['index']}: {failure['error_message']}")
+        if failure['retry_recommended']:
+            print("  → Retry recommended")
+```
+
+---
+
+## Frontend Integration
+
+### Component Structure
+
+```
+src/
+├── views/
+│   └── DocumentEmbedding.vue       # Main page at /documents/embed
+├── components/
+│   └── embedding/
+│       ├── DocumentSelector.vue    # Document dropdown (filters chunked docs)
+│       ├── ModelSelector.vue       # Model selection with detail panel
+│       └── EmbeddingResults.vue    # Results display panel
+├── stores/
+│   └── embedding.js                # Pinia state management
+└── services/
+    └── embeddingService.js         # API client
+```
+
+### Using the Embedding Store
+
+```javascript
+// In a Vue component
+import { useEmbeddingStore } from '@/stores/embedding'
+
+export default {
+  setup() {
+    const embeddingStore = useEmbeddingStore()
+    
+    // Fetch documents with chunking results
+    onMounted(async () => {
+      await embeddingStore.fetchDocumentsWithChunking()
+    })
+    
+    // Start embedding
+    const startEmbedding = async () => {
+      if (!embeddingStore.canStartEmbedding) {
+        return  // Validation failed
+      }
+      
+      await embeddingStore.startEmbedding()
+      
+      if (embeddingStore.error) {
+        // Handle error
+        console.error(embeddingStore.error)
+      } else {
+        // Success
+        const result = embeddingStore.currentResult
+        console.log(`Generated ${result.vectors.length} vectors`)
+      }
+    }
+    
+    return {
+      embeddingStore,
+      startEmbedding
+    }
+  }
+}
+```
+
+### API Service Methods
+
+```javascript
+// services/embeddingService.js
+
+export const embeddingService = {
+  // Get documents with active chunking results
+  async getDocumentsWithChunking() {
+    const response = await api.get('/documents', {
+      params: { has_chunking_result: true }
+    })
+    return response.data
+  },
+  
+  // Get available models
+  async getModels() {
+    const response = await api.get('/embedding/models')
+    return response.data.models
+  },
+  
+  // Embed from document
+  async embedDocument(payload) {
+    const response = await api.post('/embedding/from-document', payload)
+    return response.data
+  },
+  
+  // Embed from chunking result
+  async embedChunkingResult(payload) {
+    const response = await api.post('/embedding/from-chunking-result', payload)
+    return response.data
+  }
+}
+```
+
+---
+
+## Error Handling
+
+### Common Error Scenarios
+
+#### 1. Invalid API Key
+```json
+{
+  "error": {
+    "code": "AUTHENTICATION_ERROR",
+    "message": "Invalid API key. Please check your credentials."
+  }
+}
+```
+**Solution**: Set correct `EMBEDDING_API_KEY` environment variable.
+
+#### 2. Chunking Result Not Found
+```json
+{
+  "error": {
+    "code": "CHUNKING_RESULT_NOT_FOUND",
+    "message": "Chunking result abc-123 not found or not completed"
+  }
+}
+```
+**Solution**: Verify chunking result exists and has `status = COMPLETED`.
+
+#### 3. Rate Limit Exceeded
+```json
+{
+  "error": {
+    "code": "RATE_LIMIT_ERROR",
+    "message": "Rate limit exceeded",
+    "details": {
+      "retry_after_seconds": 30
+    }
+  }
+}
+```
+**Solution**: System automatically retries with exponential backoff. If all retries fail, wait specified time and retry manually.
+
+#### 4. Dimension Mismatch
+```json
+{
+  "error": {
+    "code": "DIMENSION_MISMATCH_ERROR",
+    "message": "Vector dimension mismatch: expected 1536, got 768",
+    "details": {
+      "expected": 1536,
+      "actual": 768,
+      "model": "qwen3-embedding-8b"
+    }
+  }
+}
+```
+**Solution**: Check API configuration, verify model name matches API deployment.
+
+---
+
+## Testing
+
+### Backend Unit Tests
 
 ```bash
 cd backend
-pytest tests/unit/test_embedding_service.py -v
+pytest tests/test_embedding_service.py -v
+pytest tests/test_embedding_routes.py -v
 ```
 
-### Run Integration Tests
-
-```bash
-pytest tests/integration/test_embedding_api.py -v
-```
-
-### Test Coverage
-
-```bash
-pytest --cov=src.services.embedding_service --cov-report=html
-open htmlcov/index.html
-```
-
----
-
-## 🎯 Frontend Integration
-
-### Vue 3 Component Example
-
-```vue
-<template>
-  <div class="embedding-panel">
-    <t-form @submit="handleSubmit">
-      <t-form-item label="模型选择">
-        <t-select v-model="selectedModel">
-          <t-option
-            v-for="model in models"
-            :key="model.name"
-            :value="model.name"
-            :label="`${model.name} (${model.dimension}维)`"
-          />
-        </t-select>
-      </t-form-item>
-
-      <t-form-item label="文本输入">
-        <t-textarea
-          v-model="text"
-          placeholder="输入要向量化的文本"
-          :rows="5"
-        />
-      </t-form-item>
-
-      <t-button type="submit" :loading="loading">
-        向量化
-      </t-button>
-    </t-form>
-
-    <div v-if="result" class="result-display">
-      <h3>向量结果 (维度: {{ result.vector.dimension }})</h3>
-      <pre>{{ result.vector.vector.slice(0, 10) }}...</pre>
-      <p>处理时间: {{ result.metadata.processing_time_ms }}ms</p>
-    </div>
-  </div>
-</template>
-
-<script setup>
-import { ref, onMounted } from 'vue'
-import { embeddingService } from '@/services/embeddingService'
-
-const models = ref([])
-const selectedModel = ref('qwen3-embedding-8b')
-const text = ref('')
-const loading = ref(false)
-const result = ref(null)
-
-onMounted(async () => {
-  models.value = await embeddingService.listModels()
-})
-
-const handleSubmit = async () => {
-  loading.value = true
-  try {
-    result.value = await embeddingService.embedSingle({
-      text: text.value,
-      model: selectedModel.value
-    })
-  } catch (error) {
-    console.error('Embedding failed:', error)
-  } finally {
-    loading.value = false
-  }
-}
-</script>
-```
-
-### API Service (`embeddingService.js`)
-
-```javascript
-import axios from 'axios'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
-const API_KEY = import.meta.env.VITE_API_KEY
-
-const client = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-    'X-API-Key': API_KEY
-  }
-})
-
-export const embeddingService = {
-  async embedSingle({ text, model, max_retries = 3, timeout = 60 }) {
-    const response = await client.post('/embedding/single', {
-      text,
-      model,
-      max_retries,
-      timeout
-    })
-    return response.data
-  },
-
-  async embedBatch({ texts, model, max_retries = 3, timeout = 60 }) {
-    const response = await client.post('/embedding/batch', {
-      texts,
-      model,
-      max_retries,
-      timeout
-    })
-    return response.data
-  },
-
-  async listModels() {
-    const response = await client.get('/models')
-    return response.data.models
-  },
-
-  async getModelInfo(modelName) {
-    const response = await client.get(`/models/${modelName}`)
-    return response.data
-  }
-}
-```
-
----
-
-## 🐛 Troubleshooting
-
-### Issue: "Model not found" error
-
-**Solution**: Check model name matches exactly:
-```bash
-curl http://localhost:8000/api/v1/models
-```
-Valid models: `qwen3-embedding-8b`, `bge-m3`, `hunyuan-embedding`, `jina-embeddings-v4`
-
-### Issue: "Batch size limit exceeded"
-
-**Solution**: Split large batches:
-```python
-def chunk_texts(texts, chunk_size=1000):
-    for i in range(0, len(texts), chunk_size):
-        yield texts[i:i + chunk_size]
-
-# Process in chunks
-all_vectors = []
-for chunk in chunk_texts(large_text_list, 1000):
-    vectors = service.embed_documents(chunk)
-    all_vectors.extend(vectors)
-```
-
-### Issue: Rate limiting errors
-
-**Solution**: Exponential backoff is automatic, but you can:
-1. Increase `max_retries` in request
-2. Reduce batch size to lower API load
-3. Check API rate limits with provider
-
-### Issue: Dimension mismatch
-
-**Solution**: Verify model configuration:
-```python
-# Check expected dimensions
-service = EmbeddingService(model="bge-m3", ...)
-print(service.get_model_info())
-# Should show: dimension=1024
-
-# If API returns wrong dimension, check:
-# 1. API endpoint correctness
-# 2. Model name spelling
-# 3. API provider model availability
-```
-
----
-
-## 📊 Performance Tuning
-
-### Batch Size Optimization
+### Integration Test Example
 
 ```python
-import time
+# tests/test_embedding_integration.py
+import pytest
+from fastapi.testclient import TestClient
+from src.main import app
 
-# Test different batch sizes
-for batch_size in [10, 50, 100, 500, 1000]:
-    texts = ["sample text"] * batch_size
+client = TestClient(app)
+
+def test_embed_from_chunking_result():
+    # Setup: Create test document and chunking result
+    # (Assume fixtures exist)
     
-    start = time.time()
-    vectors = service.embed_documents(texts)
-    duration = time.time() - start
+    response = client.post("/embedding/from-chunking-result", json={
+        "result_id": "test-result-id",
+        "model": "bge-m3"
+    })
     
-    throughput = batch_size / duration
-    print(f"Batch {batch_size}: {throughput:.2f} docs/sec")
+    assert response.status_code == 200
+    result = response.json()
+    assert result['status'] == 'success'
+    assert len(result['vectors']) > 0
+    assert result['metadata']['model'] == 'bge-m3'
 ```
 
-### Concurrent Requests (Advanced)
+### Frontend Component Tests
 
-```python
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-
-async def embed_batch_async(texts, model):
-    # Use ThreadPoolExecutor for sync API
-    loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor() as pool:
-        service = EmbeddingService(model=model, ...)
-        return await loop.run_in_executor(
-            pool, 
-            service.embed_documents, 
-            texts
-        )
-
-# Process multiple batches concurrently
-batches = [batch1, batch2, batch3]
-results = await asyncio.gather(*[
-    embed_batch_async(batch, "qwen3-embedding-8b")
-    for batch in batches
-])
+```bash
+cd frontend
+npm test
 ```
 
 ---
 
-## 📖 Next Steps
+## Performance Optimization
 
-1. **Implement Backend**: Follow [data-model.md](./data-model.md) and [OpenAPI spec](./contracts/openapi.yaml)
-2. **Add Frontend UI**: Use Vue 3 + TDesign components as shown above
-3. **Write Tests**: Cover edge cases (empty text, rate limits, dimension mismatch)
-4. **Monitor Logs**: Check operational metrics in structured JSON logs
-5. **Integrate with Vector DB**: Use generated vectors for similarity search
+### Best Practices
 
-## 🔗 Resources
+1. **Batch Size Optimization**
+   ```python
+   # For large documents, process in chunks of 100-500 items
+   chunk_size = 500
+   for i in range(0, len(chunks), chunk_size):
+       batch = chunks[i:i+chunk_size]
+       embed_batch(batch)
+   ```
 
-- [Feature Spec](./spec.md) - Complete requirements
-- [Research Findings](./research.md) - Technical decisions
-- [Data Model](./data-model.md) - Entity definitions
-- [API Contract](./contracts/openapi.yaml) - OpenAPI specification
-- [Constitution](../../.specify/memory/constitution.md) - Project principles
+2. **Model Selection**
+   - **Small documents (<100 chunks)**: Use higher-dimension models (Qwen3-Embedding-8B, 1536-dim)
+   - **Large documents (>500 chunks)**: Use lower-dimension models (BGE-M3, 1024-dim) for faster processing
+
+3. **Retry Configuration**
+   ```python
+   # For stable networks
+   payload = {
+       "max_retries": 2,
+       "timeout": 30
+   }
+   
+   # For unstable networks
+   payload = {
+       "max_retries": 5,
+       "timeout": 120
+   }
+   ```
+
+4. **Frontend Caching**
+   ```javascript
+   // Cache model list in Pinia store
+   const embeddingStore = useEmbeddingStore()
+   if (embeddingStore.availableModels.length === 0) {
+     await embeddingStore.fetchModels()  // Only fetch once
+   }
+   ```
+
+---
+
+## Monitoring and Logging
+
+### Operational Metrics
+
+**Backend Logs** (check `logs/` directory):
+```
+[INFO] Embedding request started: model=qwen3-embedding-8b, batch_size=50
+[INFO] Request complete: duration=2345ms, vectors=50, failures=0, retries=1
+[WARN] Rate limit hit: retry_after=30s, attempt=2/3
+```
+
+**Key Metrics to Monitor**:
+- Request latency (target: <30s for 100 chunks)
+- Retry rate (target: <5%)
+- Rate limit hit rate (target: <10%)
+- Partial success rate (target: >90% full success)
+
+### Health Check Monitoring
+
+```bash
+# Add to your monitoring script
+while true; do
+  curl -s http://localhost:8000/embedding/health | jq '.status'
+  sleep 30
+done
+```
+
+---
+
+## Troubleshooting
+
+### Issue: Frontend shows "No documents available"
+
+**Diagnosis**:
+1. Check if documents exist: `curl http://localhost:8000/documents`
+2. Check if chunking results exist: Query database or check `results/chunking/`
+3. Verify documents have `status=COMPLETED` chunking results
+
+**Solution**: Complete chunking workflow first before attempting embedding.
+
+---
+
+### Issue: All requests fail with timeout
+
+**Diagnosis**:
+1. Check API connectivity: `curl http://dev.fit-ai.woa.com/api/llmproxy/health`
+2. Check network: `ping dev.fit-ai.woa.com`
+3. Check API key validity
+
+**Solution**:
+- Increase timeout: `"timeout": 120`
+- Check firewall/VPN settings
+- Verify API key with provider
+
+---
+
+### Issue: Vectors have incorrect dimensions
+
+**Diagnosis**:
+```python
+# Check model configuration
+response = requests.get("http://localhost:8000/embedding/models/qwen3-embedding-8b")
+print(response.json()['dimension'])  # Should match actual vectors
+```
+
+**Solution**: Verify model name in API matches deployed model on embedding service.
+
+---
+
+## Next Steps
+
+1. **Phase 2 Implementation**: Implement backend service methods and API routes
+2. **Phase 3 Testing**: Write comprehensive unit and integration tests
+3. **Phase 4 Frontend**: Implement unified embedding interface
+4. **Phase 5 Optimization**: Add caching, batch processing improvements
+5. **Phase 6 Monitoring**: Set up operational dashboards
+
+---
+
+## Additional Resources
+
+- **API Documentation**: See `contracts/api-contract.yaml` for full OpenAPI spec
+- **Data Model**: See `data-model.md` for entity definitions
+- **Research**: See `research.md` for design decisions and alternatives
+- **Specification**: See `spec.md` for complete feature requirements
+
+---
+
+**Support**: For questions or issues, contact the RAG Framework team or open an issue in the repository.

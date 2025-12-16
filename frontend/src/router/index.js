@@ -25,9 +25,9 @@ const routes = [
     component: () => import('../views/DocumentChunk.vue')
   },
   {
-    path: '/embeddings',
-    name: 'VectorEmbed',
-    component: () => import('../views/VectorEmbed.vue')
+    path: '/documents/embed',
+    name: 'DocumentEmbedding',
+    component: () => import('../views/DocumentEmbedding.vue')
   },
   {
     path: '/index',

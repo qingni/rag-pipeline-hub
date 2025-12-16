@@ -74,6 +74,7 @@ async def list_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = None,
+    has_chunking_result: Optional[bool] = Query(None, description="Filter documents with/without chunking results"),
     db: Session = Depends(get_db)
 ):
     """
@@ -83,6 +84,7 @@ async def list_documents(
         page: Page number
         page_size: Items per page
         status: Filter by status
+        has_chunking_result: Filter documents with active chunking results
         db: Database session
         
     Returns:
@@ -92,6 +94,36 @@ async def list_documents(
     
     if status:
         query = query.filter(Document.status == status)
+    
+    # Filter by chunking result availability
+    if has_chunking_result is not None:
+        from ..models.chunking_result import ChunkingResult, ResultStatus
+        from ..models.chunking_task import ChunkingTask
+        
+        if has_chunking_result:
+            # Only show documents with active chunking results
+            query = query.join(
+                ChunkingTask,
+                ChunkingTask.source_document_id == Document.id
+            ).join(
+                ChunkingResult,
+                ChunkingResult.task_id == ChunkingTask.task_id
+            ).filter(
+                ChunkingResult.status == ResultStatus.COMPLETED,
+                ChunkingResult.is_active == True
+            ).distinct()
+        else:
+            # Only show documents without any chunking results
+            from sqlalchemy import exists, and_
+            has_result = exists().where(
+                and_(
+                    ChunkingTask.source_document_id == Document.id,
+                    ChunkingResult.task_id == ChunkingTask.task_id,
+                    ChunkingResult.status == ResultStatus.COMPLETED,
+                    ChunkingResult.is_active == True
+                )
+            )
+            query = query.filter(~has_result)
     
     # Get total count
     total = query.count()

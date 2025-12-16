@@ -25,7 +25,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import EmbeddingPanel from '@/components/embedding/EmbeddingPanel.vue'
 import EmbeddingResults from '@/components/embedding/EmbeddingResults.vue'
-import { embeddingService } from '@/services/embeddingService'
+import embeddingService from '@/services/embeddingService'
 
 const models = ref([])
 const selectedModel = ref('')

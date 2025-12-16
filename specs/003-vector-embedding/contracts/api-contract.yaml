@@ -1,0 +1,801 @@
+openapi: 3.0.3
+info:
+  title: Vector Embedding API
+  description: |
+    API for converting text and document chunks into vector embeddings using multiple embedding models.
+    
+    **Features**:
+    - Single and batch text vectorization
+    - Automatic chunking result integration
+    - Multi-model support (BGE-M3, Qwen3, Hunyuan, Jina)
+    - Retry mechanism with exponential backoff
+    - Partial success handling for batch operations
+  version: 1.0.0
+  contact:
+    name: RAG Framework Team
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+  - url: http://dev.fit-ai.woa.com
+    description: Development environment
+
+tags:
+  - name: embedding
+    description: Vector embedding operations
+  - name: models
+    description: Model information and management
+  - name: health
+    description: Service health checks
+
+paths:
+  /embedding/single:
+    post:
+      tags: [embedding]
+      summary: Embed single text
+      description: |
+        Convert a single text string into a vector embedding.
+        
+        **Backend-only endpoint**: Not exposed in frontend UI.
+        
+        Use cases:
+        - Ad-hoc query vectorization
+        - Testing and debugging
+        - API integrations
+      operationId: embedSingleText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SingleEmbeddingRequest'
+            examples:
+              basicQuery:
+                summary: Basic query embedding
+                value:
+                  text: "人工智能是什么?"
+                  model: "qwen3-embedding-8b"
+              withCustomConfig:
+                summary: With custom retry configuration
+                value:
+                  text: "What is artificial intelligence?"
+                  model: "bge-m3"
+                  max_retries: 5
+                  timeout: 120
+      responses:
+        '200':
+          description: Successfully embedded text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleEmbeddingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /embedding/batch:
+    post:
+      tags: [embedding]
+      summary: Embed batch of texts
+      description: |
+        Convert multiple text strings into vector embeddings in a single request.
+        
+        **Backend-only endpoint**: Not exposed in frontend UI.
+        
+        **Partial success handling**: If some texts fail, successful vectors are still returned.
+        
+        Limits:
+        - Maximum 1000 texts per batch
+        - Individual text size limited by model tokenizer
+      operationId: embedBatchTexts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchEmbeddingRequest'
+            examples:
+              basicBatch:
+                summary: Small batch
+                value:
+                  texts: ["First document", "Second document", "Third document"]
+                  model: "bge-m3"
+              withSource:
+                summary: Batch with source tracking
+                value:
+                  texts: ["Doc 1", "Doc 2"]
+                  model: "qwen3-embedding-8b"
+                  result_id: "result-uuid-123"
+      responses:
+        '200':
+          description: Batch processing completed (may include partial failures)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchEmbeddingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/BatchTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /embedding/from-chunking-result:
+    post:
+      tags: [embedding]
+      summary: Embed from chunking result
+      description: |
+        Vectorize all chunks from a completed chunking result.
+        
+        **Frontend primary endpoint**: Used by unified embedding interface.
+        
+        Workflow:
+        1. Retrieve chunking result by ID
+        2. Load all chunks in sequence order
+        3. Batch embed all chunks
+        4. Preserve chunk order in vector array
+        
+        **Requirements**:
+        - Chunking result must have status = COMPLETED
+        - Result must contain at least 1 chunk
+      operationId: embedFromChunkingResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChunkingResultEmbeddingRequest'
+            examples:
+              basic:
+                summary: Basic chunking result embedding
+                value:
+                  result_id: "result-abc-123"
+                  document_id: "doc-xyz-456"
+                  model: "qwen3-embedding-8b"
+      responses:
+        '200':
+          description: Successfully embedded all chunks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchEmbeddingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Chunking result not found or not completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "CHUNKING_RESULT_NOT_FOUND"
+                  message: "Chunking result result-abc-123 not found or not completed"
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /embedding/from-document:
+    post:
+      tags: [embedding]
+      summary: Embed from document latest chunks
+      description: |
+        Vectorize chunks from a document's most recent active chunking result.
+        
+        **Frontend primary endpoint**: Used by unified embedding interface.
+        
+        Selection logic:
+        1. If `strategy_type` provided: latest result for that strategy
+        2. Otherwise: globally latest active result
+        
+        **Filters**:
+        - Only COMPLETED results
+        - Only is_active = true results
+        - Ordered by created_at descending
+      operationId: embedFromDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentEmbeddingRequest'
+            examples:
+              basic:
+                summary: Latest result from document
+                value:
+                  document_id: "doc-xyz-456"
+                  model: "bge-m3"
+              withStrategy:
+                summary: Latest semantic chunking result
+                value:
+                  document_id: "doc-xyz-456"
+                  model: "qwen3-embedding-8b"
+                  strategy_type: "SEMANTIC"
+      responses:
+        '200':
+          description: Successfully embedded document chunks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchEmbeddingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Document or chunking result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "DOCUMENT_OR_CHUNKING_RESULT_NOT_FOUND"
+                  message: "No active chunking result found for document doc-xyz-456"
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /embedding/models:
+    get:
+      tags: [models]
+      summary: List available models
+      description: |
+        Get all supported embedding models with their specifications.
+        
+        **Use cases**:
+        - Populate frontend model selector
+        - Validate model names
+        - Display model capabilities
+      operationId: listModels
+      responses:
+        '200':
+          description: List of available models
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelsListResponse'
+              example:
+                models:
+                  - name: "bge-m3"
+                    dimension: 1024
+                    description: "BGE-M3 多语言模型，支持中英文，性能优秀"
+                    provider: "bge"
+                    supports_multilingual: true
+                    max_batch_size: 1000
+                  - name: "qwen3-embedding-8b"
+                    dimension: 1536
+                    description: "通义千问 Embedding 模型，8B 参数"
+                    provider: "qwen"
+                    supports_multilingual: true
+                    max_batch_size: 1000
+                count: 4
+
+  /embedding/models/{model_name}:
+    get:
+      tags: [models]
+      summary: Get model information
+      description: Get detailed information about a specific embedding model
+      operationId: getModelInfo
+      parameters:
+        - name: model_name
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+          description: Model identifier
+      responses:
+        '200':
+          description: Model information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelInfo'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "MODEL_NOT_FOUND"
+                  message: "Model 'invalid-model' not found. Supported models: bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4"
+
+  /embedding/health:
+    get:
+      tags: [health]
+      summary: Health check
+      description: |
+        Check service health and API connectivity.
+        
+        **Status values**:
+        - `healthy`: All systems operational
+        - `degraded`: Service running but API connectivity issues
+        - `unhealthy`: Service not functioning
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy or degraded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  api_connectivity:
+                    type: boolean
+              example:
+                status: "healthy"
+                timestamp: "2025-12-15T10:30:00Z"
+                api_connectivity: true
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [unhealthy]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  api_connectivity:
+                    type: boolean
+
+components:
+  schemas:
+    SingleEmbeddingRequest:
+      type: object
+      required: [text, model]
+      properties:
+        text:
+          type: string
+          description: Text to vectorize (must contain non-whitespace)
+          minLength: 1
+          example: "人工智能是什么?"
+        model:
+          $ref: '#/components/schemas/ModelName'
+        max_retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+          description: Maximum retry attempts for failed requests
+        timeout:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 60
+          description: Request timeout in seconds
+
+    BatchEmbeddingRequest:
+      type: object
+      required: [texts, model]
+      properties:
+        texts:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 1000
+          description: Array of texts to vectorize
+          example: ["First document", "Second document"]
+        model:
+          $ref: '#/components/schemas/ModelName'
+        result_id:
+          type: string
+          format: uuid
+          description: Optional source chunking result ID for traceability
+        max_retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+        timeout:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 60
+
+    ChunkingResultEmbeddingRequest:
+      type: object
+      required: [result_id, model]
+      properties:
+        result_id:
+          type: string
+          format: uuid
+          description: Chunking result ID (must be COMPLETED status)
+        document_id:
+          type: string
+          format: uuid
+          description: Optional document ID for display purposes
+        model:
+          $ref: '#/components/schemas/ModelName'
+        max_retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+        timeout:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 60
+
+    DocumentEmbeddingRequest:
+      type: object
+      required: [document_id, model]
+      properties:
+        document_id:
+          type: string
+          format: uuid
+          description: Document ID
+        model:
+          $ref: '#/components/schemas/ModelName'
+        strategy_type:
+          type: string
+          enum: [FIXED_SIZE, SEMANTIC, RECURSIVE, MARKDOWN, HTML]
+          description: Optional filter by chunking strategy type
+        max_retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+        timeout:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 60
+
+    SingleEmbeddingResponse:
+      type: object
+      required: [request_id, status, vector, metadata, timestamp]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        vector:
+          $ref: '#/components/schemas/Vector'
+        metadata:
+          $ref: '#/components/schemas/EmbeddingMetadata'
+        timestamp:
+          type: string
+          format: date-time
+
+    BatchEmbeddingResponse:
+      type: object
+      required: [request_id, status, vectors, failures, metadata, timestamp]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        vectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/Vector'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmbeddingFailure'
+        metadata:
+          $ref: '#/components/schemas/BatchMetadata'
+        timestamp:
+          type: string
+          format: date-time
+
+    Vector:
+      type: object
+      required: [index, vector, dimension, text_hash, text_length, processing_time_ms]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: Position in source batch (0-based)
+        vector:
+          type: array
+          items:
+            type: number
+            format: float
+          description: Numerical vector representation
+          example: [0.123, -0.456, 0.789]
+        dimension:
+          type: integer
+          minimum: 1
+          description: Vector dimension (must match model)
+        text_hash:
+          type: string
+          pattern: '^sha256:[a-f0-9]{64}$'
+          description: SHA-256 hash of source text
+        text_length:
+          type: integer
+          minimum: 1
+          description: Character count of source text
+        processing_time_ms:
+          type: number
+          format: float
+          minimum: 0
+          description: Time to embed this specific text
+
+    EmbeddingFailure:
+      type: object
+      required: [index, text_preview, error_type, error_message, retry_recommended, retry_count]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: Position in batch where failure occurred
+        text_preview:
+          type: string
+          maxLength: 200
+          description: Truncated source text for debugging
+        error_type:
+          $ref: '#/components/schemas/ErrorType'
+        error_message:
+          type: string
+          description: Human-readable error description
+        retry_recommended:
+          type: boolean
+          description: Whether retry might succeed
+        retry_count:
+          type: integer
+          minimum: 0
+          description: Number of retry attempts made
+
+    EmbeddingMetadata:
+      type: object
+      required: [model, model_dimension, processing_time_ms, retry_count, rate_limit_hits, config]
+      properties:
+        model:
+          type: string
+          description: Model name used
+        model_dimension:
+          type: integer
+          description: Model's vector dimension
+        processing_time_ms:
+          type: number
+          format: float
+          description: Total time including retries
+        api_latency_ms:
+          type: number
+          format: float
+          nullable: true
+          description: Actual API call time (excluding retries)
+        retry_count:
+          type: integer
+          minimum: 0
+          description: Total retry attempts
+        rate_limit_hits:
+          type: integer
+          minimum: 0
+          description: Number of rate limit errors encountered
+        config:
+          $ref: '#/components/schemas/EmbeddingConfig'
+
+    BatchMetadata:
+      allOf:
+        - $ref: '#/components/schemas/EmbeddingMetadata'
+        - type: object
+          required: [batch_size, successful_count, failed_count, vectors_per_second]
+          properties:
+            batch_size:
+              type: integer
+              minimum: 1
+              description: Total items in batch
+            successful_count:
+              type: integer
+              minimum: 0
+              description: Number of successfully embedded items
+            failed_count:
+              type: integer
+              minimum: 0
+              description: Number of failed items
+            vectors_per_second:
+              type: number
+              format: float
+              minimum: 0
+              description: Throughput metric
+
+    EmbeddingConfig:
+      type: object
+      required: [api_endpoint, max_retries, timeout_seconds]
+      properties:
+        api_endpoint:
+          type: string
+          format: uri
+          description: Embedding API base URL
+        max_retries:
+          type: integer
+          minimum: 0
+        timeout_seconds:
+          type: integer
+          minimum: 1
+        exponential_backoff:
+          type: boolean
+        initial_delay_seconds:
+          type: number
+          format: float
+        max_delay_seconds:
+          type: number
+          format: float
+
+    ModelInfo:
+      type: object
+      required: [name, dimension, description, provider, supports_multilingual, max_batch_size]
+      properties:
+        name:
+          $ref: '#/components/schemas/ModelName'
+        dimension:
+          type: integer
+          enum: [768, 1024, 1536]
+          description: Vector dimension
+        description:
+          type: string
+          description: Human-readable model description
+        provider:
+          type: string
+          description: Provider name
+        supports_multilingual:
+          type: boolean
+          description: Whether model supports non-English text
+        max_batch_size:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: Maximum documents per batch
+
+    ModelsListResponse:
+      type: object
+      required: [models, count]
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelInfo'
+        count:
+          type: integer
+          description: Total number of models
+
+    ModelName:
+      type: string
+      enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+      description: Supported embedding model identifier
+
+    ResponseStatus:
+      type: string
+      enum: [success, partial_success, failed]
+      description: |
+        Overall status of the embedding operation:
+        - `success`: All items succeeded
+        - `partial_success`: Some items failed
+        - `failed`: All items failed
+
+    ErrorType:
+      type: string
+      enum:
+        - INVALID_TEXT_ERROR
+        - RATE_LIMIT_ERROR
+        - API_TIMEOUT_ERROR
+        - NETWORK_ERROR
+        - AUTHENTICATION_ERROR
+        - DIMENSION_MISMATCH_ERROR
+        - UNKNOWN_ERROR
+      description: Categorized error type
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              type: object
+              description: Additional error context (optional)
+              additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "INVALID_TEXT_ERROR"
+              message: "Text must contain non-whitespace characters"
+
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "AUTHENTICATION_ERROR"
+              message: "Invalid API key. Please check your credentials."
+
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "RATE_LIMIT_ERROR"
+              message: "Rate limit exceeded. Please retry after 30 seconds."
+              details:
+                retry_after_seconds: 30
+
+    BatchTooLarge:
+      description: Batch size exceeds limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "BATCH_SIZE_LIMIT_EXCEEDED"
+              message: "Batch size 1500 exceeds maximum 1000"
+              details:
+                batch_size: 1500
+                max_batch_size: 1000
+                suggested_batches: 2
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "INTERNAL_ERROR"
+              message: "An unexpected error occurred. Please try again later."
+              details:
+                request_id: "550e8400-e29b-41d4-a716-446655440000"
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication (set via EMBEDDING_API_KEY environment variable)
+
+security:
+  - ApiKeyAuth: []

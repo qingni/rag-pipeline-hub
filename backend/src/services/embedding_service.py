@@ -38,24 +38,16 @@ EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
     },
     "qwen3-embedding-8b": {
         "name": "qwen3-embedding-8b",
-        "dimension": 1536,
-        "description": "通义千问 Embedding 模型，8B 参数",
+        "dimension": 4096,  # 实际 API 返回 4096 维
+        "description": "通义千问 Embedding 模型，8B 参数，高质量向量",
         "provider": "qwen",
-        "supports_multilingual": True,
-        "max_batch_size": 1000,
-    },
-    "hunyuan-embedding": {
-        "name": "hunyuan-embedding",
-        "dimension": 1024,
-        "description": "腾讯混元 Embedding 模型",
-        "provider": "hunyuan",
         "supports_multilingual": True,
         "max_batch_size": 1000,
     },
     "jina-embeddings-v4": {
         "name": "jina-embeddings-v4",
-        "dimension": 768,
-        "description": "Jina AI Embeddings v4，多语言支持",
+        "dimension": 2048,  # 实际 API 返回 2048 维
+        "description": "Jina AI Embeddings v4，多语言支持，语义理解强",
         "provider": "jina",
         "supports_multilingual": True,
         "max_batch_size": 1000,
@@ -494,6 +486,111 @@ class EmbeddingService:
     @staticmethod
     def _hash_text(text: str) -> str:
         return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def embed_chunking_result(
+        self, 
+        result_id: str, 
+        db_session, 
+        request_id: Optional[str] = None
+    ) -> BatchEmbeddingResult:
+        """
+        Vectorize all chunks from a chunking result.
+        
+        Args:
+            result_id: Chunking result ID
+            db_session: Database session
+            request_id: Optional request ID for tracking
+            
+        Returns:
+            BatchEmbeddingResult with vectors for all chunks
+            
+        Raises:
+            ValueError: If result not found
+            InvalidTextError: If no valid chunks found
+        """
+        from ..models.chunking_result import ChunkingResult, ResultStatus
+        from ..models.chunk import Chunk
+        
+        # Query chunking result
+        result = db_session.query(ChunkingResult).filter(
+            ChunkingResult.result_id == result_id,
+            ChunkingResult.status == ResultStatus.COMPLETED
+        ).first()
+        
+        if not result:
+            raise ValueError(f"Chunking result {result_id} not found or not completed")
+        
+        # Load chunks from database
+        chunks = db_session.query(Chunk).filter(
+            Chunk.result_id == result_id
+        ).order_by(Chunk.sequence_number).all()
+        
+        if not chunks:
+            raise InvalidTextError(f"No chunks found for result {result_id}")
+        
+        # Extract text content from chunks
+        texts = [chunk.content for chunk in chunks]
+        
+        # Use existing batch embedding functionality
+        batch_result = self.embed_documents(texts, request_id=request_id)
+        
+        return batch_result
+    
+    def embed_document_latest_chunks(
+        self,
+        document_id: str,
+        db_session,
+        strategy_type: Optional[str] = None,
+        request_id: Optional[str] = None
+    ) -> BatchEmbeddingResult:
+        """
+        Vectorize chunks from a document's latest chunking result.
+        
+        Args:
+            document_id: Document ID
+            db_session: Database session
+            strategy_type: Optional filter by strategy type
+            request_id: Optional request ID for tracking
+            
+        Returns:
+            BatchEmbeddingResult with vectors for all chunks
+            
+        Raises:
+            ValueError: If no chunking result found
+            InvalidTextError: If no valid chunks found
+        """
+        from ..models.chunking_result import ChunkingResult, ResultStatus
+        from ..models.chunking_task import ChunkingTask, StrategyType
+        
+        # Build query for latest active result
+        query = db_session.query(ChunkingResult).join(
+            ChunkingTask,
+            ChunkingResult.task_id == ChunkingTask.task_id
+        ).filter(
+            ChunkingTask.source_document_id == document_id,
+            ChunkingResult.status == ResultStatus.COMPLETED,
+            ChunkingResult.is_active == True
+        )
+        
+        # Apply strategy filter if provided
+        if strategy_type:
+            try:
+                strategy_enum = StrategyType[strategy_type.upper()]
+                query = query.filter(ChunkingTask.chunking_strategy == strategy_enum)
+            except KeyError:
+                raise ValueError(f"Invalid strategy type: {strategy_type}")
+        
+        # Get the most recent result
+        result = query.order_by(ChunkingResult.created_at.desc()).first()
+        
+        if not result:
+            raise ValueError(
+                f"No active chunking result found for document {document_id}"
+                + (f" with strategy {strategy_type}" if strategy_type else "")
+            )
+        
+        # Use chunking result embedding
+        return self.embed_chunking_result(result.result_id, db_session, request_id)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke test

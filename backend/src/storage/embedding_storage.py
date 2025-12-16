@@ -162,13 +162,17 @@ class EmbeddingStorage:
     
     def save_batch_result(
         self,
-        response: BatchEmbeddingResponse
+        response: BatchEmbeddingResponse,
+        source_result_id: Optional[str] = None,
+        source_document_id: Optional[str] = None
     ) -> Path:
         """
         Save batch embedding result.
         
         Args:
             response: Batch embedding response
+            source_result_id: Optional chunking result ID this embedding is based on
+            source_document_id: Optional document ID this embedding is based on
             
         Returns:
             Path to saved file
@@ -225,6 +229,14 @@ class EmbeddingStorage:
                 for f in response.failures
             ]
         }
+        
+        # Add source information if provided
+        if source_result_id or source_document_id:
+            data["source"] = {}
+            if source_result_id:
+                data["source"]["chunking_result_id"] = source_result_id
+            if source_document_id:
+                data["source"]["document_id"] = source_document_id
         
         self._atomic_write(filepath, data)
         return filepath

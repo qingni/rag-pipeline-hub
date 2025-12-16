@@ -49,7 +49,7 @@ class SingleEmbeddingRequest(BaseModel):
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         """Validate model name format."""
-        valid_models = ["qwen3-embedding-8b", "bge-m3", "hunyuan-embedding", "jina-embeddings-v4"]
+        valid_models = ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]
         if v not in valid_models:
             raise ValueError(
                 f"Model '{v}' not found. Supported models: {', '.join(valid_models)}"
@@ -61,6 +61,7 @@ class BatchEmbeddingRequest(BaseModel):
     """Request model for batch text vectorization."""
     texts: List[str] = Field(..., min_length=1, max_length=1000, description="Texts to vectorize")
     model: str = Field(..., description="Embedding model name")
+    result_id: Optional[str] = Field(None, description="Optional chunking result ID for tracking")
     max_retries: int = Field(default=3, ge=0, le=10, description="Maximum retry attempts")
     timeout: int = Field(default=60, ge=1, le=300, description="Request timeout in seconds")
     
@@ -79,7 +80,46 @@ class BatchEmbeddingRequest(BaseModel):
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         """Validate model name format."""
-        valid_models = ["qwen3-embedding-8b", "bge-m3", "hunyuan-embedding", "jina-embeddings-v4"]
+        valid_models = ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]
+        if v not in valid_models:
+            raise ValueError(
+                f"Model '{v}' not found. Supported models: {', '.join(valid_models)}"
+            )
+        return v
+
+
+class ChunkingResultEmbeddingRequest(BaseModel):
+    """Request model for embedding based on chunking result."""
+    result_id: str = Field(..., description="Chunking result ID to vectorize")
+    model: str = Field(..., description="Embedding model name")
+    max_retries: int = Field(default=3, ge=0, le=10, description="Maximum retry attempts")
+    timeout: int = Field(default=60, ge=1, le=300, description="Request timeout in seconds")
+    
+    @field_validator('model')
+    @classmethod
+    def validate_model_name(cls, v: str) -> str:
+        """Validate model name format."""
+        valid_models = ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]
+        if v not in valid_models:
+            raise ValueError(
+                f"Model '{v}' not found. Supported models: {', '.join(valid_models)}"
+            )
+        return v
+
+
+class DocumentEmbeddingRequest(BaseModel):
+    """Request model for embedding a document's latest chunking result."""
+    document_id: str = Field(..., description="Document ID to vectorize")
+    model: str = Field(..., description="Embedding model name")
+    strategy_type: Optional[str] = Field(None, description="Filter by chunking strategy type")
+    max_retries: int = Field(default=3, ge=0, le=10, description="Maximum retry attempts")
+    timeout: int = Field(default=60, ge=1, le=300, description="Request timeout in seconds")
+    
+    @field_validator('model')
+    @classmethod
+    def validate_model_name(cls, v: str) -> str:
+        """Validate model name format."""
+        valid_models = ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]
         if v not in valid_models:
             raise ValueError(
                 f"Model '{v}' not found. Supported models: {', '.join(valid_models)}"
@@ -101,8 +141,14 @@ class Vector(BaseModel):
     @classmethod
     def validate_dimension(cls, v: int) -> int:
         """Validate dimension is one of supported sizes."""
-        if v not in [768, 1024, 1536]:
-            raise ValueError(f"Dimension {v} not supported. Must be 768, 1024, or 1536")
+        # 支持常见的嵌入向量维度
+        # 768: BERT/Jina base models
+        # 1024: BGE-M3, Hunyuan
+        # 1536: OpenAI ada-002
+        # 2048: Jina v4
+        # 4096: Qwen3 8B
+        if v not in [768, 1024, 1536, 2048, 4096]:
+            raise ValueError(f"Dimension {v} not supported. Must be 768, 1024, 1536, 2048, or 4096")
         return v
     
     @field_validator('vector')

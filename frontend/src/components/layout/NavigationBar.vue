@@ -56,7 +56,7 @@ const navItems = [
   { path: '/documents/load', label: '文档加载', iconComponent: FileText },
   { path: '/documents/parse', label: '文档解析', iconComponent: FileCode },
   { path: '/documents/chunk', label: '文档分块', iconComponent: Scissors },
-  { path: '/embeddings', label: '向量嵌入', iconComponent: Hash },
+  { path: '/documents/embed', label: '文档向量化', iconComponent: Hash },
   { path: '/index', label: '向量索引', iconComponent: Database },
   { path: '/search', label: '搜索查询', iconComponent: Search },
   { path: '/generation', label: '文本生成', iconComponent: Sparkles }

@@ -52,10 +52,16 @@ const features = [
     description: '将文档分割成适合处理的块，支持多种分块策略'
   },
   {
+    path: '/documents/embed',
+    icon: '🧬',
+    title: '文档向量化',
+    description: '从分块结果生成向量表示，支持多种向量模型'
+  },
+  {
     path: '/embeddings',
     icon: '🔢',
-    title: '向量嵌入',
-    description: '使用AI模型生成文本向量表示'
+    title: '文本向量化',
+    description: '单文本和批量文本向量化（开发测试）'
   },
   {
     path: '/index',

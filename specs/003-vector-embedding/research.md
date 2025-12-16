@@ -1,398 +1,406 @@
 # Research: Vector Embedding Module
 
+**Date**: 2025-12-15  
 **Feature**: 003-vector-embedding  
-**Date**: 2025-12-10  
-**Phase**: 0 - Research & Decision Making
-
-## Overview
-
-This document consolidates research findings and technical decisions for the Vector Embedding Module implementation. All unknowns from Technical Context have been resolved through best practices analysis and technology evaluation.
+**Purpose**: Technical research to resolve unknowns and validate design decisions
 
 ---
 
-## 1. Exponential Backoff Strategy for Rate Limiting
+## Research Areas
 
-### Decision
-Implement exponential backoff with jitter using the following parameters:
-- **Initial delay**: 1 second
-- **Max delay**: 32 seconds
-- **Backoff multiplier**: 2x
-- **Jitter**: ±25% randomization
-- **Max retries**: 3 attempts (from constitution)
-- **Timeout**: 60 seconds total (from constitution)
+### 1. Frontend Document Filtering Strategy
 
-### Rationale
-- **Industry standard**: Used by AWS SDK, OpenAI Python client, Google Cloud libraries
-- **Prevents thundering herd**: Jitter spreads retry attempts across time
-- **Respects rate limits**: Exponential growth gives API time to recover
-- **Fast recovery**: 1s initial delay minimizes latency for transient errors
-- **Bounded wait**: 32s max delay prevents indefinite blocking
+**Question**: How should the frontend efficiently filter documents to show only those with active chunking results?
 
-### Implementation Approach
+**Research Findings**:
+
+**Option A: Client-side filtering after fetching all documents**
+- Pros: Simple implementation, no backend changes
+- Cons: Inefficient for large document lists, unnecessary data transfer, slow page load
+
+**Option B: Backend API filter parameter** ⭐ **RECOMMENDED**
+- Pros: Efficient data transfer, faster page load, scalable
+- Cons: Requires API modification
+- Implementation: Add `?has_chunking_result=true` query parameter to `/documents` endpoint
+
+**Option C: New dedicated endpoint `/documents/with-chunking-results`**
+- Pros: Clean separation of concerns
+- Cons: API proliferation, duplicate logic
+
+**Decision**: **Option B - Backend API filter parameter**
+
+**Rationale**: 
+1. Minimal API surface area expansion
+2. Reuses existing document listing endpoint
+3. Query parameter approach is RESTful and extensible
+4. Enables efficient database query: `JOIN chunking_results WHERE status='completed' AND is_active=true`
+
+**Implementation Details**:
 ```python
-import time
-import random
-
-def exponential_backoff_retry(func, max_retries=3, initial_delay=1, max_delay=32):
-    for attempt in range(max_retries):
-        try:
-            return func()
-        except RateLimitError:
-            if attempt == max_retries - 1:
-                raise
-            delay = min(initial_delay * (2 ** attempt), max_delay)
-            jitter = delay * random.uniform(-0.25, 0.25)
-            time.sleep(delay + jitter)
+# backend/src/api/documents.py
+@router.get("/documents")
+async def list_documents(
+    has_chunking_result: Optional[bool] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(Document)
+    if has_chunking_result:
+        query = query.join(ChunkingResult).filter(
+            ChunkingResult.status == ResultStatus.COMPLETED,
+            ChunkingResult.is_active == True
+        ).distinct()
+    return query.all()
 ```
 
-### Alternatives Considered
-- **Fixed delay**: Rejected - doesn't adapt to sustained load
-- **Linear backoff**: Rejected - too slow for high-frequency rate limits
-- **No jitter**: Rejected - causes synchronized retries (thundering herd)
+---
 
-### References
-- AWS SDK Retry Strategy: https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
-- OpenAI Python client implementation: https://github.com/openai/openai-python
-- Google Cloud Best Practices: https://cloud.google.com/apis/design/errors
+### 2. Model Information Display Pattern
+
+**Question**: How should the frontend present model information in the selector dropdown and detail panel?
+
+**Research Findings**:
+
+**Best Practice Analysis**:
+- **GitHub Copilot**: Shows model name + capability tags (e.g., "GPT-4 · Code · Latest")
+- **OpenAI Playground**: Dropdown shows name + version, detailed panel below with all specs
+- **Anthropic Console**: Two-stage display: compact dropdown, expanded info on selection
+
+**Pattern Selection**: **Two-stage progressive disclosure** ⭐
+
+**Decision**: 
+1. **Dropdown**: Compact format `"ModelName · Dimension维 · BriefDescription"`
+   - Example: `"BGE-M3 · 1024维 · 多语言支持"`
+2. **Detail Panel**: Expands below selector when model selected, shows:
+   - Full model name
+   - Dimension (with explanation: "每个向量包含1024个浮点数")
+   - Provider information
+   - Multilingual support status
+   - Max batch size
+   - Use case recommendations
+
+**Rationale**:
+- Dropdown readability: 3 key decision factors visible at glance
+- Dimension as critical decision factor for storage/indexing planning
+- Progressive disclosure reduces cognitive load
+- Detail panel provides confidence without cluttering selection UI
+
+**Implementation**:
+```vue
+<!-- ModelSelector.vue -->
+<t-select v-model="selectedModel" @change="onModelChange">
+  <t-option 
+    v-for="model in models" 
+    :key="model.name"
+    :value="model.name"
+    :label="`${model.name} · ${model.dimension}维 · ${model.description}`"
+  />
+</t-select>
+
+<div v-if="selectedModel" class="model-details">
+  <t-descriptions :data="modelDetailsData" />
+</div>
+```
 
 ---
 
-## 2. Batch Processing Partial Failure Handling
+### 3. Chunking Result Selection Logic
 
-### Decision
-Return structured partial success response with clear failure identification:
+**Question**: When a document has multiple chunking results (different strategies or versions), which should the system use?
+
+**Research Findings**:
+
+**Current Schema Analysis** (from `chunking_result.py`):
+- `ChunkingResult` has fields: `result_id`, `task_id`, `status`, `is_active`, `created_at`
+- `ChunkingTask` links to `source_document_id` and `chunking_strategy`
+- Multiple results can exist per document with different strategies
+
+**Industry Patterns**:
+1. **Explicit version selection** (Git, Confluence): User chooses specific version
+2. **Latest by default** (Google Docs, Notion): Always uses most recent, optional history
+3. **Strategy-based routing** (AWS Lambda): Different versions for different use cases
+
+**Decision**: **Latest active result with optional strategy filter** ⭐
+
+**Query Logic**:
+```python
+# Priority 1: If strategy_type specified, use latest for that strategy
+# Priority 2: Otherwise, use globally latest active result
+query = db.query(ChunkingResult).join(ChunkingTask).filter(
+    ChunkingTask.source_document_id == document_id,
+    ChunkingResult.status == ResultStatus.COMPLETED,
+    ChunkingResult.is_active == True
+)
+if strategy_type:
+    query = query.filter(ChunkingTask.chunking_strategy == strategy_type)
+result = query.order_by(ChunkingResult.created_at.desc()).first()
+```
+
+**Rationale**:
+1. **Simplicity**: One-level selection (document only) in UI
+2. **Recency bias**: Latest result typically reflects user's current intent
+3. **`is_active` flag**: Allows manual deactivation of problematic results
+4. **Strategy override**: Backend API supports strategy filter for advanced use cases (not exposed in frontend initially)
+
+---
+
+### 4. Error Recovery Best Practices for Embedding APIs
+
+**Question**: What retry strategies and error handling patterns are most effective for external embedding APIs?
+
+**Research Findings**:
+
+**OpenAI API Error Types** (reference for OpenAI-compatible APIs):
+1. **Rate Limiting (429)**: `Retry-After` header, exponential backoff
+2. **Timeout (504)**: Network congestion, retry immediately acceptable
+3. **Server Error (500/502/503)**: Transient failures, exponential backoff
+4. **Client Error (400/401)**: Do not retry, user action required
+
+**Industry Best Practices**:
+
+**AWS SDK Retry Strategy**:
+- Max 3 attempts
+- Exponential backoff: `delay = base * (2 ^ attempt) + jitter`
+- Jitter: ±25% randomization to prevent thundering herd
+
+**Google Cloud Retry Guidelines**:
+- Timeout: 60s default
+- Backoff multiplier: 2x
+- Max delay cap: 32s
+
+**Implemented Pattern** (already in `embedding_service.py`): ⭐
+```python
+ExponentialBackoffRetry(
+    max_retries=3,
+    initial_delay=1.0,  # 1s
+    max_delay=32.0,     # 32s cap
+    jitter=0.25         # ±25%
+)
+```
+
+**Validation**: Aligns with industry standards. No changes needed.
+
+**Additional Pattern: Circuit Breaker** (Future Enhancement):
+- After 5 consecutive failures, pause requests for 60s
+- Not critical for MVP, document as future optimization
+
+---
+
+### 5. Embedding Result Storage Format
+
+**Question**: What should the JSON structure for persisted embedding results look like?
+
+**Research Findings**:
+
+**Requirements Analysis**:
+1. **Source traceability**: Link back to chunking result or document
+2. **Reproducibility**: Capture all parameters (model, timestamp, config)
+3. **Downstream consumption**: Vector database ingestion needs specific format
+4. **Debugging**: Include metrics (latency, retry count, failures)
+
+**Proposed Schema**:
 ```json
 {
-  "status": "partial_success",
-  "total": 100,
-  "successful": 98,
-  "failed": 2,
-  "vectors": [...],  // 98 successful vectors
-  "failures": [
-    {
-      "index": 45,
-      "text_preview": "First 50 chars...",
-      "error_type": "InvalidTextError",
-      "error_message": "Text contains only whitespace",
-      "retry_recommended": false
-    },
-    {
-      "index": 73,
-      "text_preview": "First 50 chars...",
-      "error_type": "APITimeoutError",
-      "error_message": "Request timed out after 5s",
-      "retry_recommended": true
-    }
-  ]
-}
-```
-
-### Rationale
-- **Maximizes throughput**: Processes 98% of valid data instead of failing entire batch
-- **Clear diagnostics**: Users can identify and fix specific failed items
-- **Retry guidance**: `retry_recommended` flag helps automation decisions
-- **Preserves order**: Index mapping allows reconstruction of original batch order
-- **Production pattern**: Matches Stripe API, AWS Batch, Google Cloud Batch behavior
-
-### Implementation Approach
-- Process all documents sequentially in batch
-- Catch individual document errors without interrupting batch
-- Accumulate failures with full context (index, error, text preview)
-- Return combined result with success/failure counts
-
-### Alternatives Considered
-- **Fail entire batch**: Rejected - wastes computation, poor UX for large batches
-- **Silent skipping**: Rejected - users unaware of failures, data loss risk
-- **Async retry queue**: Rejected - adds complexity, out of scope for MVP
-
----
-
-## 3. Operational Logging Design
-
-### Decision
-Implement structured JSON logging with the following metrics:
-- **Request metrics**: request_id, timestamp, duration_ms, model_name
-- **Batch metrics**: batch_size, successful_count, failed_count
-- **Performance metrics**: api_latency_ms, processing_time_ms, vectors_per_second
-- **Error metrics**: error_type, error_message, retry_count, retry_successful
-- **Rate limit metrics**: rate_limit_hit, backoff_delay_ms, total_retry_time_ms
-
-**Log levels**:
-- INFO: Successful requests, batch summaries
-- WARNING: Retries, partial failures, rate limits
-- ERROR: Complete failures, validation errors, API errors
-
-### Rationale
-- **Structured logging**: JSON format enables log aggregation tools (ELK, Splunk, CloudWatch)
-- **Performance monitoring**: Latency metrics enable SLA tracking and alerting
-- **Troubleshooting**: Request IDs enable end-to-end tracing
-- **Capacity planning**: Throughput metrics inform scaling decisions
-- **No sensitive data**: Text content excluded (privacy & cost considerations)
-
-### Implementation Approach
-```python
-import logging
-import json
-from datetime import datetime
-
-logger = logging.getLogger("embedding_service")
-
-def log_embedding_request(request_id, model, duration, batch_size, success_count, failed_count):
-    logger.info(json.dumps({
-        "event": "embedding_request",
-        "request_id": request_id,
-        "timestamp": datetime.utcnow().isoformat(),
-        "model": model,
-        "duration_ms": duration,
-        "batch_size": batch_size,
-        "successful": success_count,
-        "failed": failed_count,
-        "success_rate": success_count / batch_size if batch_size > 0 else 0
-    }))
-```
-
-### Alternatives Considered
-- **Verbose logging (log text content)**: Rejected - privacy concerns, log bloat, cost
-- **Minimal logging (errors only)**: Rejected - insufficient for performance monitoring
-- **Metrics-only (no logs)**: Rejected - loses troubleshooting context
-
-### References
-- OpenTelemetry Logging Standard: https://opentelemetry.io/docs/specs/otel/logs/
-- Twelve-Factor App Logging: https://12factor.net/logs
-- Structured Logging Best Practices: https://www.datadoghq.com/blog/structured-logging/
-
----
-
-## 4. Vector Dimension Validation
-
-### Decision
-Implement strict dimension validation with immediate failure:
-```python
-def validate_vector_dimensions(vector, expected_dim, model_name):
-    actual_dim = len(vector)
-    if actual_dim != expected_dim:
-        raise VectorDimensionMismatchError(
-            f"Model '{model_name}' returned vector with {actual_dim} dimensions, "
-            f"expected {expected_dim}. This may indicate API version mismatch or "
-            f"model misconfiguration. Please verify model settings."
-        )
-    return vector
-```
-
-### Rationale
-- **Data integrity**: Wrong dimensions corrupt vector database, break search
-- **Fail fast**: Immediate detection prevents silent data corruption
-- **Clear diagnostics**: Error message includes expected vs actual for debugging
-- **API contract enforcement**: Ensures API provider compliance
-
-### Implementation Approach
-- Validate every vector immediately after API response
-- Include model name and dimensions in error context
-- Fail entire request if any vector has wrong dimensions
-- Log dimension mismatch events for monitoring
-
-### Alternatives Considered
-- **Padding/truncation**: Rejected - destroys semantic meaning, unpredictable search behavior
-- **Warning only**: Rejected - silent data corruption, difficult to detect later
-- **Skip invalid vectors**: Rejected - violates user expectations, data loss
-
----
-
-## 5. Batch Size Limit Enforcement
-
-### Decision
-Maximum batch size: **1000 documents per request**
-
-**Validation approach**:
-- Pre-request validation: Reject batches >1000 before API call
-- Clear error message: "Batch size {size} exceeds maximum limit of 1000. Please split into smaller batches."
-- Suggested chunking: Error response includes guidance on splitting batches
-
-### Rationale
-- **Memory safety**: Prevents OOM errors with large batches
-- **API reliability**: Most embedding APIs have similar limits (OpenAI: 2048, Cohere: 96, HuggingFace: varies)
-- **Timeout prevention**: 1000 docs @ 30s = 33ms/doc, reasonable for API round-trip
-- **User control**: Forces explicit chunking, prevents accidental large requests
-
-### Implementation Approach
-```python
-MAX_BATCH_SIZE = 1000
-
-def validate_batch_size(texts):
-    if len(texts) > MAX_BATCH_SIZE:
-        raise BatchSizeLimitError(
-            f"Batch size {len(texts)} exceeds maximum limit of {MAX_BATCH_SIZE}. "
-            f"Please split your request into {(len(texts) + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE} batches."
-        )
-```
-
-### Alternatives Considered
-- **Unlimited batches**: Rejected - OOM risk, timeout issues
-- **Auto-chunking**: Rejected - hides behavior, complicates error handling
-- **Lower limit (100)**: Rejected - too restrictive, excessive API calls
-
----
-
-## 6. JSON Result Persistence Format
-
-### Decision
-Per-request JSON file with naming: `embedding_{request_id}_{timestamp}.json`
-
-**Structure**:
-```json
-{
-  "metadata": {
-    "request_id": "uuid-v4",
-    "timestamp": "2025-12-10T10:30:45.123Z",
-    "model": "qwen3-embedding-8b",
-    "model_dimension": 1536,
-    "batch_size": 100,
-    "successful_count": 98,
-    "failed_count": 2,
-    "processing_time_ms": 2847
+  "request_id": "uuid-v4",
+  "timestamp": "2025-12-15T10:30:00Z",
+  "status": "success|partial_success|failed",
+  "source": {
+    "type": "chunking_result|document",
+    "document_id": "doc-uuid",
+    "result_id": "result-uuid",  // if from chunking result
+    "document_name": "example.pdf"
+  },
+  "model": {
+    "name": "qwen3-embedding-8b",
+    "dimension": 1536,
+    "provider": "qwen"
   },
   "vectors": [
     {
       "index": 0,
-      "text_hash": "sha256-hash",
-      "text_length": 245,
-      "vector": [0.123, -0.456, ...],
-      "dimension": 1536
+      "vector": [0.123, -0.456, ...],  // 1536 floats
+      "text_hash": "sha256:abc123...",
+      "text_length": 250,
+      "processing_time_ms": 45.2
     }
   ],
   "failures": [
     {
-      "index": 45,
-      "error_type": "InvalidTextError",
-      "error_message": "Text contains only whitespace"
+      "index": 5,
+      "error_type": "RATE_LIMIT_ERROR",
+      "error_message": "Rate limit exceeded",
+      "retry_count": 3
     }
   ],
-  "config": {
-    "api_endpoint": "http://dev.fit-ai.woa.com/api/llmproxy",
-    "max_retries": 3,
-    "timeout_seconds": 60
+  "metadata": {
+    "batch_size": 50,
+    "successful_count": 49,
+    "failed_count": 1,
+    "total_processing_time_ms": 2345.6,
+    "retry_count": 8,
+    "rate_limit_hits": 2,
+    "config": {
+      "api_endpoint": "http://dev.fit-ai.woa.com/api/llmproxy",
+      "max_retries": 3,
+      "timeout_seconds": 60
+    }
   }
 }
 ```
 
-### Rationale
-- **Constitution compliance**: Meets JSON persistence requirement
-- **Traceability**: Request ID enables linking to logs and downstream processing
-- **Reproducibility**: Config section allows exact reproduction
-- **Text privacy**: Store hash instead of full text (unless explicitly enabled)
-- **Metadata richness**: Supports analytics and debugging
+**Decision**: Adopt schema above with source traceability section ⭐
 
-### Implementation Approach
-- Write JSON after successful vectorization
-- Atomic write (tmp file + rename) prevents partial files
-- Directory structure: `results/embedding/YYYY-MM-DD/`
-- Optional compression for large batches
+**Rationale**:
+1. **`source` section**: Enables tracing back to original document and chunking parameters
+2. **Vector array**: Preserves chunk order (critical for reassembly)
+3. **`text_hash`**: Enables deduplication and verification
+4. **Metrics**: Supports operational monitoring and SLA validation
+5. **Failure tracking**: Enables partial success analysis
 
-### Alternatives Considered
-- **One file per vector**: Rejected - excessive file count, poor performance
-- **Append to single file**: Rejected - concurrent write issues, large file management
-- **Database only**: Rejected - violates constitution requirement
-
----
-
-## 7. Error Classification & Recovery Strategy
-
-### Decision
-Three-tier error classification for recovery decisions:
-
-**Tier 1 - Retryable (Auto-retry with backoff)**:
-- `RateLimitError`: API rate limits
-- `APITimeoutError`: Request timeouts
-- `NetworkError`: Connection failures
-- `ServiceUnavailableError`: 503 responses
-
-**Tier 2 - Non-retryable (Fail immediately)**:
-- `AuthenticationError`: Invalid API key
-- `ModelNotFoundError`: Unsupported model
-- `InvalidTextError`: Empty or malformed text
-- `BatchSizeLimitError`: Exceeds 1000 docs
-- `VectorDimensionMismatchError`: Wrong dimensions
-
-**Tier 3 - Partial retry (Document-level)**:
-- `SingleDocumentError`: Individual text issues in batch
-- Continue processing remaining documents
-
-### Rationale
-- **Efficiency**: Don't retry permanent failures
-- **Reliability**: Automatically recover from transient errors
-- **User experience**: Clear distinction between fixable and permanent errors
-- **Cost optimization**: Avoid wasted API calls
-
-### Implementation Approach
-```python
-RETRYABLE_ERRORS = {RateLimitError, APITimeoutError, NetworkError, ServiceUnavailableError}
-
-def is_retryable(error):
-    return type(error) in RETRYABLE_ERRORS
-
-def handle_embedding_error(error, attempt, max_retries):
-    if is_retryable(error) and attempt < max_retries:
-        return "retry"
-    else:
-        return "fail"
+**File Naming Convention** (per Constitution):
+```
+{document_name}_{timestamp}.json
+example: research_paper_20251215_103045.json
 ```
 
 ---
 
-## 8. LangChain Integration Best Practices
+### 6. Frontend State Management for Embedding Workflow
 
-### Decision
-Use LangChain's `OpenAIEmbeddings` class with custom retry logic wrapper:
-- **Preserve interface**: Maintain compatibility with LangChain ecosystem
-- **Override retry**: Implement custom exponential backoff (LangChain's is simpler)
-- **Add logging**: Inject operational metrics at wrapper level
-- **Maintain testability**: Wrapper enables mocking for tests
+**Question**: How should Pinia store structure handle the embedding workflow state?
 
-### Rationale
-- **Ecosystem compatibility**: Works with LangChain vector stores, chains
-- **OpenAI protocol**: Supports all OpenAI-compatible embedding APIs
-- **Proven library**: Battle-tested, well-documented, active maintenance
-- **Extensibility**: Easy to swap providers or add custom logic
+**Research Findings**:
 
-### Implementation Approach
-```python
-from langchain_openai import OpenAIEmbeddings
+**Workflow State Analysis**:
+1. **Selection State**: Current document, selected model
+2. **Processing State**: Loading, progress, errors
+3. **Results State**: Vector data, metadata, failures
+4. **History State**: Past embeddings for comparison
 
-class EnhancedEmbeddingService:
-    def __init__(self, model, api_key, base_url):
-        self._embeddings = OpenAIEmbeddings(
-            model=model,
-            openai_api_key=api_key,
-            openai_api_base=base_url,
-            max_retries=0  # Disable LangChain retries, use our own
-        )
-        self._retry_handler = ExponentialBackoffRetry()
-        self._logger = EmbeddingLogger()
+**Pinia Best Practices** (Vue 3 ecosystem):
+- **Normalized State**: Store entities by ID in maps
+- **Computed Properties**: Derive filtered/sorted views
+- **Actions Return Promises**: Enable async/await in components
+- **Optimistic Updates**: Update UI immediately, rollback on error
+
+**Proposed Store Structure**:
+```javascript
+// stores/embedding.js
+export const useEmbeddingStore = defineStore('embedding', {
+  state: () => ({
+    // Selection
+    selectedDocumentId: null,
+    selectedModel: null,
     
-    def embed_query(self, text):
-        return self._retry_handler.execute(
-            lambda: self._embeddings.embed_query(text)
-        )
+    // Processing
+    isProcessing: false,
+    progress: 0, // 0-100
+    currentRequestId: null,
+    
+    // Results (normalized)
+    embeddingResults: {}, // { requestId: result }
+    currentResultId: null,
+    
+    // Documents (cached for filtering)
+    documentsWithChunking: [], // { id, name, chunkingStatus, chunkCount }
+    
+    // Models (cached from API)
+    availableModels: [],
+    
+    // Error state
+    error: null
+  }),
+  
+  getters: {
+    currentResult: (state) => 
+      state.embeddingResults[state.currentResultId],
+    
+    selectedDocument: (state) => 
+      state.documentsWithChunking.find(d => d.id === state.selectedDocumentId),
+    
+    canStartEmbedding: (state) => 
+      state.selectedDocumentId && state.selectedModel && !state.isProcessing
+  },
+  
+  actions: {
+    async fetchDocumentsWithChunking() {
+      const docs = await embeddingService.getDocumentsWithChunking()
+      this.documentsWithChunking = docs
+    },
+    
+    async startEmbedding() {
+      this.isProcessing = true
+      this.error = null
+      try {
+        const result = await embeddingService.embedDocument({
+          documentId: this.selectedDocumentId,
+          model: this.selectedModel
+        })
+        this.embeddingResults[result.request_id] = result
+        this.currentResultId = result.request_id
+      } catch (err) {
+        this.error = err.message
+      } finally {
+        this.isProcessing = false
+      }
+    }
+  }
+})
 ```
 
-### Alternatives Considered
-- **Direct OpenAI SDK**: Rejected - less flexible for multi-provider support
-- **Custom HTTP client**: Rejected - reinventing wheel, more maintenance
-- **HuggingFace Transformers**: Rejected - requires local model hosting
+**Decision**: Adopt normalized state pattern with computed getters ⭐
+
+**Rationale**:
+- Clear separation of concerns (selection/processing/results)
+- Computed getters enable reactive validation (e.g., `canStartEmbedding`)
+- Normalized results map supports history/comparison features
+- Error state isolation simplifies error boundary rendering
 
 ---
 
-## Summary of Key Decisions
+## Summary of Decisions
 
-| Topic | Decision | Impact |
-|-------|----------|--------|
-| Retry Strategy | Exponential backoff with jitter (1s-32s, 3 retries) | High reliability, respects rate limits |
-| Partial Failures | Process valid docs, return structured failure details | Maximizes throughput, clear diagnostics |
-| Logging | Structured JSON with metrics, no text content | Production observability, privacy-safe |
-| Dimension Validation | Fail immediately with clear error | Data integrity, fail fast |
-| Batch Limit | 1000 documents maximum | Memory safety, timeout prevention |
-| Persistence | JSON per request with metadata | Constitution compliance, traceability |
-| Error Classification | 3-tier retry strategy (auto/fail/partial) | Efficiency, user experience |
-| LangChain Integration | Wrapped OpenAIEmbeddings with custom logic | Ecosystem compatibility, extensibility |
+| Area | Decision | Rationale |
+|------|----------|-----------|
+| **Document Filtering** | Backend API filter parameter `?has_chunking_result=true` | Efficient, scalable, RESTful |
+| **Model Display** | Two-stage: compact dropdown + detail panel | Progressive disclosure, reduces cognitive load |
+| **Result Selection** | Latest active result, optional strategy filter | Simplicity, recency bias, manual override via `is_active` |
+| **Retry Strategy** | Current implementation (3 retries, exp backoff, jitter) validated | Aligns with AWS/Google best practices |
+| **Storage Format** | JSON with source traceability section | Reproducibility, downstream compatibility |
+| **State Management** | Normalized Pinia store with computed getters | Reactive validation, separation of concerns |
 
-All technical unknowns from Phase 0 have been resolved. Ready to proceed to Phase 1 (Design & Contracts).
+---
+
+## Alternatives Considered
+
+### Document Filtering
+- ❌ **Client-side filtering**: Rejected due to inefficiency and slow page load
+- ❌ **New endpoint**: Rejected due to API proliferation
+
+### Model Selection
+- ❌ **Dropdown only (no detail panel)**: Rejected due to insufficient decision information
+- ❌ **Modal for details**: Rejected due to extra click required
+
+### Result Selection
+- ❌ **Explicit version picker**: Rejected due to added UI complexity (conflicts with User Story 3 requirement for one-level selection)
+- ❌ **Always latest regardless of strategy**: Rejected due to inability to handle multi-strategy scenarios
+
+### Storage Format
+- ❌ **Separate metadata file**: Rejected due to atomicity concerns
+- ❌ **Binary format (numpy/pickle)**: Rejected due to language portability and debugging difficulty
+
+---
+
+## Open Questions for Phase 1
+
+1. **API Contract**: Should `/documents` endpoint filter return include `chunkingStatus` summary in response?
+   - Recommendation: Yes, include `{ chunkingResults: [{ strategy, timestamp, chunkCount }] }` for frontend display
+
+2. **Error Boundary**: Should frontend implement global error recovery for embedding failures?
+   - Recommendation: Phase 2 - implement toast notifications, log to backend
+
+3. **Vector Visualization**: Should results panel include dimension reduction visualization (t-SNE/UMAP)?
+   - Recommendation: Out of scope for MVP, document as future enhancement
+
+---
+
+**Next Steps**: Proceed to Phase 1 (Data Model & Contracts generation)

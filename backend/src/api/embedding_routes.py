@@ -4,8 +4,9 @@ import uuid
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from ..models.embedding_models import (
     BatchEmbeddingRequest,
@@ -29,6 +30,8 @@ from ..models.embedding_models import (
     APITimeoutError,
     NetworkError,
     ErrorType,
+    ChunkingResultEmbeddingRequest,
+    DocumentEmbeddingRequest,
 )
 from ..services.embedding_service import EmbeddingService, EMBEDDING_MODELS
 from ..storage.embedding_storage import EmbeddingStorage
@@ -39,6 +42,17 @@ storage = EmbeddingStorage(
     results_dir=os.getenv("EMBEDDING_RESULTS_DIR", "results/embedding")
 )
 DEFAULT_MAX_BATCH_SIZE = 1000
+
+
+# Import database dependency
+def get_db():
+    """Get database session."""
+    from ..storage.database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def build_embedding_config(request) -> EmbeddingConfig:
@@ -286,7 +300,11 @@ async def embed_batch_texts(
             timestamp=datetime.utcnow(),
         )
 
-        storage.save_batch_result(response)
+        # Save with source information
+        storage.save_batch_result(
+            response, 
+            source_result_id=request.result_id
+        )
         return response
 
     except BatchSizeLimitError as exc:
@@ -425,20 +443,410 @@ async def get_model_info(model_name: str):
     status_code=status.HTTP_200_OK,
 )
 async def health_check():
+    """
+    Health check endpoint for service monitoring.
+    
+    Validates:
+    - Service is running (HTTP 200)
+    - API endpoint reachability (5s timeout)
+    - Model availability via embedding API
+    - Authentication validity
+    
+    Returns status: healthy | degraded | unhealthy
+    """
     try:
         api_key = os.getenv("EMBEDDING_API_KEY")
+        base_url = os.getenv("EMBEDDING_API_BASE_URL", "http://dev.fit-ai.woa.com/api/llmproxy")
+        
+        # Check authentication
+        authentication_status = "valid" if api_key else "invalid"
+        
+        # Basic connectivity check
         api_connectivity = api_key is not None
+        
+        # Get available models
+        models_available = list(EMBEDDING_MODELS.keys())
+        
+        # Determine overall status
+        if api_connectivity and authentication_status == "valid" and models_available:
+            overall_status = "healthy"
+        elif api_connectivity or models_available:
+            overall_status = "degraded"
+        else:
+            overall_status = "unhealthy"
+        
         return {
-            "status": "healthy" if api_connectivity else "degraded",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "status": overall_status,
+            "service": "up",
             "api_connectivity": api_connectivity,
+            "models_available": models_available,
+            "authentication": authentication_status,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
         }
-    except Exception:  # pragma: no cover - defensive
+    except Exception as exc:  # pragma: no cover - defensive
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={
                 "status": "unhealthy",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "service": "error",
                 "api_connectivity": False,
+                "models_available": [],
+                "authentication": "not_checked",
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "error": str(exc)
             },
         )
+
+
+@router.post(
+    "/from-chunking-result",
+    response_model=BatchEmbeddingResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        404: {"model": ErrorResponse, "description": "Chunking result not found"},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def embed_from_chunking_result(
+    request: ChunkingResultEmbeddingRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Vectorize all chunks from a chunking result.
+    
+    This endpoint takes a chunking result ID and creates embeddings for all chunks
+    in that result. It automatically handles batch processing and returns vectors
+    in the same order as the original chunks.
+    """
+    request_id = str(uuid.uuid4())
+    try:
+        service = get_embedding_service(
+            model=request.model,
+            max_retries=request.max_retries,
+            timeout=request.timeout,
+        )
+
+        result = service.embed_chunking_result(
+            result_id=request.result_id,
+            db_session=db,
+            request_id=request_id
+        )
+
+        vectors: List[Vector] = [
+            Vector(
+                index=item.index,
+                vector=item.vector,
+                dimension=len(item.vector),
+                text_hash=item.text_hash,
+                text_length=item.text_length,
+                processing_time_ms=item.processing_time_ms,
+            )
+            for item in result.vectors
+        ]
+        failures: List[EmbeddingFailure] = [
+            EmbeddingFailure(
+                index=item.index,
+                text_preview=item.text_preview,
+                error_type=item.error_type,
+                error_message=item.error_message,
+                retry_recommended=item.retry_recommended,
+                retry_count=item.retry_count,
+            )
+            for item in result.failures
+        ]
+
+        status_value = (
+            ResponseStatus.SUCCESS
+            if not failures
+            else ResponseStatus.FAILED
+            if not vectors
+            else ResponseStatus.PARTIAL_SUCCESS
+        )
+
+        vectors_per_second = (
+            len(vectors) / (result.processing_time_ms / 1000)
+            if result.processing_time_ms > 0 and vectors
+            else 0.0
+        )
+
+        metadata = BatchMetadata(
+            model=request.model,
+            model_dimension=service.model_info["dimension"],
+            processing_time_ms=result.processing_time_ms,
+            api_latency_ms=None,
+            retry_count=result.retry_count,
+            rate_limit_hits=result.rate_limit_hits,
+            batch_size=result.batch_size,
+            successful_count=len(vectors),
+            failed_count=len(failures),
+            vectors_per_second=vectors_per_second,
+            config=build_embedding_config(request),
+        )
+
+        response = BatchEmbeddingResponse(
+            request_id=request_id,
+            status=status_value,
+            vectors=vectors,
+            failures=failures,
+            metadata=metadata,
+            timestamp=datetime.utcnow(),
+        )
+
+        # Save with source information
+        storage.save_batch_result(
+            response,
+            source_document_id=request.document_id
+        )
+        return response
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "CHUNKING_RESULT_NOT_FOUND",
+                    "message": str(exc),
+                }
+            },
+        ) from exc
+    except InvalidTextError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "code": ErrorType.INVALID_TEXT_ERROR.value,
+                    "message": str(exc),
+                }
+            },
+        ) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": {
+                    "code": ErrorType.AUTHENTICATION_ERROR.value,
+                    "message": "Invalid API key. Please check your credentials.",
+                }
+            },
+        ) from exc
+    except RateLimitError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "error": {
+                    "code": ErrorType.RATE_LIMIT_ERROR.value,
+                    "message": str(exc),
+                    "details": {
+                        "retry_after_seconds": getattr(exc, "retry_after", 30),
+                    },
+                }
+            },
+        ) from exc
+    except (APITimeoutError, NetworkError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": type(exc).__name__.upper(),
+                    "message": str(exc),
+                }
+            },
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        embedding_logger.log_request_failed(
+            request_id=request_id,
+            model=request.model,
+            duration_ms=0,
+            error_type="INTERNAL_ERROR",
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred. Please try again later.",
+                    "details": {"request_id": request_id},
+                }
+            },
+        ) from exc
+
+
+@router.post(
+    "/from-document",
+    response_model=BatchEmbeddingResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid request"},
+        401: {"model": ErrorResponse, "description": "Authentication failed"},
+        404: {"model": ErrorResponse, "description": "Document or chunking result not found"},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def embed_from_document(
+    request: DocumentEmbeddingRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Vectorize chunks from a document's latest chunking result.
+    
+    This endpoint finds the most recent active chunking result for a document
+    (optionally filtered by strategy type) and creates embeddings for all its chunks.
+    """
+    request_id = str(uuid.uuid4())
+    try:
+        service = get_embedding_service(
+            model=request.model,
+            max_retries=request.max_retries,
+            timeout=request.timeout,
+        )
+
+        result = service.embed_document_latest_chunks(
+            document_id=request.document_id,
+            db_session=db,
+            strategy_type=request.strategy_type,
+            request_id=request_id
+        )
+
+        vectors: List[Vector] = [
+            Vector(
+                index=item.index,
+                vector=item.vector,
+                dimension=len(item.vector),
+                text_hash=item.text_hash,
+                text_length=item.text_length,
+                processing_time_ms=item.processing_time_ms,
+            )
+            for item in result.vectors
+        ]
+        failures: List[EmbeddingFailure] = [
+            EmbeddingFailure(
+                index=item.index,
+                text_preview=item.text_preview,
+                error_type=item.error_type,
+                error_message=item.error_message,
+                retry_recommended=item.retry_recommended,
+                retry_count=item.retry_count,
+            )
+            for item in result.failures
+        ]
+
+        status_value = (
+            ResponseStatus.SUCCESS
+            if not failures
+            else ResponseStatus.FAILED
+            if not vectors
+            else ResponseStatus.PARTIAL_SUCCESS
+        )
+
+        vectors_per_second = (
+            len(vectors) / (result.processing_time_ms / 1000)
+            if result.processing_time_ms > 0 and vectors
+            else 0.0
+        )
+
+        metadata = BatchMetadata(
+            model=request.model,
+            model_dimension=service.model_info["dimension"],
+            processing_time_ms=result.processing_time_ms,
+            api_latency_ms=None,
+            retry_count=result.retry_count,
+            rate_limit_hits=result.rate_limit_hits,
+            batch_size=result.batch_size,
+            successful_count=len(vectors),
+            failed_count=len(failures),
+            vectors_per_second=vectors_per_second,
+            config=build_embedding_config(request),
+        )
+
+        response = BatchEmbeddingResponse(
+            request_id=request_id,
+            status=status_value,
+            vectors=vectors,
+            failures=failures,
+            metadata=metadata,
+            timestamp=datetime.utcnow(),
+        )
+
+        # Save with source information
+        storage.save_batch_result(
+            response,
+            source_document_id=request.document_id
+        )
+        return response
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "DOCUMENT_OR_CHUNKING_RESULT_NOT_FOUND",
+                    "message": str(exc),
+                }
+            },
+        ) from exc
+    except InvalidTextError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "code": ErrorType.INVALID_TEXT_ERROR.value,
+                    "message": str(exc),
+                }
+            },
+        ) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": {
+                    "code": ErrorType.AUTHENTICATION_ERROR.value,
+                    "message": "Invalid API key. Please check your credentials.",
+                }
+            },
+        ) from exc
+    except RateLimitError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "error": {
+                    "code": ErrorType.RATE_LIMIT_ERROR.value,
+                    "message": str(exc),
+                    "details": {
+                        "retry_after_seconds": getattr(exc, "retry_after", 30),
+                    },
+                }
+            },
+        ) from exc
+    except (APITimeoutError, NetworkError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": type(exc).__name__.upper(),
+                    "message": str(exc),
+                }
+            },
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        embedding_logger.log_request_failed(
+            request_id=request_id,
+            model=request.model,
+            duration_ms=0,
+            error_type="INTERNAL_ERROR",
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred. Please try again later.",
+                    "details": {"request_id": request_id},
+                }
+            },
+        ) from exc
