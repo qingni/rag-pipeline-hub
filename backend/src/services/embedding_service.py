@@ -38,16 +38,24 @@ EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
     },
     "qwen3-embedding-8b": {
         "name": "qwen3-embedding-8b",
-        "dimension": 4096,  # 实际 API 返回 4096 维
-        "description": "通义千问 Embedding 模型，8B 参数，高质量向量",
+        "dimension": 4096,
+        "description": "通义千问 Embedding 模型，8B 参数",
         "provider": "qwen",
+        "supports_multilingual": True,
+        "max_batch_size": 1000,
+    },
+    "hunyuan-embedding": {
+        "name": "hunyuan-embedding",
+        "dimension": 1024,
+        "description": "腾讯混元 Embedding 模型",
+        "provider": "hunyuan",
         "supports_multilingual": True,
         "max_batch_size": 1000,
     },
     "jina-embeddings-v4": {
         "name": "jina-embeddings-v4",
-        "dimension": 2048,  # 实际 API 返回 2048 维
-        "description": "Jina AI Embeddings v4，多语言支持，语义理解强",
+        "dimension": 768,
+        "description": "Jina AI Embeddings v4，多语言支持",
         "provider": "jina",
         "supports_multilingual": True,
         "max_batch_size": 1000,
@@ -116,7 +124,7 @@ class EmbeddingService:
             "hunyuan-embedding",
             "jina-embeddings-v4",
         ] = "qwen3-embedding-8b",
-        base_url: str = "http://dev.fit-ai.woa.com/api/llmproxy",
+        base_url: str = "",  # 必须通过参数传入，不提供默认值
         max_retries: int = 3,
         request_timeout: int = 60,
         embeddings_client: Optional[OpenAIEmbeddings] = None,
@@ -488,54 +496,38 @@ class EmbeddingService:
         return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def embed_chunking_result(
-        self, 
-        result_id: str, 
-        db_session, 
+        self,
+        result_id: str,
+        db_session,
         request_id: Optional[str] = None
     ) -> BatchEmbeddingResult:
-        """
-        Vectorize all chunks from a chunking result.
-        
-        Args:
-            result_id: Chunking result ID
-            db_session: Database session
-            request_id: Optional request ID for tracking
-            
-        Returns:
-            BatchEmbeddingResult with vectors for all chunks
-            
-        Raises:
-            ValueError: If result not found
-            InvalidTextError: If no valid chunks found
-        """
+        """从分块结果ID获取所有chunks并进行向量化。"""
         from ..models.chunking_result import ChunkingResult, ResultStatus
         from ..models.chunk import Chunk
         
-        # Query chunking result
-        result = db_session.query(ChunkingResult).filter(
+        # 查询分块结果
+        chunking_result = db_session.query(ChunkingResult).filter(
             ChunkingResult.result_id == result_id,
             ChunkingResult.status == ResultStatus.COMPLETED
         ).first()
         
-        if not result:
+        if not chunking_result:
             raise ValueError(f"Chunking result {result_id} not found or not completed")
         
-        # Load chunks from database
+        # 获取所有chunks
         chunks = db_session.query(Chunk).filter(
             Chunk.result_id == result_id
         ).order_by(Chunk.sequence_number).all()
         
         if not chunks:
-            raise InvalidTextError(f"No chunks found for result {result_id}")
+            raise ValueError(f"No chunks found for result {result_id}")
         
-        # Extract text content from chunks
+        # 提取chunk文本
         texts = [chunk.content for chunk in chunks]
         
-        # Use existing batch embedding functionality
-        batch_result = self.embed_documents(texts, request_id=request_id)
-        
-        return batch_result
-    
+        # 调用批量嵌入
+        return self.embed_documents(texts, request_id=request_id)
+
     def embed_document_latest_chunks(
         self,
         document_id: str,
@@ -543,26 +535,12 @@ class EmbeddingService:
         strategy_type: Optional[str] = None,
         request_id: Optional[str] = None
     ) -> BatchEmbeddingResult:
-        """
-        Vectorize chunks from a document's latest chunking result.
-        
-        Args:
-            document_id: Document ID
-            db_session: Database session
-            strategy_type: Optional filter by strategy type
-            request_id: Optional request ID for tracking
-            
-        Returns:
-            BatchEmbeddingResult with vectors for all chunks
-            
-        Raises:
-            ValueError: If no chunking result found
-            InvalidTextError: If no valid chunks found
-        """
+        """从文档ID获取最新的分块结果并进行向量化。"""
         from ..models.chunking_result import ChunkingResult, ResultStatus
         from ..models.chunking_task import ChunkingTask, StrategyType
+        from ..models.chunk import Chunk
         
-        # Build query for latest active result
+        # 构建查询：获取文档的最新完成的分块结果
         query = db_session.query(ChunkingResult).join(
             ChunkingTask,
             ChunkingResult.task_id == ChunkingTask.task_id
@@ -572,7 +550,7 @@ class EmbeddingService:
             ChunkingResult.is_active == True
         )
         
-        # Apply strategy filter if provided
+        # 如果指定了策略类型，添加过滤
         if strategy_type:
             try:
                 strategy_enum = StrategyType[strategy_type.upper()]
@@ -580,17 +558,28 @@ class EmbeddingService:
             except KeyError:
                 raise ValueError(f"Invalid strategy type: {strategy_type}")
         
-        # Get the most recent result
-        result = query.order_by(ChunkingResult.created_at.desc()).first()
+        # 获取最新的结果
+        chunking_result = query.order_by(ChunkingResult.created_at.desc()).first()
         
-        if not result:
-            raise ValueError(
-                f"No active chunking result found for document {document_id}"
-                + (f" with strategy {strategy_type}" if strategy_type else "")
-            )
+        if not chunking_result:
+            error_msg = f"No completed chunking result found for document {document_id}"
+            if strategy_type:
+                error_msg += f" with strategy {strategy_type}"
+            raise ValueError(error_msg)
         
-        # Use chunking result embedding
-        return self.embed_chunking_result(result.result_id, db_session, request_id)
+        # 获取所有chunks
+        chunks = db_session.query(Chunk).filter(
+            Chunk.result_id == chunking_result.result_id
+        ).order_by(Chunk.sequence_number).all()
+        
+        if not chunks:
+            raise ValueError(f"No chunks found for result {chunking_result.result_id}")
+        
+        # 提取chunk文本
+        texts = [chunk.content for chunk in chunks]
+        
+        # 调用批量嵌入
+        return self.embed_documents(texts, request_id=request_id)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke test

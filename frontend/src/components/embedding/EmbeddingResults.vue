@@ -385,20 +385,30 @@ function calculateSparsity(vector) {
   return nonZeroCount / vector.length
 }
 
-// 热力图颜色映射（蓝-白-红）
+// 热力图颜色映射（深蓝-白-深红）- 优化对比度
 function getHeatmapColor(value) {
   // 归一化到 [-1, 1] 范围
   const normalized = Math.max(-1, Math.min(1, value))
   
-  if (normalized < 0) {
-    // 负值：蓝色系
+  if (normalized < -0.1) {
+    // 负值：深蓝色系 (深蓝 -> 浅蓝)
     const intensity = Math.abs(normalized)
-    const blue = Math.round(255 * intensity)
-    return `rgb(${255 - blue}, ${255 - blue}, 255)`
+    // 使用更深的蓝色范围：从 rgb(0,50,150) 到 rgb(150,200,255)
+    const r = Math.round(150 * (1 - intensity * 0.7))
+    const g = Math.round(50 + 150 * (1 - intensity * 0.7))
+    const b = Math.round(150 + 105 * intensity)
+    return `rgb(${r}, ${g}, ${b})`
+  } else if (normalized > 0.1) {
+    // 正值：深红色系 (浅红 -> 深红)
+    const intensity = normalized
+    // 使用更深的红色范围：从 rgb(255,200,150) 到 rgb(200,0,0)
+    const r = Math.round(255 - 55 * (1 - intensity))
+    const g = Math.round(200 * (1 - intensity * 0.9))
+    const b = Math.round(150 * (1 - intensity))
+    return `rgb(${r}, ${g}, ${b})`
   } else {
-    // 正值：红色系
-    const red = Math.round(255 * normalized)
-    return `rgb(255, ${255 - red}, ${255 - red})`
+    // 接近零：浅灰色
+    return `rgb(240, 240, 245)`
   }
 }
 

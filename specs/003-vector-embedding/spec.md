@@ -34,6 +34,14 @@
 - Q: Vector model selector UI presentation format? → A: Dropdown showing model name + dimension + brief description (e.g., "BGE-M3 · 1024维 · 多语言支持"), with detailed info panel below when selected
 - Q: Overall page layout after merging functionalities? → A: Two-column layout: Left (document selection + model configuration + start button), Right (results display panel)
 
+### Session 2025-12-16 (Database Storage)
+
+- Q: Database table design strategy for embedding results storage? → A: Create `embedding_results` table storing metadata, vector values saved as JSON files
+- Q: When same document is vectorized again with same model, how should system handle existing records? → A: Update database record to point to new result, preserve historical JSON files
+- Q: What query APIs should system provide for embedding results? → A: Provide complete query APIs (by document ID, list with filters, detail by result_id)
+- Q: What database indexes should be created for optimal query performance? → A: Create composite indexes (document_id+model, created_at, status)
+- Q: What transaction strategy should ensure data consistency between JSON files and database? → A: Write JSON file first, then database record; rollback (delete JSON) if database write fails
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Vectorize Chunking Result (Priority: P1)
@@ -91,6 +99,26 @@ As a RAG system user, I need a unified embedding interface at `/documents/embed`
 
 ---
 
+### User Story 9 - Query Embedding Results (Priority: P2)
+
+As a system operator or frontend developer, I need to query embedding results from the database so that I can display embedding status, history, and enable document management features.
+
+**Why this priority**: Essential for production visibility and user experience. Enables frontend to show "已向量化" status badges, embedding history lists, and supports operational troubleshooting.
+
+**Independent Test**: Can be tested by creating embedding records and verifying query APIs return correct filtered/paginated results. Demonstrates complete data lifecycle management.
+
+**Acceptance Scenarios**:
+
+1. **Given** an embedding result exists with result_id "abc-123", **When** query by result_id API is called, **Then** the system returns complete metadata including document_id, model, status, counts, file path, and timestamps
+2. **Given** a document has been vectorized with model "bge-m3", **When** query by document_id API is called, **Then** the system returns the latest embedding result for that document
+3. **Given** a document has multiple embedding results with different models, **When** query by document_id with model filter "qwen3-embedding-8b" is called, **Then** the system returns only the latest result for that specific model
+4. **Given** 50 embedding results exist in database, **When** list query API is called with page_size=10 and page=2, **Then** the system returns results 11-20 with pagination metadata (total_count, total_pages, current_page)
+5. **Given** embedding results exist with various statuses, **When** list query API is called with status filter "SUCCESS", **Then** the system returns only results with SUCCESS status
+6. **Given** embedding results created over multiple days, **When** list query API is called with date_range filter "2025-12-15 to 2025-12-16", **Then** the system returns only results created within that date range
+7. **Given** an embedding result with status "PARTIAL_SUCCESS", **When** queried, **Then** the response includes error_message field explaining which chunks failed
+
+---
+
 ### User Story 4 - Single Text Vectorization (Priority: P3, Backend-only)
 
 As a developer or API user, I need backend API support for single text vectorization so that I can perform ad-hoc queries and testing via API calls.
@@ -133,10 +161,10 @@ As a system administrator, I need to choose from multiple embedding models (BGE-
 
 **Acceptance Scenarios**:
 
-1. **Given** the model name "qwen3-embedding-8b", **When** service is initialized, **Then** vectors are generated with 1536 dimensions
+1. **Given** the model name "qwen3-embedding-8b", **When** service is initialized, **Then** vectors are generated with 4096 dimensions
 2. **Given** the model name "bge-m3", **When** service is initialized, **Then** vectors are generated with 1024 dimensions
 3. **Given** the model name "hunyuan-embedding", **When** service is initialized, **Then** vectors are generated with 1024 dimensions
-4. **Given** the model name "jina-embeddings-v4", **When** service is initialized, **Then** vectors are generated with 768 dimensions
+4. **Given** the model name "jina-embeddings-v4", **When** service is initialized, **Then** vectors are generated with 2048 dimensions
 5. **Given** an unsupported model name, **When** service initialization is attempted, **Then** the system returns a clear error listing supported models
 
 ---
@@ -151,7 +179,7 @@ As a developer, I need to query the current model's information (name, dimension
 
 **Acceptance Scenarios**:
 
-1. **Given** a service instance with model "qwen3-embedding-8b", **When** model info is requested, **Then** the system returns name, dimension (1536), and description
+1. **Given** a service instance with model "qwen3-embedding-8b", **When** model info is requested, **Then** the system returns name, dimension (4096), and description
 2. **Given** any service state, **When** listing available models is requested, **Then** the system returns all four supported models with their specifications
 
 ---
@@ -182,6 +210,9 @@ As a system operator, I need the embedding service to automatically retry failed
 - **Vector dimension mismatch**: System fails immediately with clear error message indicating expected dimensions (per model specification) versus actual dimensions received from API (see FR-011)
 - **Rate limiting**: System retries with exponential backoff (increasing delays between attempts, jitter ±25%) when API returns rate limit errors, respecting timeout constraints (see FR-007)
 - **Empty document list (all documents unchunked)**: Document selector displays empty state message "暂无已分块文档,请先对文档进行分块处理" with disabled "开始向量化" button. User must navigate to chunking module to process documents first.
+- **Duplicate vectorization (same document+chunking result+model)**: System updates existing database record with new result_id and json_file_path, preserves old JSON file on disk for audit trail (see FR-024)
+- **Database write failure after JSON file write**: System automatically deletes the orphaned JSON file to maintain consistency, returns error to caller (see FR-022)
+- **Partial JSON write (disk full, permission error)**: System detects incomplete file, rolls back, and returns clear error indicating storage issue
 
 ## Requirements *(mandatory)*
 
@@ -192,7 +223,7 @@ As a system operator, I need the embedding service to automatically retry failed
 - **FR-003**: System MUST support optional filtering by chunking strategy type when vectorizing by document ID (backend API)
 - **FR-004**: System MUST support single text vectorization for ad-hoc queries (backend API only, not exposed in frontend)
 - **FR-005**: System MUST support batch vectorization of arbitrary text strings (max 1000 texts per batch) with partial success handling (backend API only, not exposed in frontend)
-- **FR-006**: System MUST support four embedding models: BGE-M3 (1024-dim), Qwen3-Embedding-8B (1536-dim), Hunyuan-Embedding (1024-dim), and Jina-Embeddings-v4 (768-dim)
+- **FR-006**: System MUST support four embedding models: BGE-M3 (1024-dim), Qwen3-Embedding-8B (4096-dim), Hunyuan-Embedding (1024-dim), and Jina-Embeddings-v4 (2048-dim)
 - **FR-007**: System MUST validate model names and reject unsupported models with clear error messages
 - **FR-008**: System MUST connect to embedding API using OpenAI-compatible protocol
 - **FR-009**: System MUST accept configurable API credentials and base URL
@@ -207,17 +238,25 @@ As a system operator, I need the embedding service to automatically retry failed
 - **FR-018**: System MUST handle Unicode characters according to the embedding model's tokenization rules
 - **FR-019**: System MUST persist embedding results as JSON files with source information (chunking result ID or document ID when applicable)
 - **FR-020**: System MUST return vectors in the same order as the input chunks for chunking-based vectorization
-- **FR-021**: Frontend MUST use `/documents/embed` as the sole entry point for vector embedding module (no separate `/embeddings` route)
-- **FR-022**: Frontend navigation menu MUST display single entry "文档向量化" for embedding module (no separate text vectorization entry)
-- **FR-023**: Frontend document selector MUST display ONLY documents with active chunking results (completely hide unchunked documents from list)
-- **FR-024**: Frontend document selector MUST show each document in format "DocumentName · 已分块 · YYYY-MM-DD"
-- **FR-025**: Frontend MUST implement one-level document selection (user selects document, system automatically uses latest active chunking result)
-- **FR-026**: Frontend model selector dropdown MUST display each model as "ModelName · Dimension维 · BriefDescription" (e.g., "BGE-M3 · 1024维 · 多语言支持")
-- **FR-027**: Frontend MUST show detailed model information panel below selector when model is selected (dimension, provider, multilingual support, max batch size)
-- **FR-028**: Frontend MUST require user to click "开始向量化" button to trigger vectorization after selecting document and model
-- **FR-029**: Frontend MUST implement two-column page layout: left column (document selector + model configuration + start button), right column (results display panel)
-- **FR-030**: Frontend MUST display document source information (document name, chunk count, vector dimensions) at the top of results panel after successful vectorization
-- **FR-031**: Frontend MUST disable or show validation message for "开始向量化" button when no document is selected
+- **FR-021**: System MUST create `embedding_results` database table to store embedding metadata (result_id, document_id, chunking_result_id, model, status, counts, dimension, file path, timestamps)
+- **FR-022**: System MUST write embedding metadata to database table and vector values to JSON file in atomic dual-write operation: (1) write JSON file first, (2) write database record, (3) if database write fails, delete the JSON file to maintain consistency
+- **FR-023**: System MUST store JSON file path in database record as relative path from configured results directory
+- **FR-024**: System MUST update existing database record when same document+chunking result is re-vectorized with same model (preserve historical JSON files but point database record to latest result)
+- **FR-025**: System MUST provide query API to retrieve embedding result by result_id
+- **FR-026**: System MUST provide query API to retrieve latest embedding result by document_id (optionally filtered by model)
+- **FR-027**: System MUST provide list query API with pagination and filters (document_id, model, status, date range)
+- **FR-028**: System MUST create database indexes: composite index on (document_id, model), index on created_at DESC, index on status
+- **FR-029**: Frontend MUST use `/documents/embed` as the sole entry point for vector embedding module (no separate `/embeddings` route)
+- **FR-030**: Frontend navigation menu MUST display single entry "文档向量化" for embedding module (no separate text vectorization entry)
+- **FR-031**: Frontend document selector MUST display ONLY documents with active chunking results (completely hide unchunked documents from list)
+- **FR-032**: Frontend document selector MUST show each document in format "DocumentName · 已分块 · YYYY-MM-DD"
+- **FR-039**: Frontend MUST implement one-level document selection (user selects document, system automatically uses latest active chunking result)
+- **FR-033**: Frontend model selector dropdown MUST display each model as "ModelName · Dimension维 · BriefDescription" (e.g., "BGE-M3 · 1024维 · 多语言支持")
+- **FR-034**: Frontend MUST show detailed model information panel below selector when model is selected (dimension, provider, multilingual support, max batch size)
+- **FR-035**: Frontend MUST require user to click "开始向量化" button to trigger vectorization after selecting document and model
+- **FR-036**: Frontend MUST implement two-column page layout: left column (document selector + model configuration + start button), right column (results display panel)
+- **FR-037**: Frontend MUST display document source information (document name, chunk count, vector dimensions) at the top of results panel after successful vectorization
+- **FR-038**: Frontend MUST disable or show validation message for "开始向量化" button when no document is selected
 
 ### Non-Functional Requirements
 
@@ -245,6 +284,8 @@ As a system operator, I need the embedding service to automatically retry failed
   - `unhealthy`: Service cannot start or critical dependency missing
 - **NFR-002**: All API responses MUST follow standardized JSON format defined in OpenAPI specification
 - **NFR-003**: System MUST handle concurrent requests without data corruption or race conditions
+- **NFR-004**: Dual-write operation (JSON file + database record) MUST complete within 5 seconds for 100 vectors (4096-dim) under normal conditions
+- **NFR-005**: System MUST guarantee no orphaned JSON files exist (all JSON files MUST have corresponding database records) through rollback mechanism
 
 ### Key Entities *(include if feature involves data)*
 
@@ -254,6 +295,24 @@ As a system operator, I need the embedding service to automatically retry failed
 - **Embedding Response**: Contains generated vector(s), metadata about the operation, and source information (chunking result ID or document ID when applicable)
 - **Chunking Result**: Reference to a completed document chunking result containing multiple chunks to be vectorized
 - **Document Selection State** (Frontend): UI state tracking selected document ID, model, and latest chunking result status for display
+- **Embedding Result** (Database): Database table storing embedding metadata with fields:
+  - `result_id` (TEXT PRIMARY KEY): Unique identifier for embedding result
+  - `document_id` (TEXT): Reference to source document
+  - `chunking_result_id` (TEXT): Reference to chunking result used as source
+  - `model` (TEXT): Embedding model name used
+  - `status` (TEXT): Processing status (SUCCESS, FAILED, PARTIAL_SUCCESS)
+  - `successful_count` (INTEGER): Number of successfully vectorized chunks
+  - `failed_count` (INTEGER): Number of failed chunks
+  - `vector_dimension` (INTEGER): Dimension size of generated vectors
+  - `json_file_path` (TEXT): Relative path to JSON file containing actual vector values
+  - `processing_time_ms` (REAL): Total processing time in milliseconds
+  - `created_at` (TIMESTAMP): Record creation timestamp
+  - `error_message` (TEXT): Error details for failed/partial results
+  - **Indexes**:
+    - PRIMARY KEY on `result_id`
+    - COMPOSITE INDEX on `(document_id, model)` for document+model queries
+    - INDEX on `created_at DESC` for latest result queries and date range filtering
+    - INDEX on `status` for status-based filtering
 
 ## Success Criteria *(mandatory)*
 
@@ -274,11 +333,13 @@ As a system operator, I need the embedding service to automatically retry failed
 - **SC-013**: Frontend correctly displays document source information in results panel after successful vectorization
 - **SC-014**: Frontend model selector displays complete information (name, dimension, description) for all four supported models
 - **SC-015**: Navigation menu shows single "文档向量化" entry pointing to `/documents/embed` (no duplicate text vectorization entry)
+- **SC-016**: Query API by document_id returns latest embedding result within 100ms for database with 10,000 records
+- **SC-017**: List query API with pagination returns results within 200ms for page_size=20
 
 ## Assumptions
 
 - API endpoint follows OpenAI-compatible embedding protocol
-- Default API endpoint is `http://dev.fit-ai.woa.com/api/llmproxy`
+- API endpoint must be configured via `EMBEDDING_API_BASE_URL` environment variable (no default value)
 - Default maximum retry count is 3 attempts
 - Default request timeout is 60 seconds
 - API authentication uses key-based mechanism

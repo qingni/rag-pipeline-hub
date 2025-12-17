@@ -1,7 +1,12 @@
 """
-JSON persistence layer for embedding results.
+Dual-write persistence layer for embedding results.
 
-Implements atomic writes with per-request file storage per constitution requirement.
+Implements:
+- FR-022: Atomic dual-write (JSON file + database record)
+- FR-023: Relative path storage
+- FR-024: Update-on-duplicate for same document+model
+- NFR-003: Row-level locking for concurrent safety
+- NFR-005: Rollback guarantee (no orphaned JSON files)
 """
 import json
 import os
@@ -9,24 +14,39 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from ..models.embedding_models import (
     SingleEmbeddingResponse,
     BatchEmbeddingResponse,
     Vector,
-    EmbeddingFailure
+    EmbeddingFailure,
+    EmbeddingResult,
 )
+
+
+class StorageError(Exception):
+    """Base exception for storage operations."""
+    pass
 
 
 class EmbeddingStorage:
     """
-    JSON storage for embedding results.
+    Dual-write storage for embedding results.
+    
+    Architecture:
+    1. JSON files: Store vector values (high-dimensional data)
+    2. Database: Store metadata (fast queries, traceability)
     
     Features:
     - Per-request JSON files
     - Atomic writes (tmp file + rename)
     - Directory structure: results/embedding/YYYY-MM-DD/
     - Naming convention: embedding_{request_id}_{timestamp}.json
+    - Dual-write with rollback on failure (NFR-005)
+    - Row-level locking for concurrent updates (NFR-003)
     """
     
     def __init__(self, results_dir: str = "results/embedding"):

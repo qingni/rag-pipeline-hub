@@ -34,11 +34,12 @@ from ..models.embedding_models import (
     DocumentEmbeddingRequest,
 )
 from ..services.embedding_service import EmbeddingService, EMBEDDING_MODELS
-from ..storage.embedding_storage import EmbeddingStorage
+from ..storage.embedding_storage_dual import DualWriteEmbeddingStorage
+from ..storage.embedding_db import EmbeddingResultDB
 from ..utils.logging_utils import embedding_logger
 
 router = APIRouter(prefix="/embedding", tags=["embedding"])
-storage = EmbeddingStorage(
+storage = DualWriteEmbeddingStorage(
     results_dir=os.getenv("EMBEDDING_RESULTS_DIR", "results/embedding")
 )
 DEFAULT_MAX_BATCH_SIZE = 1000
@@ -56,8 +57,12 @@ def get_db():
 
 
 def build_embedding_config(request) -> EmbeddingConfig:
+    base_url = os.getenv("EMBEDDING_API_BASE_URL")
+    if not base_url:
+        raise AuthenticationError("EMBEDDING_API_BASE_URL environment variable not set")
+    
     return EmbeddingConfig(
-        api_endpoint=os.getenv("EMBEDDING_API_BASE_URL", "http://dev.fit-ai.woa.com/api/llmproxy"),
+        api_endpoint=base_url,
         max_retries=request.max_retries,
         timeout_seconds=request.timeout,
         exponential_backoff=True,
@@ -75,7 +80,10 @@ def get_embedding_service(
     if not api_key:
         raise AuthenticationError("EMBEDDING_API_KEY environment variable not set")
 
-    base_url = os.getenv("EMBEDDING_API_BASE_URL", "http://dev.fit-ai.woa.com/api/llmproxy")
+    base_url = os.getenv("EMBEDDING_API_BASE_URL")
+    if not base_url:
+        raise AuthenticationError("EMBEDDING_API_BASE_URL environment variable not set")
+    
     return EmbeddingService(
         api_key=api_key,
         model=model,
@@ -456,10 +464,10 @@ async def health_check():
     """
     try:
         api_key = os.getenv("EMBEDDING_API_KEY")
-        base_url = os.getenv("EMBEDDING_API_BASE_URL", "http://dev.fit-ai.woa.com/api/llmproxy")
+        base_url = os.getenv("EMBEDDING_API_BASE_URL")
         
         # Check authentication
-        authentication_status = "valid" if api_key else "invalid"
+        authentication_status = "valid" if (api_key and base_url) else "invalid"
         
         # Basic connectivity check
         api_connectivity = api_key is not None
@@ -595,11 +603,41 @@ async def embed_from_chunking_result(
             timestamp=datetime.utcnow(),
         )
 
-        # Save with source information
-        storage.save_batch_result(
-            response,
-            source_document_id=request.document_id
+        # Get chunking_result_id from the service (it already found the latest result)
+        from ..models.chunking_result import ChunkingResult, ResultStatus
+        from ..models.chunking_task import ChunkingTask, StrategyType
+        
+        # Build query for latest active result
+        query = db.query(ChunkingResult).join(
+            ChunkingTask,
+            ChunkingResult.task_id == ChunkingTask.task_id
+        ).filter(
+            ChunkingTask.source_document_id == request.document_id,
+            ChunkingResult.status == ResultStatus.COMPLETED,
+            ChunkingResult.is_active == True
         )
+        
+        # Apply strategy filter if provided
+        if request.strategy_type:
+            try:
+                strategy_enum = StrategyType[request.strategy_type.upper()]
+                query = query.filter(ChunkingTask.chunking_strategy == strategy_enum)
+            except KeyError:
+                pass
+        
+        # Get the most recent result
+        chunking_result = query.order_by(ChunkingResult.created_at.desc()).first()
+        chunking_result_id = chunking_result.result_id if chunking_result else None
+        
+        # Save with dual-write (JSON + Database)
+        db_record = storage.save_with_database(
+            session=db,
+            response=response,
+            document_id=request.document_id,
+            chunking_result_id=chunking_result_id,
+            model=request.model
+        )
+        
         return response
 
     except ValueError as exc:
@@ -772,11 +810,41 @@ async def embed_from_document(
             timestamp=datetime.utcnow(),
         )
 
-        # Save with source information
-        storage.save_batch_result(
-            response,
-            source_document_id=request.document_id
+        # Get chunking_result_id from the service (it already found the latest result)
+        from ..models.chunking_result import ChunkingResult, ResultStatus
+        from ..models.chunking_task import ChunkingTask, StrategyType
+        
+        # Build query for latest active result
+        query = db.query(ChunkingResult).join(
+            ChunkingTask,
+            ChunkingResult.task_id == ChunkingTask.task_id
+        ).filter(
+            ChunkingTask.source_document_id == request.document_id,
+            ChunkingResult.status == ResultStatus.COMPLETED,
+            ChunkingResult.is_active == True
         )
+        
+        # Apply strategy filter if provided
+        if request.strategy_type:
+            try:
+                strategy_enum = StrategyType[request.strategy_type.upper()]
+                query = query.filter(ChunkingTask.chunking_strategy == strategy_enum)
+            except KeyError:
+                pass
+        
+        # Get the most recent result
+        chunking_result = query.order_by(ChunkingResult.created_at.desc()).first()
+        chunking_result_id = chunking_result.result_id if chunking_result else None
+        
+        # Save with dual-write (JSON + Database)
+        db_record = storage.save_with_database(
+            session=db,
+            response=response,
+            document_id=request.document_id,
+            chunking_result_id=chunking_result_id,
+            model=request.model
+        )
+        
         return response
 
     except ValueError as exc:

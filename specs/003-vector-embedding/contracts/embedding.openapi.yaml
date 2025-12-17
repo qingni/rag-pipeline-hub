@@ -1,0 +1,496 @@
+openapi: 3.0.3
+info:
+  title: Vector Embedding API
+  description: |
+    API for converting text chunks into high-dimensional vector representations using multiple embedding models.
+    Supports document-based vectorization via chunking results and ad-hoc text vectorization.
+  version: 1.0.0
+  contact:
+    name: RAG Framework Team
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+
+tags:
+  - name: vectorization
+    description: Convert text chunks to vector embeddings
+  - name: models
+    description: Query available embedding models
+
+paths:
+  /embedding/from-chunking-result:
+    post:
+      tags:
+        - vectorization
+      summary: Vectorize all chunks from a chunking result
+      description: |
+        Converts all text chunks from a completed chunking result into vector embeddings.
+        Corresponds to User Story 1 (FR-001).
+      operationId: vectorizeChunkingResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VectorizationFromChunkingRequest'
+      responses:
+        '200':
+          description: Vectorization completed (SUCCESS or PARTIAL_SUCCESS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VectorizationResponse'
+        '400':
+          description: Invalid request (bad model name, empty chunks, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Chunking result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error (API timeout, dimension mismatch, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /embedding/from-document:
+    post:
+      tags:
+        - vectorization
+      summary: Vectorize latest chunking result for a document
+      description: |
+        Automatically selects and vectorizes the latest active chunking result for a document.
+        Optionally filters by chunking strategy type.
+        Corresponds to User Story 2 (FR-002, FR-003).
+      operationId: vectorizeDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VectorizationFromDocumentRequest'
+      responses:
+        '200':
+          description: Vectorization completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VectorizationResponse'
+        '404':
+          description: Document or chunking result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /embedding/single:
+    post:
+      tags:
+        - vectorization
+      summary: Vectorize single text (backend-only)
+      description: |
+        Vectorizes a single text string for ad-hoc queries and testing.
+        Backend API only - not exposed in frontend UI.
+        Corresponds to User Story 4 (FR-004).
+      operationId: vectorizeSingleText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - text
+                - model
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 10000
+                  description: Text to vectorize
+                  example: "人工智能是什么"
+                model:
+                  type: string
+                  enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+                  description: Embedding model to use
+      responses:
+        '200':
+          description: Vectorization successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vector:
+                    type: array
+                    items:
+                      type: number
+                      format: float
+                    description: Embedding vector
+                  dimension:
+                    type: integer
+                    description: Vector dimension
+                  model:
+                    type: string
+                    description: Model used
+        '400':
+          description: Invalid request (empty text, unsupported model)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /embedding/batch:
+    post:
+      tags:
+        - vectorization
+      summary: Vectorize batch of texts (backend-only)
+      description: |
+        Vectorizes multiple text strings in a single request.
+        Max 1000 texts per batch. Partial success handling enabled.
+        Backend API only - not exposed in frontend UI.
+        Corresponds to User Story 5 (FR-005).
+      operationId: vectorizeBatchTexts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - texts
+                - model
+              properties:
+                texts:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 1000
+                  description: Array of texts to vectorize
+                  example: ["文本一", "文本二", "文本三"]
+                model:
+                  type: string
+                  enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+      responses:
+        '200':
+          description: Batch vectorization completed (may include failures)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [SUCCESS, PARTIAL_SUCCESS, FAILED]
+                  successful_count:
+                    type: integer
+                  failed_count:
+                    type: integer
+                  vectors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:
+                          type: integer
+                        vector:
+                          type: array
+                          items:
+                            type: number
+                        dimension:
+                          type: integer
+                  failures:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:
+                          type: integer
+                        error:
+                          type: string
+        '400':
+          description: Invalid request (>1000 texts, empty array)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /embedding/models:
+    get:
+      tags:
+        - models
+      summary: List available embedding models
+      description: |
+        Returns metadata for all supported embedding models.
+        Corresponds to FR-013.
+      operationId: listEmbeddingModels
+      responses:
+        '200':
+          description: List of available models
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/ModelInfo'
+              example:
+                bge-m3:
+                  name: "bge-m3"
+                  dimension: 1024
+                  description: "BGE-M3 多语言模型，支持中英文，性能优秀"
+                  provider: "bge"
+                  supports_multilingual: true
+                  max_batch_size: 1000
+                qwen3-embedding-8b:
+                  name: "qwen3-embedding-8b"
+                  dimension: 4096
+                  description: "通义千问 Embedding 模型，8B 参数，高质量向量"
+                  provider: "qwen"
+                  supports_multilingual: true
+                  max_batch_size: 1000
+                jina-embeddings-v4:
+                  name: "jina-embeddings-v4"
+                  dimension: 2048
+                  description: "Jina AI Embeddings v4，多语言支持，语义理解强"
+                  provider: "jina"
+                  supports_multilingual: true
+                  max_batch_size: 1000
+
+  /health:
+    get:
+      tags:
+        - models
+      summary: Health check endpoint
+      description: |
+        Verifies service readiness and API connectivity.
+        Corresponds to NFR-001.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service healthy or degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+components:
+  schemas:
+    VectorizationFromChunkingRequest:
+      type: object
+      required:
+        - chunking_result_id
+        - model
+      properties:
+        chunking_result_id:
+          type: string
+          description: ID of completed chunking result
+          example: "chunk-a3b7c9f2"
+        model:
+          type: string
+          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+          description: Embedding model to use
+
+    VectorizationFromDocumentRequest:
+      type: object
+      required:
+        - document_id
+        - model
+      properties:
+        document_id:
+          type: string
+          description: Document ID
+          example: "doc-123"
+        model:
+          type: string
+          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+          description: Embedding model to use
+        strategy:
+          type: string
+          enum: [fixed_size, semantic, recursive, markdown, sentence, paragraph]
+          description: Optional filter for chunking strategy
+          nullable: true
+
+    VectorizationResponse:
+      type: object
+      required:
+        - request_id
+        - document_id
+        - model
+        - status
+        - metadata
+        - vectors
+        - failures
+        - json_file_path
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Unique request identifier
+        document_id:
+          type: string
+          description: Source document ID
+        chunking_result_id:
+          type: string
+          nullable: true
+          description: Source chunking result ID (null for ad-hoc text)
+        model:
+          type: string
+          description: Model used for vectorization
+        status:
+          type: string
+          enum: [SUCCESS, FAILED, PARTIAL_SUCCESS]
+          description: Processing outcome
+        metadata:
+          type: object
+          properties:
+            total_chunks:
+              type: integer
+            successful_count:
+              type: integer
+            failed_count:
+              type: integer
+            vector_dimension:
+              type: integer
+            processing_time_ms:
+              type: number
+              format: float
+            created_at:
+              type: string
+              format: date-time
+        vectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/VectorResult'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/FailureInfo'
+        json_file_path:
+          type: string
+          description: Relative path to JSON file with full vector data
+
+    VectorResult:
+      type: object
+      properties:
+        index:
+          type: integer
+          description: Original chunk index
+        chunk_text:
+          type: string
+          description: Original text chunk
+        vector:
+          type: array
+          items:
+            type: number
+            format: float
+          description: Embedding vector (dimension matches model)
+        dimension:
+          type: integer
+          description: Actual vector dimension
+        text_length:
+          type: integer
+          description: Character count of chunk
+        processing_time_ms:
+          type: number
+          format: float
+          description: Time to vectorize this chunk
+
+    FailureInfo:
+      type: object
+      properties:
+        index:
+          type: integer
+          description: Failed chunk index
+        chunk_text:
+          type: string
+          description: Failed chunk text
+        error:
+          type: string
+          description: Human-readable error message
+        error_code:
+          type: string
+          description: Machine-readable error code
+          example: "TIMEOUT"
+
+    ModelInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Model identifier
+        dimension:
+          type: integer
+          description: Vector dimension
+        description:
+          type: string
+          description: Model description (Chinese)
+        provider:
+          type: string
+          description: Model provider
+        supports_multilingual:
+          type: boolean
+          description: Multilingual support flag
+        max_batch_size:
+          type: integer
+          description: Maximum batch size
+
+    HealthCheckResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall health status
+        service:
+          type: string
+          description: Service status
+          example: "up"
+        api_connectivity:
+          type: boolean
+          description: Embedding API reachability
+        models_available:
+          type: array
+          items:
+            type: string
+          description: List of available models
+        authentication:
+          type: string
+          enum: [valid, invalid, not_checked]
+          description: API authentication status
+        timestamp:
+          type: string
+          format: date-time
+          description: Health check timestamp
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "ChunkingResultNotFound"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "No chunking result found with ID: chunk-456"
+        details:
+          type: object
+          description: Additional error context
+          nullable: true

@@ -5,6 +5,20 @@ from .chunking_task import ChunkingTask, TaskStatus, StrategyType
 from .chunking_strategy import ChunkingStrategy
 from .chunking_result import ChunkingResult, ResultStatus
 from .chunk import Chunk
+from .embedding_models import (
+    EmbeddingResult,
+    ResponseStatus,
+    ErrorType,
+    SingleEmbeddingRequest,
+    BatchEmbeddingRequest,
+    ChunkingResultEmbeddingRequest,
+    DocumentEmbeddingRequest,
+    SingleEmbeddingResponse,
+    BatchEmbeddingResponse,
+    EmbeddingResultDetail,
+    EmbeddingResultListResponse,
+    PaginationMeta,
+)
 
 __all__ = [
     "Document",
@@ -16,4 +30,16 @@ __all__ = [
     "ChunkingResult",
     "ResultStatus",
     "Chunk",
+    "EmbeddingResult",
+    "ResponseStatus",
+    "ErrorType",
+    "SingleEmbeddingRequest",
+    "BatchEmbeddingRequest",
+    "ChunkingResultEmbeddingRequest",
+    "DocumentEmbeddingRequest",
+    "SingleEmbeddingResponse",
+    "BatchEmbeddingResponse",
+    "EmbeddingResultDetail",
+    "EmbeddingResultListResponse",
+    "PaginationMeta",
 ]

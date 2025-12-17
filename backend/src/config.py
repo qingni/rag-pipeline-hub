@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     
     # Embedding API Configuration
     EMBEDDING_API_KEY: Optional[str] = None
-    EMBEDDING_API_BASE_URL: str = "http://dev.fit-ai.woa.com/api/llmproxy"
+    EMBEDDING_API_BASE_URL: str = ""  # 必须通过 .env 配置
     EMBEDDING_DEFAULT_MODEL: str = "qwen3-embedding-8b"
     
     # Embedding Retry Configuration

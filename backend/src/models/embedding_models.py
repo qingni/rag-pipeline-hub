@@ -1,13 +1,20 @@
 """
-Pydantic models for embedding service.
+Embedding models for both Pydantic (API) and SQLAlchemy (Database).
 
-Defines request/response schemas and validation rules.
+Defines:
+- SQLAlchemy ORM model: EmbeddingResult (database table)
+- Pydantic models: Request/response schemas and validation rules
 """
 from typing import List, Optional, Literal
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator, ConfigDict
+from sqlalchemy import Column, String, Integer, Float, DateTime, CheckConstraint, Index
+from sqlalchemy.sql import func
 import hashlib
+import uuid
+
+from ..storage.database import Base
 
 
 # Enums for error classification
@@ -27,6 +34,176 @@ class ResponseStatus(str, Enum):
     SUCCESS = "SUCCESS"
     PARTIAL_SUCCESS = "PARTIAL_SUCCESS"
     FAILED = "FAILED"
+
+
+# ============================================================================
+# SQLAlchemy ORM Models (Database Tables)
+# ============================================================================
+
+class EmbeddingResult(Base):
+    """
+    Database model for storing embedding result metadata.
+    
+    Vector values are stored separately as JSON files to optimize database performance.
+    This table stores metadata enabling fast queries and traceability.
+    
+    Implements:
+    - FR-021: Database table for embedding metadata
+    - FR-022: Dual-write storage pattern (DB + JSON)
+    - FR-023: Relative JSON file path storage
+    - FR-024: Update-on-duplicate for same document+model
+    - FR-028: Performance indexes (document_id+model, created_at, status)
+    - NFR-003: Row-level locking for concurrent safety
+    """
+    
+    __tablename__ = "embedding_results"
+    
+    # Identity
+    result_id = Column(
+        String(36), 
+        primary_key=True, 
+        default=lambda: str(uuid.uuid4()),
+        comment="Unique identifier for this embedding operation"
+    )
+    
+    # Source Traceability (FR-021)
+    document_id = Column(
+        String(36), 
+        nullable=False,
+        comment="Reference to source document"
+    )
+    chunking_result_id = Column(
+        String(36), 
+        nullable=True,
+        comment="Reference to chunking result (NULL for ad-hoc text)"
+    )
+    
+    # Model Configuration (FR-006)
+    model = Column(
+        String(50), 
+        nullable=False,
+        comment="Embedding model name (bge-m3, qwen3-embedding-8b, etc.)"
+    )
+    vector_dimension = Column(
+        Integer, 
+        nullable=False,
+        comment="Dimension of generated vectors (1024, 2048, 4096)"
+    )
+    
+    # Processing Status
+    status = Column(
+        String(20), 
+        nullable=False,
+        comment="Processing outcome (SUCCESS, FAILED, PARTIAL_SUCCESS)"
+    )
+    successful_count = Column(
+        Integer, 
+        nullable=False, 
+        default=0,
+        comment="Number of successfully vectorized chunks"
+    )
+    failed_count = Column(
+        Integer, 
+        nullable=False, 
+        default=0,
+        comment="Number of failed chunks"
+    )
+    
+    # Storage Reference (FR-023)
+    json_file_path = Column(
+        String, 
+        nullable=False,
+        comment="Relative path to JSON file containing vector values"
+    )
+    
+    # Performance Metrics (FR-017)
+    processing_time_ms = Column(
+        Float, 
+        nullable=True,
+        comment="Total vectorization time in milliseconds"
+    )
+    
+    # Timestamps
+    created_at = Column(
+        DateTime(timezone=True), 
+        server_default=func.now(), 
+        nullable=False,
+        comment="Record creation timestamp (UTC)"
+    )
+    
+    # Error Tracking
+    error_message = Column(
+        String, 
+        nullable=True,
+        comment="Detailed error for FAILED or PARTIAL_SUCCESS status"
+    )
+    
+    # Constraints (FR-021)
+    __table_args__ = (
+        # Composite index for "latest embedding by document+model" query (FR-028)
+        Index('idx_embedding_doc_model', 'document_id', 'model'),
+        
+        # Index for timestamp-based queries and sorting (FR-028)
+        Index('idx_embedding_created_at', 'created_at'),
+        
+        # Index for status-based filtering (FR-028)
+        Index('idx_embedding_status', 'status'),
+        
+        # Check constraints for data integrity
+        CheckConstraint(
+            "status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS')",
+            name='check_status_enum'
+        ),
+        CheckConstraint(
+            "model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4')",
+            name='check_model_enum'
+        ),
+        CheckConstraint(
+            'successful_count >= 0',
+            name='check_successful_count_non_negative'
+        ),
+        CheckConstraint(
+            'failed_count >= 0',
+            name='check_failed_count_non_negative'
+        ),
+        CheckConstraint(
+            'vector_dimension > 0',
+            name='check_vector_dimension_positive'
+        ),
+    )
+    
+    def __repr__(self):
+        return (
+            f"<EmbeddingResult("
+            f"id={self.result_id[:8]}..., "
+            f"doc={self.document_id[:8]}..., "
+            f"model={self.model}, "
+            f"status={self.status}, "
+            f"vectors={self.successful_count}"
+            f")>"
+        )
+    
+    def to_dict(self) -> dict:
+        """Convert ORM model to dictionary for API responses."""
+        return {
+            "result_id": self.result_id,
+            "document_id": self.document_id,
+            "chunking_result_id": self.chunking_result_id,
+            "model": self.model,
+            "status": self.status,
+            "successful_count": self.successful_count,
+            "failed_count": self.failed_count,
+            "vector_dimension": self.vector_dimension,
+            "json_file_path": self.json_file_path,
+            "processing_time_ms": self.processing_time_ms,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "error_message": self.error_message,
+        }
+
+
+# ============================================================================
+# Pydantic Models (API Request/Response)
+# ============================================================================
 
 
 # Request Models
@@ -324,3 +501,39 @@ class AuthenticationError(EmbeddingServiceError):
 class NetworkError(EmbeddingServiceError):
     """Network connectivity failure."""
     pass
+
+
+# ============================================================================
+# Query API Response Models
+# ============================================================================
+
+class EmbeddingResultDetail(BaseModel):
+    """Detailed embedding result for query responses (FR-025, FR-026)."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    result_id: str = Field(..., description="Unique result identifier")
+    document_id: str = Field(..., description="Source document ID")
+    chunking_result_id: Optional[str] = Field(None, description="Source chunking result ID")
+    model: str = Field(..., description="Embedding model used")
+    status: str = Field(..., description="Processing status")
+    successful_count: int = Field(..., ge=0, description="Successfully vectorized chunks")
+    failed_count: int = Field(..., ge=0, description="Failed chunks")
+    vector_dimension: int = Field(..., gt=0, description="Vector dimension")
+    json_file_path: str = Field(..., description="Relative path to JSON file")
+    processing_time_ms: Optional[float] = Field(None, ge=0, description="Processing time")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    error_message: Optional[str] = Field(None, description="Error details")
+
+
+class PaginationMeta(BaseModel):
+    """Pagination metadata for list responses (FR-027)."""
+    total_count: int = Field(..., ge=0, description="Total results matching filters")
+    page: int = Field(..., ge=1, description="Current page number")
+    page_size: int = Field(..., ge=1, le=100, description="Results per page")
+    total_pages: int = Field(..., ge=0, description="Total pages")
+
+
+class EmbeddingResultListResponse(BaseModel):
+    """Response for paginated embedding result list (FR-027)."""
+    results: List[EmbeddingResultDetail] = Field(default_factory=list, description="Result items")
+    pagination: PaginationMeta = Field(..., description="Pagination metadata")

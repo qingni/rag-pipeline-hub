@@ -1,0 +1,297 @@
+openapi: 3.0.3
+info:
+  title: Embedding Query API
+  description: |
+    API for querying embedding results from database.
+    Supports retrieval by result ID, document ID, and paginated listing with filters.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+
+tags:
+  - name: query
+    description: Query embedding results
+
+paths:
+  /embedding/results/{result_id}:
+    get:
+      tags:
+        - query
+      summary: Get embedding result by ID
+      description: |
+        Retrieves complete metadata for a specific embedding result.
+        Corresponds to FR-025.
+      operationId: getEmbeddingResultById
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Embedding result UUID
+          example: "a3b7c9f2-4e5d-6789-abcd-ef0123456789"
+      responses:
+        '200':
+          description: Embedding result found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResultDetail'
+        '404':
+          description: Result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /embedding/results/by-document/{document_id}:
+    get:
+      tags:
+        - query
+      summary: Get latest embedding result for document
+      description: |
+        Retrieves the most recent embedding result for a document.
+        Optionally filters by embedding model.
+        Corresponds to FR-026.
+      operationId: getLatestEmbeddingByDocument
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Document ID
+          example: "doc-123"
+        - name: model
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+          description: Filter by embedding model (optional)
+      responses:
+        '200':
+          description: Latest embedding result found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResultDetail'
+        '404':
+          description: No embedding result found for document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /embedding/results:
+    get:
+      tags:
+        - query
+      summary: List embedding results with pagination and filters
+      description: |
+        Returns paginated list of embedding results with optional filters.
+        Corresponds to FR-027.
+      operationId: listEmbeddingResults
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Page number (1-indexed)
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Results per page (max 100)
+        - name: document_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by document ID
+        - name: model
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+          description: Filter by embedding model
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [SUCCESS, FAILED, PARTIAL_SUCCESS]
+          description: Filter by processing status
+        - name: date_from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Filter results created on or after this date (YYYY-MM-DD)
+          example: "2025-12-15"
+        - name: date_to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Filter results created on or before this date (YYYY-MM-DD)
+          example: "2025-12-16"
+      responses:
+        '200':
+          description: Paginated list of embedding results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResultListResponse'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    EmbeddingResultDetail:
+      type: object
+      required:
+        - result_id
+        - document_id
+        - model
+        - status
+        - successful_count
+        - failed_count
+        - vector_dimension
+        - json_file_path
+        - created_at
+      properties:
+        result_id:
+          type: string
+          format: uuid
+          description: Unique embedding result identifier
+          example: "a3b7c9f2-4e5d-6789-abcd-ef0123456789"
+        document_id:
+          type: string
+          description: Source document ID
+          example: "doc-123"
+        chunking_result_id:
+          type: string
+          nullable: true
+          description: Source chunking result ID (null for ad-hoc text)
+          example: "chunk-456"
+        model:
+          type: string
+          description: Embedding model used
+          example: "qwen3-embedding-8b"
+        status:
+          type: string
+          enum: [SUCCESS, FAILED, PARTIAL_SUCCESS]
+          description: Processing outcome
+        successful_count:
+          type: integer
+          description: Number of successfully vectorized chunks
+          example: 50
+        failed_count:
+          type: integer
+          description: Number of failed chunks
+          example: 0
+        vector_dimension:
+          type: integer
+          description: Dimension of generated vectors
+          example: 4096
+        json_file_path:
+          type: string
+          description: Relative path to JSON file with vector data
+          example: "embedding/2025-12-16/embedding_a3b7c9f2_20251216_143052.json"
+        processing_time_ms:
+          type: number
+          format: float
+          nullable: true
+          description: Total processing time in milliseconds
+          example: 8234.5
+        created_at:
+          type: string
+          format: date-time
+          description: Record creation timestamp (UTC)
+          example: "2025-12-16T14:30:52Z"
+        error_message:
+          type: string
+          nullable: true
+          description: Error details (populated for FAILED or PARTIAL_SUCCESS)
+          example: "3 chunks failed due to API timeout"
+
+    EmbeddingResultListResponse:
+      type: object
+      required:
+        - results
+        - pagination
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmbeddingResultDetail'
+          description: Array of embedding results for current page
+        pagination:
+          type: object
+          required:
+            - total_count
+            - total_pages
+            - current_page
+            - page_size
+          properties:
+            total_count:
+              type: integer
+              description: Total number of results matching filters
+              example: 157
+            total_pages:
+              type: integer
+              description: Total number of pages
+              example: 8
+            current_page:
+              type: integer
+              description: Current page number (1-indexed)
+              example: 2
+            page_size:
+              type: integer
+              description: Results per page
+              example: 20
+            has_next:
+              type: boolean
+              description: Whether next page exists
+              example: true
+            has_previous:
+              type: boolean
+              description: Whether previous page exists
+              example: true
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "EmbeddingResultNotFound"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "No embedding result found with ID: a3b7c9f2-4e5d-6789-abcd-ef0123456789"
+        details:
+          type: object
+          description: Additional error context
+          nullable: true

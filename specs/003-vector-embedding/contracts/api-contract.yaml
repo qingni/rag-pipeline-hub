@@ -277,9 +277,15 @@ paths:
                     supports_multilingual: true
                     max_batch_size: 1000
                   - name: "qwen3-embedding-8b"
-                    dimension: 1536
+                    dimension: 4096
                     description: "通义千问 Embedding 模型，8B 参数"
                     provider: "qwen"
+                    supports_multilingual: true
+                    max_batch_size: 1000
+                  - name: "jina-embeddings-v4"
+                    dimension: 2048
+                    description: "Jina Embeddings v4"
+                    provider: "jina"
                     supports_multilingual: true
                     max_batch_size: 1000
                 count: 4
