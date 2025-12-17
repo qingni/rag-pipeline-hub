@@ -65,7 +65,7 @@
           <template #icon>
             <Zap :size="18" />
           </template>
-          {{ store.isProcessing ? '向量化中...' : '开始向量化' }}
+          {{ buttonText }}
         </t-button>
         
         <!-- 验证提示 -->
@@ -87,13 +87,18 @@
     
     <!-- 右侧结果面板 -->
     <div class="results-panel">
-      <EmbeddingResults :result="store.currentResult" />
+      <!-- 加载中状态 -->
+      <div v-if="loadingResult" class="loading-overlay">
+        <t-loading size="large" text="正在加载向量化结果..." />
+      </div>
+      
+      <EmbeddingResults v-else :result="store.currentResult" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { Hash, Zap, AlertCircle } from 'lucide-vue-next'
 import { useEmbeddingStore } from '@/stores/embedding'
@@ -105,6 +110,7 @@ const store = useEmbeddingStore()
 
 const loadingDocs = ref(false)
 const loadingModels = ref(false)
+const loadingResult = ref(false)
 const advancedExpanded = ref([])
 const maxRetries = ref(3)
 const timeout = ref(60)
@@ -118,6 +124,32 @@ const validationMessage = computed(() => {
   }
   return ''
 })
+
+const buttonText = computed(() => {
+  if (store.isProcessing) {
+    return '向量化中...'
+  }
+  return store.currentResult ? '重新向量化' : '开始向量化'
+})
+
+// 监听文档选择变化，自动加载历史向量化结果
+watch(
+  () => store.selectedDocumentId,
+  async (newDocumentId, oldDocumentId) => {
+    if (!newDocumentId) {
+      store.clearResults()
+      return
+    }
+    
+    // 文档切换时才加载（避免初始化重复加载）
+    if (oldDocumentId !== undefined && newDocumentId !== oldDocumentId) {
+      await loadLatestResult(newDocumentId)
+    } else if (oldDocumentId === undefined) {
+      // 首次选择文档
+      await loadLatestResult(newDocumentId)
+    }
+  }
+)
 
 onMounted(async () => {
   // 并行加载文档和模型
@@ -150,6 +182,24 @@ async function loadModels() {
     MessagePlugin.error(error.message || '获取模型列表失败')
   } finally {
     loadingModels.value = false
+  }
+}
+
+async function loadLatestResult(documentId) {
+  try {
+    loadingResult.value = true
+    await store.fetchLatestEmbeddingResult(documentId)
+    
+    if (store.currentResult) {
+      MessagePlugin.success('已加载历史向量化结果')
+    }
+  } catch (error) {
+    // 404 错误已在 store 中处理，不显示错误消息
+    if (error.response?.status !== 404) {
+      console.error('Failed to load latest result:', error)
+    }
+  } finally {
+    loadingResult.value = false
   }
 }
 
@@ -263,5 +313,16 @@ async function handleStartEmbedding() {
 .results-panel {
   flex: 1;
   overflow: hidden;
+  position: relative;
+}
+
+.loading-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background-color: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
 }
 </style>

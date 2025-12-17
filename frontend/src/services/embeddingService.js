@@ -124,6 +124,32 @@ const embeddingService = {
   async getModelInfo(modelName) {
     return apiClient.get(`/embedding/models/${modelName}`)
   },
+
+  /**
+   * 获取文档的最新向量化结果
+   * @param {number} documentId - 文档ID
+   * @param {string} model - 可选的模型过滤
+   */
+  async getLatestByDocument(documentId, model = null) {
+    const params = model ? { model } : {}
+    return apiClient.get(`/embedding/results/by-document/${documentId}`, { params })
+  },
+
+  /**
+   * 根据结果ID获取向量化结果
+   * @param {string} resultId - 结果ID
+   */
+  async getResultById(resultId) {
+    return apiClient.get(`/embedding/results/${resultId}`)
+  },
+
+  /**
+   * 列出向量化结果（带分页和过滤）
+   * @param {Object} params - 查询参数
+   */
+  async listResults(params = {}) {
+    return apiClient.get('/embedding/results', { params })
+  },
 }
 
 export default embeddingService

@@ -106,7 +106,7 @@
             <t-button 
               size="small" 
               variant="outline" 
-              @click="downloadVectors"
+              @click="downloadVectors($event)"
             >
               <Download :size="14" />
               导出向量
@@ -152,7 +152,7 @@
               <t-button 
                 size="small" 
                 variant="text" 
-                @click="toggleVectorExpand(idx)"
+                @click="toggleVectorExpand(idx, $event)"
               >
                 {{ expandedVectors.has(idx) ? '收起' : '展开' }}
               </t-button>
@@ -202,7 +202,7 @@
                 <t-button 
                   size="small" 
                   variant="text" 
-                  @click="copyVector(vector.vector)"
+                  @click="copyVector(vector.vector, $event)"
                 >
                   <Copy :size="14" />
                   复制
@@ -413,7 +413,11 @@ function getHeatmapColor(value) {
 }
 
 // 交互操作
-function toggleVectorExpand(index) {
+function toggleVectorExpand(index, event) {
+  if (event) {
+    event.stopPropagation?.()
+    event.preventDefault?.()
+  }
   if (expandedVectors.value.has(index)) {
     expandedVectors.value.delete(index)
   } else {
@@ -421,7 +425,11 @@ function toggleVectorExpand(index) {
   }
 }
 
-function copyVector(vector) {
+function copyVector(vector, event) {
+  if (event) {
+    event.stopPropagation?.()
+    event.preventDefault?.()
+  }
   const text = JSON.stringify(vector)
   navigator.clipboard.writeText(text).then(() => {
     MessagePlugin.success('向量已复制到剪贴板')
@@ -430,7 +438,11 @@ function copyVector(vector) {
   })
 }
 
-function downloadVectors() {
+function downloadVectors(event) {
+  if (event) {
+    event.stopPropagation?.()
+    event.preventDefault?.()
+  }
   if (!props.result?.vectors) return
   
   const data = {

@@ -8,10 +8,16 @@ from ..models.embedding_models import (
     EmbeddingResult,
     ErrorResponse,
     EmbeddingResultDetail,
+    EmbeddingResultWithVectors,
     EmbeddingResultListResponse,
     PaginationMeta,
+    Vector,
+    EmbeddingFailure,
 )
 from ..storage.embedding_db import EmbeddingResultDB
+from ..storage.embedding_storage import EmbeddingStorage
+import json
+from pathlib import Path
 
 router = APIRouter(prefix="/embedding/results", tags=["embedding-queries"])
 
@@ -73,7 +79,7 @@ async def get_embedding_result(
 
 @router.get(
     "/by-document/{document_id}",
-    response_model=EmbeddingResultDetail,
+    response_model=EmbeddingResultWithVectors,
     status_code=status.HTTP_200_OK,
     responses={
         404: {"model": ErrorResponse, "description": "Result not found"},
@@ -82,6 +88,7 @@ async def get_embedding_result(
 async def get_latest_embedding_result(
     document_id: str,
     model: Optional[str] = Query(None, description="Filter by embedding model"),
+    include_vectors: bool = Query(True, description="Include vector data from JSON file"),
     db: Session = Depends(get_db),
 ):
     """
@@ -92,10 +99,11 @@ async def get_latest_embedding_result(
     Args:
         document_id: Document identifier
         model: Optional model filter (e.g., 'bge-m3')
+        include_vectors: Whether to load vector data from JSON file
         db: Database session
         
     Returns:
-        Latest embedding result metadata
+        Latest embedding result metadata (with vectors if include_vectors=True)
         
     Raises:
         404: No result found for document
@@ -115,7 +123,82 @@ async def get_latest_embedding_result(
             },
         )
     
-    return EmbeddingResultDetail.model_validate(result)
+    # Convert to dict for modification
+    result_dict = {
+        "result_id": result.result_id,
+        "document_id": result.document_id,
+        "chunking_result_id": result.chunking_result_id,
+        "model": result.model,
+        "status": result.status,
+        "successful_count": result.successful_count,
+        "failed_count": result.failed_count,
+        "vector_dimension": result.vector_dimension,
+        "json_file_path": result.json_file_path,
+        "processing_time_ms": result.processing_time_ms,
+        "created_at": result.created_at,
+        "error_message": result.error_message,
+        "vectors": [],
+        "failures": [],
+        "metadata": None,
+    }
+    
+    # Load vector data from JSON file if requested
+    if include_vectors and result.json_file_path:
+        try:
+            # Construct absolute path to JSON file
+            # Note: json_file_path already contains "embedding/" prefix from database
+            json_path = Path("results") / result.json_file_path
+            
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    json_data = json.load(f)
+                
+                # Extract vectors and failures from JSON
+                result_dict["vectors"] = json_data.get("vectors", [])
+                result_dict["failures"] = json_data.get("failures", [])
+                
+                # Build metadata from JSON data
+                json_metadata = json_data.get("metadata", {})
+                result_dict["metadata"] = {
+                    "model": json_metadata.get("model", result.model),
+                    "model_dimension": json_metadata.get("model_dimension", result.vector_dimension),
+                    "batch_size": json_metadata.get("batch_size"),
+                    "successful_count": json_metadata.get("successful_count", result.successful_count),
+                    "failed_count": json_metadata.get("failed_count", result.failed_count),
+                    "retry_count": json_metadata.get("retry_count", 0),
+                    "processing_time_ms": json_metadata.get("processing_time_ms", result.processing_time_ms),
+                    "vectors_per_second": json_metadata.get("vectors_per_second"),
+                }
+            else:
+                # File doesn't exist, log warning and use database metadata only
+                import logging
+                logging.warning(f"JSON file not found: {json_path}")
+                result_dict["metadata"] = {
+                    "model": result.model,
+                    "model_dimension": result.vector_dimension,
+                    "batch_size": None,
+                    "successful_count": result.successful_count,
+                    "failed_count": result.failed_count,
+                    "retry_count": 0,
+                    "processing_time_ms": result.processing_time_ms,
+                    "vectors_per_second": None,
+                }
+        except Exception as e:
+            # If JSON loading fails, log error but still return metadata
+            import logging
+            logging.warning(f"Failed to load vectors from {result.json_file_path}: {e}")
+            result_dict["metadata"] = {
+                "model": result.model,
+                "model_dimension": result.vector_dimension,
+                "batch_size": None,
+                "successful_count": result.successful_count,
+                "failed_count": result.failed_count,
+                "retry_count": 0,
+                "processing_time_ms": result.processing_time_ms,
+                "vectors_per_second": None,
+            }
+    
+    return EmbeddingResultWithVectors(**result_dict)
 
 
 @router.get(

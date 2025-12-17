@@ -1,776 +1,659 @@
-# Quickstart: Vector Embedding Module Development
+# Quickstart Guide: Vector Embedding Module
 
 **Feature**: 003-vector-embedding  
-**Target Audience**: Developers implementing the vector embedding module  
-**Prerequisites**: Python 3.10+, Node.js 18+, existing RAG framework setup
+**Date**: 2025-12-17
+
+## Overview
+
+This guide provides step-by-step instructions for developers to understand, build, test, and use the vector embedding module. Follow these steps to get the module running on your local machine.
 
 ---
 
-## 🚀 Setup
+## Prerequisites
 
-### 1. Backend Dependencies
+### Required Software
+- Python 3.11+ (backend)
+- Node.js 18+ and npm/yarn (frontend)
+- SQLite 3 (for database)
+- Git (for version control)
 
-Install required Python packages:
+### Required Accounts/Credentials
+- Embedding API key (OpenAI-compatible service)
+- API base URL for embedding service
+
+### Knowledge Prerequisites
+- Basic understanding of vector embeddings
+- Familiarity with REST APIs
+- Experience with Vue.js (for frontend work)
+- Understanding of SQLAlchemy ORM (for backend work)
+
+---
+
+## Step 1: Environment Setup
+
+### 1.1 Clone Repository and Switch Branch
+
 ```bash
-cd backend
-pip install fastapi sqlalchemy httpx tenacity pydantic
+cd /path/to/rag-framework-spec
+git checkout 003-vector-embedding
 ```
 
-**Key Libraries**:
-- `httpx`: Async HTTP client for OpenAI-compatible embedding API
-- `tenacity`: Exponential backoff retry mechanism
-- `sqlalchemy`: ORM for `embedding_results` table
-- `pydantic`: Request/response validation
+### 1.2 Backend Setup
 
-### 2. Frontend Dependencies
+```bash
+cd backend
 
-Install Vue3 components (already in project):
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 1.3 Frontend Setup
+
 ```bash
 cd frontend
-# TDesign Vue Next, Vue Router, Pinia already installed
+
+# Install dependencies
+npm install
+# or
+yarn install
 ```
 
-### 3. Database Migration
+### 1.4 Configure Environment Variables
 
-Create `embedding_results` table:
+Create `backend/.env` file:
+
+```bash
+# Database
+DATABASE_URL=sqlite:///./app.db
+
+# Embedding API Configuration (REQUIRED)
+EMBEDDING_API_KEY=your_api_key_here
+EMBEDDING_API_BASE_URL=https://your-embedding-api.com/v1
+EMBEDDING_DEFAULT_MODEL=qwen3-embedding-8b
+
+# Embedding Retry Configuration
+EMBEDDING_MAX_RETRIES=3
+EMBEDDING_TIMEOUT=60
+EMBEDDING_INITIAL_DELAY=1
+EMBEDDING_MAX_DELAY=32
+
+# Storage
+UPLOAD_DIR=../uploads
+RESULTS_DIR=./results
+EMBEDDING_RESULTS_DIR=results/embedding
+
+# API Authentication
+EMBEDDING_CLIENT_API_KEY=your_client_api_key_here
+
+# Server
+HOST=0.0.0.0
+PORT=8000
+RELOAD=true
+LOG_LEVEL=info
+```
+
+**Important**: Replace placeholder values with actual credentials.
+
+---
+
+## Step 2: Database Migration
+
+### 2.1 Run Migration Script
+
 ```bash
 cd backend
-# Run Alembic migration or direct SQL
-python -m alembic upgrade head
+
+# Run embedding_results table migration
+python -c "
+from src.storage.database import engine
+from migrations.create_embedding_results_table import upgrade
+
+with engine.connect() as conn:
+    upgrade(conn)
+    conn.commit()
+print('Migration completed successfully')
+"
 ```
 
-**Manual SQL** (for development):
-```sql
-sqlite3 database.db < migrations/003_embedding_results.sql
+### 2.2 Verify Table Creation
+
+```bash
+# Using SQLite CLI
+sqlite3 app.db
+
+sqlite> .schema embedding_results
+# Should show CREATE TABLE statement with indexes
+
+sqlite> .exit
 ```
 
-**Migration File** (`migrations/003_embedding_results.sql`):
+Expected output:
 ```sql
 CREATE TABLE embedding_results (
     result_id TEXT PRIMARY KEY,
     document_id TEXT NOT NULL,
-    chunking_result_id TEXT,
+    chunking_result_id TEXT NOT NULL,
     model TEXT NOT NULL,
-    status TEXT NOT NULL,
-    successful_count INTEGER DEFAULT 0,
-    failed_count INTEGER DEFAULT 0,
-    vector_dimension INTEGER NOT NULL,
-    json_file_path TEXT NOT NULL,
-    processing_time_ms REAL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    error_message TEXT,
-    CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS')),
-    CHECK (model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4'))
+    ...
 );
-
-CREATE INDEX idx_doc_model ON embedding_results(document_id, model);
-CREATE INDEX idx_created_at ON embedding_results(created_at DESC);
-CREATE INDEX idx_status ON embedding_results(status);
+CREATE INDEX idx_embedding_doc_model ON embedding_results(document_id, model);
+...
 ```
 
 ---
 
-## 📂 File Structure Overview
+## Step 3: Start Services
 
-### Backend Files to Create/Modify
+### 3.1 Start Backend Server
 
-```
-backend/src/
-├── models/
-│   └── embedding_models.py          # NEW: ORM model + Pydantic schemas
-├── storage/
-│   └── embedding_db.py               # NEW: Database queries
-├── services/
-│   ├── embedding_service.py          # MODIFY: Add chunking result integration
-│   └── embedding_storage.py          # NEW: Dual-write logic (JSON + DB)
-└── api/
-    ├── embedding_routes.py           # MODIFY: Add /from-document endpoint
-    └── embedding_query_routes.py     # NEW: Query endpoints
+```bash
+cd backend
+source venv/bin/activate  # If not already activated
+
+# Start with uvicorn
+python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Frontend Files to Create/Modify
-
+Expected output:
 ```
-frontend/src/
-├── views/
-│   └── VectorEmbed.vue               # NEW: Unified embedding page
-├── components/embedding/
-│   ├── EmbeddingPanel.vue            # NEW: Document selector + config
-│   └── EmbeddingResults.vue          # MODIFY: Add database result display
-└── services/
-    └── embeddingApi.js               # MODIFY: Add query API calls
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [12345] using StatReload
+INFO:     Started server process [12346]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
 ```
 
----
+### 3.2 Verify Backend Health
 
-## 🔧 Implementation Steps
+Open browser or use curl:
 
-### Phase 1: Backend Database Layer
-
-#### Step 1.1: Create ORM Model
-
-**File**: `backend/src/models/embedding_models.py`
-
-```python
-from sqlalchemy import Column, String, Integer, Float, DateTime, CheckConstraint
-from sqlalchemy.sql import func
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Literal
-from datetime import datetime
-
-# SQLAlchemy ORM Model
-class EmbeddingResult(Base):
-    __tablename__ = "embedding_results"
-    
-    result_id = Column(String, primary_key=True)
-    document_id = Column(String, nullable=False)
-    chunking_result_id = Column(String)
-    model = Column(String, nullable=False)
-    status = Column(String, nullable=False)
-    successful_count = Column(Integer, default=0)
-    failed_count = Column(Integer, default=0)
-    vector_dimension = Column(Integer, nullable=False)
-    json_file_path = Column(String, nullable=False)
-    processing_time_ms = Column(Float)
-    created_at = Column(DateTime, default=func.now())
-    error_message = Column(String)
-    
-    __table_args__ = (
-        CheckConstraint("status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS')"),
-        CheckConstraint("model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4')"),
-    )
-
-# Pydantic Request Schemas
-class VectorizationFromChunkingRequest(BaseModel):
-    chunking_result_id: str
-    model: Literal['bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4']
-
-class VectorizationFromDocumentRequest(BaseModel):
-    document_id: str
-    model: Literal['bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4']
-    strategy: Optional[str] = None
-
-# Pydantic Response Schemas
-class EmbeddingResultDetail(BaseModel):
-    result_id: str
-    document_id: str
-    chunking_result_id: Optional[str]
-    model: str
-    status: str
-    successful_count: int
-    failed_count: int
-    vector_dimension: int
-    json_file_path: str
-    processing_time_ms: Optional[float]
-    created_at: datetime
-    error_message: Optional[str]
-    
-    class Config:
-        orm_mode = True
+```bash
+curl http://localhost:8000/api/embeddings/health
 ```
 
-#### Step 1.2: Implement Database Queries
+Expected response:
+```json
+{
+  "status": "healthy",
+  "service": "up",
+  "api_connectivity": true,
+  "models_available": [
+    "qwen3-embedding-8b",
+    "bge-m3",
+    "hunyuan-embedding",
+    "jina-embeddings-v4"
+  ],
+  "authentication": "valid",
+  "timestamp": "2025-12-17T10:30:45Z"
+}
+```
 
-**File**: `backend/src/storage/embedding_db.py`
+### 3.3 Start Frontend Development Server
 
-```python
-from sqlalchemy.orm import Session
-from typing import Optional, List
-from datetime import datetime
-from .models.embedding_models import EmbeddingResult
+```bash
+cd frontend
 
-def get_embedding_by_id(db: Session, result_id: str) -> Optional[EmbeddingResult]:
-    """Get embedding result by ID (FR-025)"""
-    return db.query(EmbeddingResult).filter(EmbeddingResult.result_id == result_id).first()
+# Start Vite dev server
+npm run dev
+# or
+yarn dev
+```
 
-def get_latest_embedding_by_document(
-    db: Session, 
-    document_id: str, 
-    model: Optional[str] = None
-) -> Optional[EmbeddingResult]:
-    """Get latest embedding for document, optionally filtered by model (FR-026)"""
-    query = db.query(EmbeddingResult).filter(EmbeddingResult.document_id == document_id)
-    if model:
-        query = query.filter(EmbeddingResult.model == model)
-    return query.order_by(EmbeddingResult.created_at.desc()).first()
+Expected output:
+```
+  VITE v5.0.4  ready in 234 ms
 
-def list_embedding_results(
-    db: Session,
-    page: int = 1,
-    page_size: int = 20,
-    document_id: Optional[str] = None,
-    model: Optional[str] = None,
-    status: Optional[str] = None,
-    date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None
-) -> tuple[List[EmbeddingResult], int]:
-    """List embedding results with pagination and filters (FR-027)"""
-    query = db.query(EmbeddingResult)
-    
-    # Apply filters
-    if document_id:
-        query = query.filter(EmbeddingResult.document_id == document_id)
-    if model:
-        query = query.filter(EmbeddingResult.model == model)
-    if status:
-        query = query.filter(EmbeddingResult.status == status)
-    if date_from:
-        query = query.filter(EmbeddingResult.created_at >= date_from)
-    if date_to:
-        query = query.filter(EmbeddingResult.created_at <= date_to)
-    
-    total_count = query.count()
-    
-    # Pagination
-    results = query.order_by(EmbeddingResult.created_at.desc()) \
-                   .offset((page - 1) * page_size) \
-                   .limit(page_size) \
-                   .all()
-    
-    return results, total_count
-
-def create_or_update_embedding_result(
-    db: Session,
-    result_data: dict
-) -> EmbeddingResult:
-    """Create new or update existing embedding result (FR-024 duplicate handling)"""
-    # Check if record exists for same document+chunking_result+model
-    existing = db.query(EmbeddingResult).filter(
-        EmbeddingResult.document_id == result_data["document_id"],
-        EmbeddingResult.chunking_result_id == result_data["chunking_result_id"],
-        EmbeddingResult.model == result_data["model"]
-    ).first()
-    
-    if existing:
-        # Update existing record (FR-024)
-        for key, value in result_data.items():
-            setattr(existing, key, value)
-        db.commit()
-        db.refresh(existing)
-        return existing
-    else:
-        # Create new record
-        new_result = EmbeddingResult(**result_data)
-        db.add(new_result)
-        db.commit()
-        db.refresh(new_result)
-        return new_result
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h to show help
 ```
 
 ---
 
-### Phase 2: Backend Storage Layer
+## Step 4: Test Basic Functionality
 
-#### Step 2.1: Dual-Write Implementation
+### 4.1 Create Test Data (Prerequisites)
 
-**File**: `backend/src/services/embedding_storage.py`
+Before testing embedding, you need:
+1. A document uploaded to the system
+2. A completed chunking result for that document
 
-```python
-import os
-import json
-from pathlib import Path
-from datetime import datetime
-from sqlalchemy.orm import Session
-from .embedding_db import create_or_update_embedding_result
+```bash
+# Example: Upload a test document
+curl -X POST http://localhost:8000/api/documents/upload \
+  -H "X-API-Key: your_client_api_key_here" \
+  -F "file=@/path/to/test.pdf"
 
-RESULTS_DIR = "results/embedding"
+# Response: { "document_id": "doc_123", ... }
 
-def save_embedding_result(
-    db: Session,
-    result_data: dict,
-    vectors_data: list
-) -> tuple[str, str]:
-    """
-    Dual-write: Save vectors to JSON file, then save metadata to database.
-    Rollback (delete JSON) if database write fails.
-    
-    Returns: (result_id, json_file_path)
-    Raises: StorageError on failure
-    """
-    json_path = None
-    
-    try:
-        # Step 1: Write JSON file
-        json_path = _write_vector_json(result_data["request_id"], vectors_data, result_data)
-        
-        # Step 2: Update result_data with file path
-        result_data["json_file_path"] = json_path
-        
-        # Step 3: Write/update database record
-        db_result = create_or_update_embedding_result(db, result_data)
-        
-        return db_result.result_id, json_path
-        
-    except Exception as e:
-        # Step 4: Rollback - delete JSON file if database write failed
-        if json_path and os.path.exists(os.path.join(RESULTS_DIR, json_path)):
-            full_path = os.path.join(RESULTS_DIR, json_path)
-            os.remove(full_path)
-        raise StorageError(f"Failed to save embedding result: {str(e)}")
+# Example: Create chunking result
+curl -X POST http://localhost:8000/api/chunking/chunk \
+  -H "X-API-Key: your_client_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "document_id": "doc_123",
+    "chunking_strategy": "fixed_size",
+    "chunk_size": 512,
+    "chunk_overlap": 50
+  }'
 
-def _write_vector_json(request_id: str, vectors: list, metadata: dict) -> str:
-    """
-    Write vectors to JSON file in dated directory.
-    Returns relative path from RESULTS_DIR.
-    """
-    # Create directory: results/embedding/YYYY-MM-DD/
-    today = datetime.now().strftime("%Y-%m-%d")
-    date_dir = Path(RESULTS_DIR) / today
-    date_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Generate filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"embedding_{request_id[:8]}_{timestamp}.json"
-    full_path = date_dir / filename
-    
-    # Write JSON
-    json_data = {
-        "request_id": request_id,
-        "document_id": metadata["document_id"],
-        "chunking_result_id": metadata.get("chunking_result_id"),
-        "model": metadata["model"],
-        "status": metadata["status"],
-        "metadata": {
-            "total_chunks": len(vectors) + len(metadata.get("failures", [])),
-            "successful_count": metadata["successful_count"],
-            "failed_count": metadata["failed_count"],
-            "vector_dimension": metadata["vector_dimension"],
-            "processing_time_ms": metadata.get("processing_time_ms"),
-            "created_at": datetime.now().isoformat()
-        },
-        "vectors": vectors,
-        "failures": metadata.get("failures", [])
+# Response: { "result_id": "chunk_456", ... }
+```
+
+### 4.2 Test Vectorization API
+
+**Test 1: Vectorize by Chunking Result ID**
+
+```bash
+curl -X POST http://localhost:8000/api/embeddings/from-chunking-result \
+  -H "X-API-Key: your_client_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "result_id": "chunk_456",
+    "model": "qwen3-embedding-8b"
+  }'
+```
+
+Expected response:
+```json
+{
+  "result_id": "emb_550e8400-e29b-41d4-a716-446655440000",
+  "document_id": "doc_123",
+  "chunking_result_id": "chunk_456",
+  "model": "qwen3-embedding-8b",
+  "status": "SUCCESS",
+  "successful_count": 50,
+  "failed_count": 0,
+  "vector_dimension": 4096,
+  "json_file_path": "embedding/doc_123_20251217_103045.json",
+  "processing_time_ms": 12450.5,
+  "created_at": "2025-12-17T10:30:45Z",
+  "error_message": null
+}
+```
+
+**Test 2: Vectorize by Document ID**
+
+```bash
+curl -X POST http://localhost:8000/api/embeddings/from-document \
+  -H "X-API-Key: your_client_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "document_id": "doc_123",
+    "model": "bge-m3"
+  }'
+```
+
+### 4.3 Test Query API
+
+**Query Latest Result for Document**
+
+```bash
+curl http://localhost:8000/api/embeddings/results/by-document/doc_123 \
+  -H "X-API-Key: your_client_api_key_here"
+```
+
+**List All Results**
+
+```bash
+curl "http://localhost:8000/api/embeddings/results?page=1&page_size=20" \
+  -H "X-API-Key: your_client_api_key_here"
+```
+
+### 4.4 Verify JSON File Creation
+
+```bash
+cd backend/results/embedding
+ls -lh
+
+# Should see JSON file like: doc_123_20251217_103045.json
+
+# Inspect file structure
+cat doc_123_20251217_103045.json | jq '.'
+```
+
+Expected structure:
+```json
+{
+  "result_id": "emb_...",
+  "document_id": "doc_123",
+  "chunking_result_id": "chunk_456",
+  "model": "qwen3-embedding-8b",
+  "vector_dimension": 4096,
+  "created_at": "2025-12-17T10:30:45Z",
+  "vectors": [
+    {
+      "chunk_index": 0,
+      "text_hash": "sha256:...",
+      "text_length": 512,
+      "vector": [0.0234, -0.0156, ...],
+      "processing_time_ms": 245.3
     }
-    
-    with open(full_path, 'w', encoding='utf-8') as f:
-        json.dump(json_data, f, ensure_ascii=False, indent=2)
-    
-    # Return relative path
-    relative_path = f"{today}/{filename}"
-    return relative_path
+  ]
+}
 ```
 
 ---
 
-### Phase 3: Backend API Routes
+## Step 5: Test Frontend UI
 
-#### Step 3.1: Vectorization Endpoints
+### 5.1 Navigate to Embedding Page
 
-**File**: `backend/src/api/embedding_routes.py` (modify existing)
+1. Open browser: `http://localhost:5173`
+2. Click "文档向量化" in navigation menu
+3. Should see `/documents/embed` URL
 
-Add new endpoint:
-```python
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from ..services.embedding_service import EmbeddingService
-from ..services.embedding_storage import save_embedding_result
-from ..models.embedding_models import VectorizationFromDocumentRequest
+### 5.2 Test Document Selection
 
-router = APIRouter(prefix="/embedding", tags=["vectorization"])
+1. Open document selector dropdown
+2. Verify only chunked documents are shown
+3. Select a document with existing embedding result
+4. Verify:
+   - Right panel immediately shows historical result
+   - Model selector auto-switches to match historical model
+   - Button text changes to "重新向量化"
 
-@router.post("/from-document")
-async def vectorize_document(
-    request: VectorizationFromDocumentRequest,
-    db: Session = Depends(get_db)
-):
-    """Vectorize latest chunking result for document (User Story 2, FR-002)"""
-    service = EmbeddingService(model=request.model)
-    
-    # 1. Find latest chunking result for document
-    chunking_result = get_latest_chunking_result(
-        db, 
-        request.document_id, 
-        strategy=request.strategy
-    )
-    if not chunking_result:
-        raise HTTPException(404, "No chunking result found for document")
-    
-    # 2. Load chunks from chunking result JSON
-    chunks = load_chunks_from_json(chunking_result.json_file_path)
-    
-    # 3. Vectorize chunks
-    result = await service.vectorize_batch(chunks)
-    
-    # 4. Dual-write: JSON + Database
-    result_id, json_path = save_embedding_result(
-        db,
-        result_data={
-            "request_id": result["request_id"],
-            "document_id": request.document_id,
-            "chunking_result_id": chunking_result.id,
-            "model": request.model,
-            "status": result["status"],
-            "successful_count": result["successful_count"],
-            "failed_count": result["failed_count"],
-            "vector_dimension": result["vector_dimension"],
-            "processing_time_ms": result["processing_time_ms"]
-        },
-        vectors_data=result["vectors"]
-    )
-    
-    return result
+### 5.3 Test Vectorization Workflow
+
+**Scenario 1: View Historical Result**
+
+1. Select document with embedding history
+2. Verify metadata header shows: `DocumentName · model-name · 1024维 · 50/50块 · 1250ms`
+3. Verify vector results display in right panel
+
+**Scenario 2: Re-Vectorize with Same Model**
+
+1. Keep same model selected
+2. Click "重新向量化"
+3. Wait for processing
+4. Verify display auto-updates to show new result
+5. Verify new database record created (old preserved)
+
+**Scenario 3: Re-Vectorize with Different Model**
+
+1. Select document with embedding history
+2. Change model selector to different model
+3. Click "重新向量化"
+4. Verify new result generated with new model
+5. Verify both results preserved in database
+
+---
+
+## Step 6: Run Automated Tests
+
+### 6.1 Backend Unit Tests
+
+```bash
+cd backend
+source venv/bin/activate
+
+# Run all embedding tests
+pytest tests/unit/test_embedding_service.py -v
+pytest tests/unit/test_embedding_storage.py -v
+
+# Run with coverage
+pytest tests/unit/test_embedding*.py --cov=src.services.embedding_service --cov=src.storage.embedding_db --cov-report=html
 ```
 
-#### Step 3.2: Query Endpoints
+Expected output:
+```
+tests/unit/test_embedding_service.py::test_embed_query_success PASSED
+tests/unit/test_embedding_service.py::test_embed_documents_partial_success PASSED
+tests/unit/test_embedding_storage.py::test_dual_write_success PASSED
+tests/unit/test_embedding_storage.py::test_dual_write_rollback_on_db_failure PASSED
+...
+==================== 15 passed in 2.34s ====================
+```
 
-**File**: `backend/src/api/embedding_query_routes.py` (new)
+### 6.2 Backend Integration Tests
 
-```python
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from ..storage.embedding_db import (
-    get_embedding_by_id,
-    get_latest_embedding_by_document,
-    list_embedding_results
-)
-from ..models.embedding_models import EmbeddingResultDetail
+```bash
+# Run API integration tests
+pytest tests/integration/test_embedding_api.py -v
+pytest tests/integration/test_embedding_dual_write.py -v
+```
 
-router = APIRouter(prefix="/embedding/results", tags=["query"])
+### 6.3 Frontend Component Tests
 
-@router.get("/{result_id}", response_model=EmbeddingResultDetail)
-def get_result_by_id(result_id: str, db: Session = Depends(get_db)):
-    """Get embedding result by ID (FR-025)"""
-    result = get_embedding_by_id(db, result_id)
-    if not result:
-        raise HTTPException(404, f"Embedding result not found: {result_id}")
-    return result
+```bash
+cd frontend
 
-@router.get("/by-document/{document_id}", response_model=EmbeddingResultDetail)
-def get_latest_by_document(
-    document_id: str,
-    model: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
-):
-    """Get latest embedding for document (FR-026)"""
-    result = get_latest_embedding_by_document(db, document_id, model)
-    if not result:
-        raise HTTPException(404, f"No embedding found for document: {document_id}")
-    return result
-
-@router.get("", response_model=dict)
-def list_results(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    document_id: Optional[str] = None,
-    model: Optional[str] = None,
-    status: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    """List embedding results with pagination (FR-027)"""
-    results, total_count = list_embedding_results(
-        db, page, page_size, document_id, model, status, date_from, date_to
-    )
-    
-    total_pages = (total_count + page_size - 1) // page_size
-    
-    return {
-        "results": [EmbeddingResultDetail.from_orm(r) for r in results],
-        "pagination": {
-            "total_count": total_count,
-            "total_pages": total_pages,
-            "current_page": page,
-            "page_size": page_size,
-            "has_next": page < total_pages,
-            "has_previous": page > 1
-        }
-    }
+# Run component tests
+npm run test
+# or
+yarn test
 ```
 
 ---
 
-### Phase 4: Frontend Implementation
+## Step 7: Common Workflows
 
-#### Step 4.1: Unified Embedding Page
+### Workflow 1: First-Time Document Vectorization
 
-**File**: `frontend/src/views/VectorEmbed.vue`
+```bash
+# 1. Upload document
+doc_id=$(curl -X POST http://localhost:8000/api/documents/upload \
+  -H "X-API-Key: $API_KEY" \
+  -F "file=@document.pdf" | jq -r '.document_id')
 
-```vue
-<template>
-  <div class="vector-embed-page">
-    <div class="page-layout">
-      <!-- Left Panel: Controls -->
-      <div class="left-panel">
-        <EmbeddingPanel
-          @start-vectorization="handleStartVectorization"
-        />
-      </div>
-      
-      <!-- Right Panel: Results -->
-      <div class="right-panel">
-        <EmbeddingResults
-          :result="embeddingStore.currentResult"
-          :loading="embeddingStore.isLoading"
-          :error="embeddingStore.error"
-        />
-      </div>
-    </div>
-  </div>
-</template>
+# 2. Chunk document
+result_id=$(curl -X POST http://localhost:8000/api/chunking/chunk \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"document_id\": \"$doc_id\", \"chunking_strategy\": \"semantic\"}" \
+  | jq -r '.result_id')
 
-<script setup>
-import { useEmbeddingStore } from '@/stores/embedding'
-import EmbeddingPanel from '@/components/embedding/EmbeddingPanel.vue'
-import EmbeddingResults from '@/components/embedding/EmbeddingResults.vue'
-
-const embeddingStore = useEmbeddingStore()
-
-async function handleStartVectorization({ documentId, model }) {
-  await embeddingStore.startVectorization(documentId, model)
-}
-</script>
-
-<style scoped>
-.page-layout {
-  display: grid;
-  grid-template-columns: 400px 1fr;
-  gap: 24px;
-  height: calc(100vh - 120px);
-}
-
-.left-panel {
-  border-right: 1px solid #e5e7eb;
-  padding-right: 24px;
-}
-
-.right-panel {
-  overflow-y: auto;
-}
-</style>
+# 3. Vectorize chunks
+curl -X POST http://localhost:8000/api/embeddings/from-chunking-result \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"result_id\": \"$result_id\", \"model\": \"qwen3-embedding-8b\"}"
 ```
 
-#### Step 4.2: Document Selector Component
+### Workflow 2: Compare Multiple Models
 
-**File**: `frontend/src/components/embedding/EmbeddingPanel.vue`
+```bash
+# Vectorize same document with different models
+for model in "bge-m3" "qwen3-embedding-8b" "hunyuan-embedding"; do
+  echo "Vectorizing with $model..."
+  curl -X POST http://localhost:8000/api/embeddings/from-document \
+    -H "X-API-Key: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"document_id\": \"doc_123\", \"model\": \"$model\"}"
+  sleep 2
+done
 
-```vue
-<template>
-  <div class="embedding-panel">
-    <t-card title="文档向量化">
-      <!-- Document Selector -->
-      <t-select
-        v-model="selectedDocumentId"
-        placeholder="选择已分块文档"
-        :loading="documentsLoading"
-      >
-        <t-option
-          v-for="doc in chunkedDocuments"
-          :key="doc.id"
-          :value="doc.id"
-          :label="formatDocumentLabel(doc)"
-        />
-      </t-select>
-      
-      <!-- Model Selector -->
-      <t-select
-        v-model="selectedModel"
-        placeholder="选择向量模型"
-        class="mt-4"
-      >
-        <t-option
-          v-for="(info, name) in embeddingModels"
-          :key="name"
-          :value="name"
-          :label="`${info.name} · ${info.dimension}维 · ${info.description}`"
-        />
-      </t-select>
-      
-      <!-- Model Details Panel -->
-      <div v-if="selectedModelInfo" class="model-details mt-4">
-        <p><strong>维度:</strong> {{ selectedModelInfo.dimension }}</p>
-        <p><strong>提供商:</strong> {{ selectedModelInfo.provider }}</p>
-        <p><strong>多语言支持:</strong> {{ selectedModelInfo.supports_multilingual ? '是' : '否' }}</p>
-        <p><strong>最大批量:</strong> {{ selectedModelInfo.max_batch_size }}</p>
-      </div>
-      
-      <!-- Start Button -->
-      <t-button
-        theme="primary"
-        block
-        class="mt-4"
-        :disabled="!canStartVectorization"
-        @click="handleStart"
-      >
-        开始向量化
-      </t-button>
-    </t-card>
-  </div>
-</template>
+# Query all results for comparison
+curl "http://localhost:8000/api/embeddings/results?document_id=doc_123" \
+  -H "X-API-Key: $API_KEY" | jq '.results[] | {model, vector_dimension, processing_time_ms}'
+```
 
-<script setup>
-import { ref, computed, onMounted } from 'vue'
-import { embeddingApi } from '@/services/embeddingApi'
+### Workflow 3: Batch Processing Multiple Documents
 
-const emit = defineEmits(['start-vectorization'])
-
-const selectedDocumentId = ref(null)
-const selectedModel = ref('qwen3-embedding-8b')
-const chunkedDocuments = ref([])
-const embeddingModels = ref({})
-const documentsLoading = ref(false)
-
-const selectedModelInfo = computed(() => embeddingModels.value[selectedModel.value])
-const canStartVectorization = computed(() => selectedDocumentId.value && selectedModel.value)
-
-function formatDocumentLabel(doc) {
-  const date = new Date(doc.latest_chunking.created_at).toLocaleDateString('zh-CN')
-  return `${doc.name} · 已分块 · ${date}`
-}
-
-async function loadChunkedDocuments() {
-  documentsLoading.value = true
-  try {
-    const response = await fetch('/api/documents?status=chunked')
-    chunkedDocuments.value = (await response.json()).documents
-  } finally {
-    documentsLoading.value = false
-  }
-}
-
-async function loadEmbeddingModels() {
-  embeddingModels.value = await embeddingApi.getModels()
-}
-
-function handleStart() {
-  emit('start-vectorization', {
-    documentId: selectedDocumentId.value,
-    model: selectedModel.value
-  })
-}
-
-onMounted(() => {
-  loadChunkedDocuments()
-  loadEmbeddingModels()
-})
-</script>
+```bash
+# Vectorize all documents in the system
+curl http://localhost:8000/api/documents/list -H "X-API-Key: $API_KEY" \
+  | jq -r '.documents[] | select(.chunking_status == "chunked") | .document_id' \
+  | while read doc_id; do
+      echo "Processing $doc_id..."
+      curl -X POST http://localhost:8000/api/embeddings/from-document \
+        -H "X-API-Key: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{\"document_id\": \"$doc_id\", \"model\": \"qwen3-embedding-8b\"}"
+      sleep 1
+    done
 ```
 
 ---
 
-## 🧪 Testing
+## Troubleshooting
 
-### Unit Tests
+### Problem 1: Health Check Shows "degraded" Status
 
-**Backend** (`backend/tests/unit/test_embedding_storage.py`):
-```python
-def test_dual_write_success(db_session, tmpdir):
-    result_data = {
-        "request_id": "test-123",
-        "document_id": "doc-1",
-        "model": "bge-m3",
-        "status": "SUCCESS",
-        "successful_count": 10,
-        "failed_count": 0,
-        "vector_dimension": 1024
-    }
-    vectors = [{"vector": [0.1, 0.2], "index": i} for i in range(10)]
-    
-    result_id, json_path = save_embedding_result(db_session, result_data, vectors)
-    
-    # Assert database record exists
-    db_result = get_embedding_by_id(db_session, result_id)
-    assert db_result is not None
-    assert db_result.status == "SUCCESS"
-    
-    # Assert JSON file exists
-    assert os.path.exists(os.path.join(RESULTS_DIR, json_path))
+**Symptoms**: `/api/embeddings/health` returns `"status": "degraded"`
 
-def test_dual_write_rollback_on_db_failure(db_session, tmpdir, monkeypatch):
-    # Simulate database failure
-    def mock_commit():
-        raise Exception("Database error")
-    
-    monkeypatch.setattr(db_session, "commit", mock_commit)
-    
-    result_data = {...}
-    vectors = [...]
-    
-    with pytest.raises(StorageError):
-        save_embedding_result(db_session, result_data, vectors)
-    
-    # Assert JSON file was rolled back (deleted)
-    assert not os.path.exists(...)  # Check file doesn't exist
+**Possible Causes**:
+- Invalid or missing `EMBEDDING_API_KEY`
+- Incorrect `EMBEDDING_API_BASE_URL`
+- Embedding API service is down
+- Network connectivity issues
+
+**Solutions**:
+1. Verify environment variables in `.env`
+2. Test API connectivity manually:
+   ```bash
+   curl -H "Authorization: Bearer $EMBEDDING_API_KEY" \
+        $EMBEDDING_API_BASE_URL/models
+   ```
+3. Check API service status with provider
+4. Verify firewall/proxy settings
+
+### Problem 2: "No embedding results found for document"
+
+**Symptoms**: 404 error when querying by document ID
+
+**Possible Causes**:
+- Document has no chunking results
+- Chunking results are not in COMPLETED status
+- No vectorization has been performed for this document
+
+**Solutions**:
+1. Check document's chunking status:
+   ```bash
+   curl http://localhost:8000/api/documents/$doc_id \
+     -H "X-API-Key: $API_KEY"
+   ```
+2. List chunking results:
+   ```bash
+   curl "http://localhost:8000/api/chunking/results?document_id=$doc_id" \
+     -H "X-API-Key: $API_KEY"
+   ```
+3. Create chunking result if missing, then vectorize
+
+### Problem 3: Frontend Shows Empty Document List
+
+**Symptoms**: Document selector dropdown is empty
+
+**Possible Causes**:
+- No documents have been chunked
+- Backend API not responding
+- CORS issues
+
+**Solutions**:
+1. Check browser console for errors
+2. Verify backend is running and accessible
+3. Upload and chunk at least one document
+4. Check `FRONTEND_ALLOWED_ORIGINS` in backend `.env`
+
+### Problem 4: Vectorization Fails with "Rate limit exceeded"
+
+**Symptoms**: Status returns PARTIAL_SUCCESS or FAILED with rate limit errors
+
+**Possible Causes**:
+- Embedding API rate limit reached
+- Too many concurrent requests
+
+**Solutions**:
+1. Wait for rate limit window to reset (check retry_after in response)
+2. Reduce batch size (chunk document into smaller results)
+3. Increase `EMBEDDING_INITIAL_DELAY` and `EMBEDDING_MAX_DELAY` in config
+4. Contact API provider about rate limit increase
+
+### Problem 5: Database Integrity Errors
+
+**Symptoms**: Foreign key constraint errors or CHECK constraint violations
+
+**Possible Causes**:
+- Database migration not run
+- Manual database modifications
+- Concurrent write race conditions
+
+**Solutions**:
+1. Re-run migration:
+   ```bash
+   python migrations/create_embedding_results_table.py
+   ```
+2. Check database schema:
+   ```bash
+   sqlite3 app.db ".schema embedding_results"
+   ```
+3. Verify foreign key references exist:
+   ```sql
+   SELECT * FROM documents WHERE document_id = 'doc_123';
+   SELECT * FROM chunking_results WHERE result_id = 'chunk_456';
+   ```
+
+---
+
+## Performance Benchmarks
+
+### Expected Performance Metrics
+
+| Operation | Target | Typical Actual |
+|-----------|--------|----------------|
+| Vectorize 100 chunks (qwen3-embedding-8b) | <30s | 12-15s |
+| Vectorize 100 chunks (bge-m3) | <30s | 8-12s |
+| Query latest result by document_id | <100ms | 15-30ms |
+| List 20 results with pagination | <200ms | 40-80ms |
+| Dual-write 100 vectors (4096-dim) | <5s | 1.5-2.5s |
+| Frontend display historical result | <500ms | 200-350ms |
+
+### Monitoring Commands
+
+**Check API Latency**:
+```bash
+time curl -X POST http://localhost:8000/api/embeddings/from-document \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"document_id": "doc_123", "model": "qwen3-embedding-8b"}'
 ```
 
-### Integration Tests
+**Monitor Database Query Performance**:
+```bash
+sqlite3 app.db
 
-**API Test** (`backend/tests/integration/test_embedding_api.py`):
-```python
-def test_vectorize_document_endpoint(client, db_session):
-    # Setup: Create document with chunking result
-    doc = create_test_document(db_session)
-    chunk_result = create_test_chunking_result(db_session, doc.id)
-    
-    # Call endpoint
-    response = client.post("/api/embedding/from-document", json={
-        "document_id": doc.id,
-        "model": "bge-m3"
-    })
-    
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "SUCCESS"
-    assert data["document_id"] == doc.id
-    
-    # Verify database record
-    db_result = get_latest_embedding_by_document(db_session, doc.id)
-    assert db_result is not None
-    assert db_result.model == "bge-m3"
+sqlite> .timer ON
+sqlite> SELECT * FROM embedding_results WHERE document_id = 'doc_123' ORDER BY created_at DESC LIMIT 1;
+# Run time: 0.015 seconds
+
+sqlite> .exit
+```
+
+**Check JSON File Size**:
+```bash
+du -h backend/results/embedding/*.json
+# Typical sizes:
+# - 1024-dim, 100 chunks: ~800KB
+# - 4096-dim, 100 chunks: ~3.2MB
 ```
 
 ---
 
-## 📊 Verification Checklist
+## Next Steps
 
-### Backend
-- [ ] Database table `embedding_results` created with indexes
-- [ ] Dual-write transaction works (JSON first, DB second, rollback on failure)
-- [ ] `/from-document` endpoint uses latest chunking result
-- [ ] Query endpoints return correct filtered/paginated results
-- [ ] Model dimension validation prevents mismatched vectors
-- [ ] Retry mechanism works (exponential backoff with jitter)
+After completing this quickstart:
 
-### Frontend
-- [ ] `/documents/embed` route exists (no `/embeddings` route)
-- [ ] Document selector shows only chunked documents
-- [ ] Model selector displays dimension and description
-- [ ] "开始向量化" button disabled when no document selected
-- [ ] Results panel shows document source information
-
-### Integration
-- [ ] End-to-end test: Select document → Vectorize → View results
-- [ ] Re-vectorization updates existing record (FR-024)
-- [ ] Database query performance <100ms for 10k records (SC-016)
+1. **Read API Documentation**: Explore full OpenAPI specs in `contracts/` directory
+2. **Review Data Model**: Understand entity relationships in `data-model.md`
+3. **Study Research Decisions**: Learn about technical choices in `research.md`
+4. **Implement Features**: Follow task breakdown in `tasks.md` (generated by `/speckit.tasks`)
+5. **Extend Functionality**: Add new embedding models, improve error handling, or optimize performance
 
 ---
 
-## 🐛 Troubleshooting
+## Additional Resources
 
-### Issue: "No chunked documents available"
-**Cause**: No documents have completed chunking  
-**Fix**: Run chunking module first on uploaded documents
-
-### Issue: "Dimension mismatch" error
-**Cause**: API returned different dimension than expected  
-**Fix**: Verify `EMBEDDING_MODELS` dictionary matches actual API responses
-
-### Issue: Orphaned JSON files
-**Cause**: Database write failed without rollback  
-**Fix**: Check `save_embedding_result` function has try-except with file cleanup
-
-### Issue: Slow query performance
-**Cause**: Missing database indexes  
-**Fix**: Verify indexes created: `idx_doc_model`, `idx_created_at`, `idx_status`
+- **Feature Specification**: `specs/003-vector-embedding/spec.md`
+- **Implementation Plan**: `specs/003-vector-embedding/plan.md`
+- **API Contracts**: `specs/003-vector-embedding/contracts/`
+- **LangChain Embeddings Docs**: https://python.langchain.com/docs/integrations/text_embedding/openai
+- **TDesign Vue Next Docs**: https://tdesign.tencent.com/vue-next/overview
+- **FastAPI Documentation**: https://fastapi.tiangolo.com/
 
 ---
 
-## 📚 Next Steps
-
-After completing quickstart:
-1. Run full test suite: `pytest backend/tests`
-2. Review API contracts: `/specs/003-vector-embedding/contracts/*.yaml`
-3. Proceed to task breakdown: `/speckit.tasks` command
-4. Reference data model: `/specs/003-vector-embedding/data-model.md`
-
-**Estimated Development Time**: 3-5 days (backend 2 days, frontend 1-2 days, testing 1 day)
+**Status**: ✅ Quickstart guide complete. Ready for development.

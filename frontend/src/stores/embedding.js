@@ -38,13 +38,11 @@ export const useEmbeddingStore = defineStore('embedding', () => {
         page_size: 100
       })
       
+      // Response structure: { success: true, data: { items: [...], total: ... } }
       documentsWithChunking.value = response.data?.items || []
       return documentsWithChunking.value
     } catch (err) {
-      const errorMessage = err.response?.data?.error?.message 
-        || err.response?.data?.message 
-        || err.message 
-        || '获取已分块文档列表失败'
+      const errorMessage = err.message || '获取已分块文档列表失败'
       error.value = errorMessage
       throw err
     }
@@ -54,7 +52,12 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     try {
       error.value = null
       const response = await embeddingService.listModels()
-      availableModels.value = response.models || []
+      
+      // Handle two possible response formats:
+      // 1. Wrapped: { success: true, data: { models: [...] } }
+      // 2. Direct: { models: [...], count: ... }
+      const models = response.data?.models || response.models || []
+      availableModels.value = models
       
       // Set default model if none selected
       if (!selectedModel.value && availableModels.value.length > 0) {
@@ -63,10 +66,41 @@ export const useEmbeddingStore = defineStore('embedding', () => {
       
       return availableModels.value
     } catch (err) {
-      const errorMessage = err.response?.data?.error?.message 
-        || err.response?.data?.message 
-        || err.message 
-        || '获取模型列表失败'
+      const errorMessage = err.message || '获取模型列表失败'
+      error.value = errorMessage
+      throw err
+    }
+  }
+
+  async function fetchLatestEmbeddingResult(documentId, modelFilter = null) {
+    try {
+      error.value = null
+      const response = await embeddingService.getLatestByDocument(documentId, modelFilter)
+      
+      // Handle two possible response formats:
+      // 1. Wrapped: { success: true, data: { ... } }
+      // 2. Direct: { result_id, model, vectors, ... }
+      const resultData = response.data || response
+      
+      embeddingResults.value = {
+        ...resultData,
+        documentInfo: selectedDocument.value
+      }
+      
+      // 自动切换模型选择器到历史结果使用的模型
+      if (resultData?.model && resultData.model !== selectedModel.value) {
+        selectedModel.value = resultData.model
+      }
+      
+      return embeddingResults.value
+    } catch (err) {
+      // 404 是正常情况（文档未向量化），不显示错误
+      if (err.status === 404) {
+        embeddingResults.value = null
+        return null
+      }
+      
+      const errorMessage = err.message || '获取向量化结果失败'
       error.value = errorMessage
       throw err
     }
@@ -90,17 +124,19 @@ export const useEmbeddingStore = defineStore('embedding', () => {
         timeout: options.timeout || 60
       })
 
+      // Handle two possible response formats:
+      // 1. Wrapped: { success: true, data: { ... } }
+      // 2. Direct: { request_id, status, vectors, ... }
+      const resultData = response.data || response
+      
       embeddingResults.value = {
-        ...response,
+        ...resultData,
         documentInfo: selectedDocument.value
       }
 
       return embeddingResults.value
     } catch (err) {
-      const errorMessage = err.response?.data?.error?.message 
-        || err.response?.data?.message 
-        || err.message 
-        || '向量化失败'
+      const errorMessage = err.message || '向量化失败'
       error.value = errorMessage
       throw err
     } finally {
@@ -137,6 +173,7 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     // Actions
     fetchDocumentsWithChunking,
     fetchModels,
+    fetchLatestEmbeddingResult,
     startEmbedding,
     clearResults,
     resetSelection

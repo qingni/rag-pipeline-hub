@@ -525,6 +525,13 @@ class EmbeddingResultDetail(BaseModel):
     error_message: Optional[str] = Field(None, description="Error details")
 
 
+class EmbeddingResultWithVectors(EmbeddingResultDetail):
+    """Extended result with vector data loaded from JSON file."""
+    vectors: List[Vector] = Field(default_factory=list, description="Vector data from JSON file")
+    failures: List[EmbeddingFailure] = Field(default_factory=list, description="Failed vectorization items")
+    metadata: Optional[dict] = Field(None, description="Additional metadata from JSON")
+
+
 class PaginationMeta(BaseModel):
     """Pagination metadata for list responses (FR-027)."""
     total_count: int = Field(..., ge=0, description="Total results matching filters")

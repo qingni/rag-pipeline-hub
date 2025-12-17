@@ -42,6 +42,14 @@
 - Q: What database indexes should be created for optimal query performance? → A: Create composite indexes (document_id+model, created_at, status)
 - Q: What transaction strategy should ensure data consistency between JSON files and database? → A: Write JSON file first, then database record; rollback (delete JSON) if database write fails
 
+### Session 2025-12-17 (Display Historical Embedding Results)
+
+- Q: When user selects a document that has already been vectorized, how should the system respond? → A: Immediately display the document's latest embedding result (historical record) in right panel, while allowing user to click "重新向量化" button to generate new result
+- Q: When document has multiple embedding history records (e.g., vectorized with different models multiple times), which result should be initially displayed? → A: Display the latest embedding result sorted by creation time
+- Q: When displaying historical embedding result, how should the left-side model selector be handled? → A: Automatically switch model selector to match the historical result's model, but allow user to change it (changing model + clicking "重新向量化" uses new model)
+- Q: When displaying historical embedding result, how should the "开始向量化" button's text and behavior be adjusted? → A: Change button text to "重新向量化", clicking it generates new result and auto-switches display (historical result preserved in database)
+- Q: When displaying historical embedding result, what metadata information should be shown in the results panel header? → A: Display core metrics: document name, model name (with dimension), successful chunks/total chunks, processing time
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Vectorize Chunking Result (Priority: P1)
@@ -89,13 +97,17 @@ As a RAG system user, I need a unified embedding interface at `/documents/embed`
 1. **Given** the user navigates to `/documents/embed` page, **When** page loads, **Then** document selector displays ONLY documents with active chunking results in format "DocumentName · 已分块 · 2025-12-15"
 2. **Given** a document without chunking results exists in database, **When** document selector loads, **Then** that document is NOT displayed in the selection list
 3. **Given** user selects a document from the selector, **When** document has multiple chunking results, **Then** system automatically uses the latest active chunking result without requiring manual selection
-4. **Given** user views model selector dropdown, **When** dropdown opens, **Then** each model option displays "ModelName · Dimension维 · BriefDescription" format (e.g., "BGE-M3 · 1024维 · 多语言支持")
-5. **Given** user selects a model, **When** selection is made, **Then** detailed model information panel appears below showing dimension, provider, multilingual support, max batch size
-6. **Given** user has selected both document and model, **When** "开始向量化" button is clicked, **Then** system calls `/from-document` API with document_id and selected model
-7. **Given** vectorization completes, **When** results are displayed, **Then** right panel shows document source information (document name, chunk count, vector dimensions) at the top
-8. **Given** no document is selected, **When** user attempts to click "开始向量化" button, **Then** button is disabled or shows validation message "请选择文档"
-9. **Given** page layout renders, **When** viewed, **Then** displays two-column layout: left side (document selector + model configuration + start button), right side (results display panel)
-10. **Given** navigation menu, **When** user views menu, **Then** shows single entry "文档向量化" pointing to `/documents/embed` (no separate text vectorization entry)
+4. **Given** user selects a document that has already been vectorized, **When** selection is made, **Then** system immediately displays the latest embedding result in right panel (sorted by created_at DESC) with core metrics header (document name, model name with dimension, successful/total chunks, processing time)
+5. **Given** user selects a document with existing embedding result, **When** result is displayed, **Then** left-side model selector automatically switches to match the historical result's model but remains enabled for user modification
+6. **Given** user views historical embedding result and changes model selector, **When** model is changed, **Then** button text changes to "重新向量化" and clicking it triggers new vectorization with the newly selected model
+7. **Given** user clicks "重新向量化" button, **When** new vectorization completes, **Then** system automatically switches display to show the new result while preserving historical result in database
+8. **Given** user views model selector dropdown, **When** dropdown opens, **Then** each model option displays "ModelName · Dimension维 · BriefDescription" format (e.g., "BGE-M3 · 1024维 · 多语言支持")
+9. **Given** user selects a model, **When** selection is made, **Then** detailed model information panel appears below showing dimension, provider, multilingual support, max batch size
+10. **Given** user has selected both document and model (for first-time vectorization), **When** "开始向量化" button is clicked, **Then** system calls `/from-document` API with document_id and selected model
+11. **Given** vectorization completes, **When** results are displayed, **Then** right panel shows document source information (document name, chunk count, vector dimensions) at the top
+12. **Given** no document is selected, **When** user attempts to click "开始向量化" button, **Then** button is disabled or shows validation message "请选择文档"
+13. **Given** page layout renders, **When** viewed, **Then** displays two-column layout: left side (document selector + model configuration + start button), right side (results display panel)
+14. **Given** navigation menu, **When** user views menu, **Then** shows single entry "文档向量化" pointing to `/documents/embed` (no separate text vectorization entry)
 
 ---
 
@@ -116,6 +128,27 @@ As a system operator or frontend developer, I need to query embedding results fr
 5. **Given** embedding results exist with various statuses, **When** list query API is called with status filter "SUCCESS", **Then** the system returns only results with SUCCESS status
 6. **Given** embedding results created over multiple days, **When** list query API is called with date_range filter "2025-12-15 to 2025-12-16", **Then** the system returns only results created within that date range
 7. **Given** an embedding result with status "PARTIAL_SUCCESS", **When** queried, **Then** the response includes error_message field explaining which chunks failed
+
+---
+
+### User Story 10 - Display Historical Embedding Results (Priority: P1)
+
+As a RAG system user, I need to immediately see the latest embedding results when selecting a document that has already been vectorized so that I can review existing vectors without re-processing and decide whether to re-vectorize with a different model.
+
+**Why this priority**: Essential for user experience and operational efficiency. Prevents unnecessary re-vectorization and allows users to quickly access existing results. Supports informed decision-making about when to regenerate vectors.
+
+**Independent Test**: Can be tested by creating embedding records, selecting the document in UI, and verifying the latest result displays immediately with correct metadata and auto-switched model selector.
+
+**Acceptance Scenarios**:
+
+1. **Given** a document has one embedding result created at "2025-12-17 10:00" with model "bge-m3", **When** user selects that document, **Then** the system displays the embedding result in right panel within 500ms with header showing "DocumentName · bge-m3 · 1024维 · 50/50块 · 1250ms"
+2. **Given** a document has multiple embedding results with different models, **When** user selects that document, **Then** the system displays the result with the latest created_at timestamp (most recent vectorization)
+3. **Given** user selects a document with embedding result created using "qwen3-embedding-8b", **When** result is displayed, **Then** the left-side model selector automatically switches to "qwen3-embedding-8b" selection
+4. **Given** user views historical embedding result with model "bge-m3", **When** user manually changes model selector to "hunyuan-embedding", **Then** the button text remains "重新向量化" and the displayed result does not change
+5. **Given** user views historical result and changes model to a different one, **When** user clicks "重新向量化", **Then** system triggers new vectorization with the newly selected model, creates new database record, and auto-switches display to show new result
+6. **Given** user selects a document with no embedding history, **When** page loads, **Then** right panel shows empty state, model selector shows default selection, and button displays "开始向量化" text
+7. **Given** user selects document A (with embedding history), then selects document B (with different embedding history), **When** second selection is made, **Then** system immediately replaces displayed result with document B's latest embedding result and auto-switches model selector to match
+8. **Given** a document has embedding result with status "PARTIAL_SUCCESS", **When** displayed, **Then** result header shows failed count (e.g., "45/50块 · 部分成功") and error_message is visible below header
 
 ---
 
@@ -210,6 +243,9 @@ As a system operator, I need the embedding service to automatically retry failed
 - **Vector dimension mismatch**: System fails immediately with clear error message indicating expected dimensions (per model specification) versus actual dimensions received from API (see FR-011)
 - **Rate limiting**: System retries with exponential backoff (increasing delays between attempts, jitter ±25%) when API returns rate limit errors, respecting timeout constraints (see FR-007)
 - **Empty document list (all documents unchunked)**: Document selector displays empty state message "暂无已分块文档,请先对文档进行分块处理" with disabled "开始向量化" button. User must navigate to chunking module to process documents first.
+- **Document with no embedding history selected**: Button displays "开始向量化" text and triggers new vectorization when clicked.
+- **Document with existing embedding history selected**: System immediately queries and displays latest embedding result, auto-switches model selector to match result's model, changes button text to "重新向量化". Clicking button generates new result and auto-updates display.
+- **User changes model while viewing historical result**: Button remains as "重新向量化"; clicking it vectorizes with the newly selected model and creates new database record (preserving historical record).
 - **Duplicate vectorization (same document+chunking result+model)**: System updates existing database record with new result_id and json_file_path, preserves old JSON file on disk for audit trail (see FR-024)
 - **Database write failure after JSON file write**: System automatically deletes the orphaned JSON file to maintain consistency, returns error to caller (see FR-022)
 - **Partial JSON write (disk full, permission error)**: System detects incomplete file, rolls back, and returns clear error indicating storage issue
@@ -257,6 +293,11 @@ As a system operator, I need the embedding service to automatically retry failed
 - **FR-036**: Frontend MUST implement two-column page layout: left column (document selector + model configuration + start button), right column (results display panel)
 - **FR-037**: Frontend MUST display document source information (document name, chunk count, vector dimensions) at the top of results panel after successful vectorization
 - **FR-038**: Frontend MUST disable or show validation message for "开始向量化" button when no document is selected
+- **FR-040**: Frontend MUST automatically query and display the latest embedding result (by created_at DESC) when user selects a document that has existing vectorization records
+- **FR-041**: Frontend MUST automatically switch model selector to match the displayed historical embedding result's model while keeping the selector enabled for user modification
+- **FR-042**: Frontend MUST change button text from "开始向量化" to "重新向量化" when displaying historical embedding result
+- **FR-043**: Frontend MUST display core metadata in results panel header when showing embedding results: document name, model name (with dimension), successful chunks count/total chunks count, processing time in milliseconds
+- **FR-044**: Frontend MUST preserve historical embedding results in database when user clicks "重新向量化" and automatically switch display to show the newly generated result
 
 ### Non-Functional Requirements
 
@@ -335,6 +376,9 @@ As a system operator, I need the embedding service to automatically retry failed
 - **SC-015**: Navigation menu shows single "文档向量化" entry pointing to `/documents/embed` (no duplicate text vectorization entry)
 - **SC-016**: Query API by document_id returns latest embedding result within 100ms for database with 10,000 records
 - **SC-017**: List query API with pagination returns results within 200ms for page_size=20
+- **SC-018**: When user selects a document with existing embedding result, frontend displays historical result within 500ms (including API query time)
+- **SC-019**: Frontend correctly auto-switches model selector to match historical result's model in 100% of cases
+- **SC-020**: Button text correctly changes to "重新向量化" when displaying historical results in 100% of cases
 
 ## Assumptions
 
@@ -357,6 +401,7 @@ As a system operator, I need the embedding service to automatically retry failed
 - LangChain OpenAI embeddings library compatibility
 - Frontend: Document list API for populating document selector
 - Frontend: Chunking results API for retrieving latest chunking status per document
+- Frontend: Embedding results query API for retrieving latest embedding result by document_id (GET `/api/embeddings/results?document_id={id}&sort=created_at:desc&limit=1`)
 - Backend: ChunkingStrategy enum from chunking module (valid values: fixed_size, semantic, recursive, markdown, sentence, paragraph)
 
 ## Out of Scope

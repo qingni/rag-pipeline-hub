@@ -37,6 +37,7 @@ from ..services.embedding_service import EmbeddingService, EMBEDDING_MODELS
 from ..storage.embedding_storage_dual import DualWriteEmbeddingStorage
 from ..storage.embedding_db import EmbeddingResultDB
 from ..utils.logging_utils import embedding_logger
+from ..utils.formatters import success_response
 
 router = APIRouter(prefix="/embedding", tags=["embedding"])
 storage = DualWriteEmbeddingStorage(
@@ -395,10 +396,10 @@ async def embed_batch_texts(
 
 @router.get(
     "/models",
-    response_model=ModelsListResponse,
     status_code=status.HTTP_200_OK,
 )
 async def list_models():
+    """List all available embedding models."""
     models = [
         ModelInfo(
             name=name,
@@ -410,7 +411,12 @@ async def list_models():
         )
         for name, info in EMBEDDING_MODELS.items()
     ]
-    return ModelsListResponse(models=models, count=len(models))
+    return success_response(
+        data={
+            "models": models,
+            "count": len(models)
+        }
+    )
 
 
 @router.get(

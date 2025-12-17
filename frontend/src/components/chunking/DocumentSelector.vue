@@ -75,7 +75,7 @@
               <t-radio
                 :value="doc.id"
                 :checked="selectedDocId === doc.id"
-                @click.stop
+                @click.stop.prevent="() => {}"
               >
                 <div class="doc-item">
                   <div class="doc-header">

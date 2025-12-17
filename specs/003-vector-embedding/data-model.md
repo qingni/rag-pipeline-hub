@@ -1,509 +1,596 @@
 # Data Model: Vector Embedding Module
 
 **Feature**: 003-vector-embedding  
-**Date**: 2025-12-16  
-**Source**: Extracted from spec.md Requirements and research.md decisions
+**Date**: 2025-12-17  
+**Status**: Complete
 
----
+## Overview
 
-## 1. Database Schema
+This document defines the data entities, relationships, validation rules, and state transitions for the vector embedding module.
 
-### EmbeddingResult Table
+## Entity Definitions
 
-**Purpose**: Store metadata for vectorization operations with source traceability and query optimization.
+### 1. EmbeddingResult (Database Entity)
 
-**Schema**:
-```sql
-CREATE TABLE embedding_results (
-    -- Identity
-    result_id TEXT PRIMARY KEY,          -- UUID v4 format
-    
-    -- Source Traceability
-    document_id TEXT NOT NULL,           -- Reference to documents table
-    chunking_result_id TEXT,             -- Reference to chunking_results (NULL for ad-hoc text)
-    
-    -- Model Configuration
-    model TEXT NOT NULL,                 -- One of: bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4
-    vector_dimension INTEGER NOT NULL,   -- Model-specific: 1024, 4096, 1024, 2048
-    
-    -- Processing Status
-    status TEXT NOT NULL,                -- One of: SUCCESS, FAILED, PARTIAL_SUCCESS
-    successful_count INTEGER DEFAULT 0,  -- Number of successfully vectorized chunks
-    failed_count INTEGER DEFAULT 0,      -- Number of failed chunks
-    
-    -- Storage Reference
-    json_file_path TEXT NOT NULL,        -- Relative path: embedding/YYYY-MM-DD/embedding_{request_id}_{timestamp}.json
-    
-    -- Performance Metrics
-    processing_time_ms REAL,             -- Total vectorization time in milliseconds
-    
-    -- Timestamps
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Error Tracking
-    error_message TEXT,                  -- Detailed error for FAILED or PARTIAL_SUCCESS status
-    
-    -- Constraints
-    CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS')),
-    CHECK (model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4')),
-    CHECK (successful_count >= 0),
-    CHECK (failed_count >= 0),
-    CHECK (vector_dimension > 0)
-);
+**Purpose**: Store metadata about embedding operations
 
--- Indexes (from FR-028)
-CREATE INDEX idx_doc_model ON embedding_results(document_id, model);
-CREATE INDEX idx_created_at ON embedding_results(created_at DESC);
-CREATE INDEX idx_status ON embedding_results(status);
-```
+**Table**: `embedding_results`
 
-**Field Descriptions**:
+**Fields**:
 
-| Field | Type | Nullable | Description |
-|-------|------|----------|-------------|
-| `result_id` | TEXT | NO | Unique identifier (UUID v4) for this embedding operation |
-| `document_id` | TEXT | NO | Foreign key to source document |
-| `chunking_result_id` | TEXT | YES | Foreign key to chunking result (NULL for ad-hoc text vectorization) |
-| `model` | TEXT | NO | Embedding model name (validated against EMBEDDING_MODELS) |
-| `vector_dimension` | INTEGER | NO | Actual dimension of generated vectors |
-| `status` | TEXT | NO | Processing outcome (SUCCESS/FAILED/PARTIAL_SUCCESS) |
-| `successful_count` | INTEGER | NO | Count of chunks successfully vectorized |
-| `failed_count` | INTEGER | NO | Count of chunks that failed vectorization |
-| `json_file_path` | TEXT | NO | Relative path to JSON file containing vector data |
-| `processing_time_ms` | REAL | YES | Total processing duration in milliseconds |
-| `created_at` | TIMESTAMP | NO | Record creation timestamp (UTC) |
-| `error_message` | TEXT | YES | Error details for failed operations |
+| Field | Type | Nullable | Default | Constraints | Description |
+|-------|------|----------|---------|-------------|-------------|
+| result_id | TEXT | NO | UUID | PRIMARY KEY | Unique identifier for embedding result |
+| document_id | TEXT | NO | - | FOREIGN KEY → documents.document_id | Source document reference |
+| chunking_result_id | TEXT | NO | - | FOREIGN KEY → chunking_results.result_id | Source chunking result reference |
+| model | TEXT | NO | - | IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4') | Embedding model used |
+| status | TEXT | NO | - | IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS') | Processing status |
+| successful_count | INTEGER | NO | - | >= 0 | Number of successfully vectorized chunks |
+| failed_count | INTEGER | NO | - | >= 0 | Number of failed chunks |
+| vector_dimension | INTEGER | NO | - | IN (768, 1024, 4096) | Dimension size of generated vectors |
+| json_file_path | TEXT | NO | - | LENGTH > 0 | Relative path to JSON file containing vectors |
+| processing_time_ms | REAL | NO | - | >= 0.0 | Total processing time in milliseconds |
+| created_at | TIMESTAMP | NO | CURRENT_TIMESTAMP | - | Record creation timestamp |
+| error_message | TEXT | YES | NULL | - | Error details for FAILED/PARTIAL_SUCCESS status |
 
-**Validation Rules** (from Spec Requirements):
-- `model` must match one of four supported models (FR-006)
-- `vector_dimension` must match model's expected dimension (FR-014)
-- `status='SUCCESS'` requires `successful_count > 0` and `failed_count = 0`
-- `status='PARTIAL_SUCCESS'` requires `successful_count > 0` and `failed_count > 0`
-- `status='FAILED'` requires `successful_count = 0` and `error_message IS NOT NULL`
-- `json_file_path` must be relative path from configured results directory (FR-023)
+**Indexes**:
+- PRIMARY KEY on `result_id`
+- COMPOSITE INDEX on `(document_id, model)` - for "get latest by document+model" queries
+- INDEX on `created_at DESC` - for "get latest" queries and date range filtering
+- INDEX on `status` - for status-based filtering
 
----
+**Validation Rules**:
+- `successful_count + failed_count > 0` (at least one chunk processed)
+- `status = 'SUCCESS'` implies `failed_count = 0`
+- `status = 'FAILED'` implies `successful_count = 0`
+- `status = 'PARTIAL_SUCCESS'` implies `successful_count > 0 AND failed_count > 0`
+- `error_message` must be set when `status IN ('FAILED', 'PARTIAL_SUCCESS')`
+- `json_file_path` must be relative path (no leading `/`)
+- `model` must match one of the supported models
 
-## 2. JSON Vector Data Format
-
-### File Naming Convention
-**Pattern**: `embedding_{request_id}_{timestamp}.json`  
-**Example**: `embedding_a3b7c9f2-4e5d-6789-abcd-ef0123456789_20251216_143052.json`
-
-**Directory Structure**:
-```
-results/
-└── embedding/
-    └── 2025-12-16/
-        ├── embedding_a3b7c9f2_20251216_143052.json
-        └── embedding_b8d4e1a3_20251216_150125.json
-```
-
-### JSON Schema
+**Example**:
 ```json
 {
-  "request_id": "a3b7c9f2-4e5d-6789-abcd-ef0123456789",
-  "document_id": "doc-123",
-  "chunking_result_id": "chunk-456",
+  "result_id": "emb_550e8400-e29b-41d4-a716-446655440000",
+  "document_id": "doc_123",
+  "chunking_result_id": "chunk_456",
   "model": "qwen3-embedding-8b",
   "status": "SUCCESS",
-  "metadata": {
-    "total_chunks": 50,
-    "successful_count": 50,
-    "failed_count": 0,
-    "vector_dimension": 4096,
-    "processing_time_ms": 8234.5,
-    "created_at": "2025-12-16T14:30:52Z"
-  },
-  "vectors": [
-    {
-      "index": 0,
-      "chunk_text": "First chunk content...",
-      "vector": [0.1234, -0.5678, 0.9012, ...],  // 4096 floats
-      "dimension": 4096,
-      "text_length": 256,
-      "processing_time_ms": 164.7
-    },
-    {
-      "index": 1,
-      "chunk_text": "Second chunk content...",
-      "vector": [0.3456, 0.7890, -0.2345, ...],
-      "dimension": 4096,
-      "text_length": 312,
-      "processing_time_ms": 175.2
-    }
-    // ... 48 more vectors
-  ],
-  "failures": []  // Empty for SUCCESS status
+  "successful_count": 50,
+  "failed_count": 0,
+  "vector_dimension": 4096,
+  "json_file_path": "embedding/doc_123_20251217_103045.json",
+  "processing_time_ms": 12450.5,
+  "created_at": "2025-12-17T10:30:45Z",
+  "error_message": null
 }
 ```
 
-**For PARTIAL_SUCCESS Status**:
+---
+
+### 2. EmbeddingVectorFile (JSON File Entity)
+
+**Purpose**: Store actual vector values and chunk metadata
+
+**File Location**: `{EMBEDDING_RESULTS_DIR}/{document_id}_{timestamp}.json`
+
+**Schema**:
 ```json
 {
-  "status": "PARTIAL_SUCCESS",
-  "metadata": {
-    "successful_count": 48,
-    "failed_count": 2
-  },
-  "vectors": [ /* 48 successful vectors */ ],
-  "failures": [
+  "result_id": "string",
+  "document_id": "string",
+  "chunking_result_id": "string",
+  "model": "string",
+  "vector_dimension": "integer",
+  "created_at": "ISO8601 timestamp",
+  "vectors": [
     {
-      "index": 15,
-      "chunk_text": "Problematic chunk...",
-      "error": "API timeout after 60 seconds",
-      "error_code": "TIMEOUT"
-    },
-    {
-      "index": 32,
-      "chunk_text": "Another failed chunk...",
-      "error": "Empty text after preprocessing",
-      "error_code": "EMPTY_TEXT"
+      "chunk_index": "integer",
+      "chunk_id": "string (optional)",
+      "text_hash": "string (sha256:...)",
+      "text_length": "integer",
+      "vector": [0.123, -0.456, ...],
+      "processing_time_ms": "float"
     }
   ]
 }
 ```
 
-**Field Descriptions**:
+**Validation Rules**:
+- All vectors must have same length (`vector_dimension`)
+- `vectors` array length must equal `successful_count` from database record
+- Each `vector` array must contain only finite floating-point numbers
+- `text_hash` must start with `sha256:`
+- File must be valid JSON (reject malformed files)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `request_id` | string | Matches database `result_id` |
-| `document_id` | string | Source document identifier |
-| `chunking_result_id` | string \| null | Source chunking result (null for ad-hoc text) |
-| `model` | string | Embedding model used |
-| `status` | string | SUCCESS \| FAILED \| PARTIAL_SUCCESS |
-| `metadata.total_chunks` | integer | Total chunks attempted |
-| `metadata.successful_count` | integer | Successfully vectorized chunks |
-| `metadata.failed_count` | integer | Failed chunks count |
-| `metadata.vector_dimension` | integer | Dimension of vectors |
-| `metadata.processing_time_ms` | float | Total processing time |
-| `vectors[].index` | integer | Original chunk index (0-based) |
-| `vectors[].chunk_text` | string | Original text chunk (for traceability) |
-| `vectors[].vector` | float[] | Embedding vector (dimension matches model) |
-| `vectors[].dimension` | integer | Actual dimension (validation) |
-| `vectors[].text_length` | integer | Character count of chunk |
-| `vectors[].processing_time_ms` | float | Time to vectorize this chunk |
-| `failures[].index` | integer | Failed chunk index |
-| `failures[].chunk_text` | string | Failed chunk text |
-| `failures[].error` | string | Human-readable error message |
-| `failures[].error_code` | string | Machine-readable error code |
-
----
-
-## 3. API Request/Response Models
-
-### VectorizationRequest (Chunking-based)
-
-**Endpoint**: `POST /embedding/from-chunking-result`
-
-```python
-class VectorizationFromChunkingRequest(BaseModel):
-    chunking_result_id: str = Field(..., description="ID of completed chunking result")
-    model: str = Field(..., description="Embedding model name")
-    
-    @validator('model')
-    def validate_model(cls, v):
-        valid_models = ['bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4']
-        if v not in valid_models:
-            raise ValueError(f"Invalid model. Must be one of {valid_models}")
-        return v
-```
-
-### VectorizationRequest (Document-based)
-
-**Endpoint**: `POST /embedding/from-document`
-
-```python
-class VectorizationFromDocumentRequest(BaseModel):
-    document_id: str = Field(..., description="Document ID")
-    model: str = Field(..., description="Embedding model name")
-    strategy: Optional[str] = Field(None, description="Filter by chunking strategy (optional)")
-    
-    @validator('model')
-    def validate_model(cls, v):
-        # Same validation as above
-        pass
-    
-    @validator('strategy')
-    def validate_strategy(cls, v):
-        if v is not None:
-            valid_strategies = ['fixed_size', 'semantic', 'recursive', 'markdown', 'sentence', 'paragraph']
-            if v not in valid_strategies:
-                raise ValueError(f"Invalid strategy. Must be one of {valid_strategies}")
-        return v
-```
-
-### VectorizationResponse
-
-```python
-class VectorResult(BaseModel):
-    index: int
-    chunk_text: str
-    vector: List[float]
-    dimension: int
-    text_length: int
-    processing_time_ms: float
-
-class FailureInfo(BaseModel):
-    index: int
-    chunk_text: str
-    error: str
-    error_code: str
-
-class VectorizationResponse(BaseModel):
-    request_id: str
-    document_id: str
-    chunking_result_id: Optional[str]
-    model: str
-    status: Literal['SUCCESS', 'FAILED', 'PARTIAL_SUCCESS']
-    metadata: Dict[str, Any]  # Contains total_chunks, counts, timing, etc.
-    vectors: List[VectorResult]
-    failures: List[FailureInfo]
-    json_file_path: str  # Where vectors are persisted
-```
-
-### Query Requests/Responses
-
-**Endpoint**: `GET /embedding/results/{result_id}`
-
-```python
-class EmbeddingResultDetail(BaseModel):
-    result_id: str
-    document_id: str
-    chunking_result_id: Optional[str]
-    model: str
-    status: str
-    successful_count: int
-    failed_count: int
-    vector_dimension: int
-    json_file_path: str
-    processing_time_ms: Optional[float]
-    created_at: datetime
-    error_message: Optional[str]
-```
-
-**Endpoint**: `GET /embedding/results/by-document/{document_id}?model=xxx`
-
-```python
-class LatestEmbeddingQuery(BaseModel):
-    document_id: str
-    model: Optional[str] = None  # Filter by model if provided
-
-# Response: EmbeddingResultDetail (latest by created_at DESC)
-```
-
-**Endpoint**: `GET /embedding/results?page=1&page_size=20&status=SUCCESS&date_from=2025-12-15`
-
-```python
-class EmbeddingResultListQuery(BaseModel):
-    page: int = Field(1, ge=1)
-    page_size: int = Field(20, ge=1, le=100)
-    document_id: Optional[str] = None
-    model: Optional[str] = None
-    status: Optional[Literal['SUCCESS', 'FAILED', 'PARTIAL_SUCCESS']] = None
-    date_from: Optional[datetime] = None
-    date_to: Optional[datetime] = None
-
-class EmbeddingResultListResponse(BaseModel):
-    results: List[EmbeddingResultDetail]
-    pagination: Dict[str, Any]  # total_count, total_pages, current_page, page_size
+**Example**:
+```json
+{
+  "result_id": "emb_550e8400-e29b-41d4-a716-446655440000",
+  "document_id": "doc_123",
+  "chunking_result_id": "chunk_456",
+  "model": "qwen3-embedding-8b",
+  "vector_dimension": 4096,
+  "created_at": "2025-12-17T10:30:45Z",
+  "vectors": [
+    {
+      "chunk_index": 0,
+      "chunk_id": "chunk_456_0",
+      "text_hash": "sha256:abc123...",
+      "text_length": 512,
+      "vector": [0.0234, -0.0156, 0.0789, ...],  // 4096 floats
+      "processing_time_ms": 245.3
+    },
+    {
+      "chunk_index": 1,
+      "chunk_id": "chunk_456_1",
+      "text_hash": "sha256:def456...",
+      "text_length": 487,
+      "vector": [0.0123, -0.0245, 0.0567, ...],  // 4096 floats
+      "processing_time_ms": 238.7
+    }
+  ]
+}
 ```
 
 ---
 
-## 4. Entity Relationships
+### 3. EmbeddingModel (Configuration Entity)
 
-```
-┌─────────────────┐
-│   Documents     │
-│  (external)     │
-└────────┬────────┘
-         │ 1
-         │
-         │ N
-┌────────▼────────────┐
-│ ChunkingResults     │
-│  (external)         │
-└────────┬────────────┘
-         │ 1
-         │
-         │ N
-┌────────▼────────────┐         ┌──────────────────┐
-│ EmbeddingResults    │────────▶│ JSON Vector File │
-│   (database)        │ 1    1  │  (file system)   │
-└─────────────────────┘         └──────────────────┘
+**Purpose**: Define supported embedding model configurations
 
-Relationship: embedding_results.json_file_path → vector JSON file
-Constraint: Delete cascade NOT implemented (preserve historical JSON files per FR-024)
+**Storage**: In-memory constant (`EMBEDDING_MODELS` dict in `embedding_service.py`)
+
+**Schema**:
+```python
+{
+  "model_name": {
+    "name": str,
+    "dimension": int,
+    "description": str,
+    "provider": str,
+    "supports_multilingual": bool,
+    "max_batch_size": int
+  }
+}
 ```
 
-**Foreign Key Relationships**:
-- `embedding_results.document_id` → `documents.id` (implicit, not enforced by FK constraint)
-- `embedding_results.chunking_result_id` → `chunking_results.id` (implicit, not enforced)
-- `embedding_results.json_file_path` → physical JSON file (enforced by dual-write transaction)
+**Supported Models**:
 
-**Cardinality**:
-- One document → Many chunking results → Many embedding results
-- One chunking result → Many embedding results (different models)
-- One embedding result → One JSON file (1:1 enforced by dual-write)
+| Name | Dimension | Provider | Multilingual | Max Batch | Description |
+|------|-----------|----------|--------------|-----------|-------------|
+| bge-m3 | 1024 | bge | Yes | 1000 | BGE-M3 多语言模型,支持中英文 |
+| qwen3-embedding-8b | 4096 | qwen | Yes | 1000 | 通义千问 Embedding 模型,8B 参数 |
+| hunyuan-embedding | 1024 | hunyuan | Yes | 1000 | 腾讯混元 Embedding 模型 |
+| jina-embeddings-v4 | 768 | jina | Yes | 1000 | Jina AI Embeddings v4,多语言支持 |
 
-**Concurrency Control (NFR-003)**:
-- Row-level locks (`SELECT ... FOR UPDATE`) prevent race conditions when multiple requests update same document+model
-- Transaction isolation ensures atomic dual-write operations (JSON file + database record)
-- Optimistic locking alternative considered but rejected (see research.md Section 8)
+**Validation Rules**:
+- Model name must be alphanumeric with hyphens only
+- Dimension must be power of 2 (for optimization)
+- Max batch size must be <= 1000 (global limit)
 
 ---
 
-## 5. State Transitions
+### 4. EmbeddingRequest (API Request Entity)
 
-### Embedding Result Status Lifecycle
+**Purpose**: Represent incoming vectorization requests
+
+**Variants**:
+
+#### 4a. FromChunkingResultRequest
+```python
+{
+  "result_id": str,        # Chunking result ID (required)
+  "model": str,            # Embedding model name (required)
+  "request_id": str | None # Optional request tracking ID
+}
+```
+
+#### 4b. FromDocumentRequest
+```python
+{
+  "document_id": str,        # Document ID (required)
+  "model": str,              # Embedding model name (required)
+  "strategy_type": str | None,  # Optional filter (fixed_size, semantic, etc.)
+  "request_id": str | None   # Optional request tracking ID
+}
+```
+
+**Validation Rules**:
+- `result_id` must exist in `chunking_results` table with `status = 'COMPLETED'`
+- `document_id` must exist in `documents` table
+- `model` must be one of the supported models
+- `strategy_type` (if provided) must be valid ChunkingStrategy enum value
+- Request body must be valid JSON
+
+---
+
+### 5. EmbeddingResponse (API Response Entity)
+
+**Purpose**: Return vectorization operation results
+
+**Schema**:
+```python
+{
+  "result_id": str,
+  "document_id": str,
+  "chunking_result_id": str,
+  "model": str,
+  "status": "SUCCESS" | "FAILED" | "PARTIAL_SUCCESS",
+  "successful_count": int,
+  "failed_count": int,
+  "vector_dimension": int,
+  "json_file_path": str,
+  "processing_time_ms": float,
+  "created_at": str,  # ISO8601
+  "error_message": str | null,
+  "failures": [        # Only present for PARTIAL_SUCCESS
+    {
+      "chunk_index": int,
+      "error_type": str,
+      "error_message": str,
+      "retry_recommended": bool
+    }
+  ]
+}
+```
+
+**Example (Success)**:
+```json
+{
+  "result_id": "emb_550e8400-e29b-41d4-a716-446655440000",
+  "document_id": "doc_123",
+  "chunking_result_id": "chunk_456",
+  "model": "qwen3-embedding-8b",
+  "status": "SUCCESS",
+  "successful_count": 50,
+  "failed_count": 0,
+  "vector_dimension": 4096,
+  "json_file_path": "embedding/doc_123_20251217_103045.json",
+  "processing_time_ms": 12450.5,
+  "created_at": "2025-12-17T10:30:45Z",
+  "error_message": null
+}
+```
+
+**Example (Partial Success)**:
+```json
+{
+  "result_id": "emb_550e8400-e29b-41d4-a716-446655440000",
+  "document_id": "doc_123",
+  "chunking_result_id": "chunk_456",
+  "model": "bge-m3",
+  "status": "PARTIAL_SUCCESS",
+  "successful_count": 48,
+  "failed_count": 2,
+  "vector_dimension": 1024,
+  "json_file_path": "embedding/doc_123_20251217_104532.json",
+  "processing_time_ms": 15230.8,
+  "created_at": "2025-12-17T10:45:32Z",
+  "error_message": "2 chunks failed to vectorize",
+  "failures": [
+    {
+      "chunk_index": 15,
+      "error_type": "RATE_LIMIT_ERROR",
+      "error_message": "Rate limit exceeded, retry after 30s",
+      "retry_recommended": true
+    },
+    {
+      "chunk_index": 32,
+      "error_type": "INVALID_TEXT_ERROR",
+      "error_message": "Text contains invalid UTF-8 sequences",
+      "retry_recommended": false
+    }
+  ]
+}
+```
+
+---
+
+### 6. EmbeddingQueryResponse (Query API Response Entity)
+
+**Purpose**: Return query results for embedding history
+
+**Schema**:
+```python
+{
+  "results": [EmbeddingResponse],
+  "total_count": int,
+  "page": int,
+  "page_size": int,
+  "total_pages": int
+}
+```
+
+**Example**:
+```json
+{
+  "results": [
+    {
+      "result_id": "emb_123",
+      "document_id": "doc_456",
+      "model": "qwen3-embedding-8b",
+      "status": "SUCCESS",
+      "successful_count": 50,
+      "failed_count": 0,
+      "vector_dimension": 4096,
+      "created_at": "2025-12-17T10:30:45Z"
+    }
+  ],
+  "total_count": 1,
+  "page": 1,
+  "page_size": 20,
+  "total_pages": 1
+}
+```
+
+---
+
+### 7. DocumentSelectionState (Frontend State Entity)
+
+**Purpose**: Track UI state for document embedding page
+
+**Schema** (Pinia Store):
+```typescript
+{
+  selectedDocument: {
+    document_id: string,
+    name: string,
+    chunking_status: 'chunked',
+    chunking_date: string  // YYYY-MM-DD
+  } | null,
+  
+  selectedModel: string,  // Model name
+  
+  currentResult: {
+    result_id: string,
+    document_id: string,
+    model: string,
+    status: 'SUCCESS' | 'FAILED' | 'PARTIAL_SUCCESS',
+    successful_count: number,
+    failed_count: number,
+    vector_dimension: number,
+    processing_time_ms: number,
+    created_at: string,
+    vectors: Array<{
+      chunk_index: number,
+      vector: number[],
+      text_length: number
+    }>
+  } | null,
+  
+  latestResults: {
+    [document_id: string]: EmbeddingResult
+  },
+  
+  isLoading: boolean,
+  error: string | null
+}
+```
+
+---
+
+## Entity Relationships
 
 ```
-       ┌──────────────┐
-       │   CREATED    │ (transient state, not persisted)
-       └──────┬───────┘
-              │
-              ▼
-       ┌──────────────┐
-       │  PROCESSING  │ (transient state, in-memory only)
-       └──────┬───────┘
-              │
-       ┌──────┴──────┬────────────────┐
-       │             │                │
-       ▼             ▼                ▼
-┌─────────────┐ ┌────────────┐ ┌──────────────┐
-│   SUCCESS   │ │   FAILED   │ │PARTIAL_SUCCESS│
-│ (terminal)  │ │ (terminal) │ │  (terminal)   │
-└─────────────┘ └────────────┘ └──────────────┘
+┌─────────────────────┐
+│   documents         │
+│                     │
+│ PK: document_id     │
+└──────────┬──────────┘
+           │
+           │ 1
+           │
+           │
+           │ N
+┌──────────┴──────────┐
+│ chunking_results    │
+│                     │
+│ PK: result_id       │
+│ FK: document_id     │
+└──────────┬──────────┘
+           │
+           │ 1
+           │
+           │
+           │ N
+┌──────────┴──────────┐
+│ embedding_results   │
+│                     │
+│ PK: result_id       │
+│ FK: document_id     │
+│ FK: chunking_result_id │
+│                     │
+│ Related Files:      │
+│ - JSON vector files │
+└─────────────────────┘
+```
 
-Terminal states are persisted to database.
+**Relationship Rules**:
+- One document can have many chunking results (1:N)
+- One chunking result can have many embedding results (1:N)
+- One document can have many embedding results (1:N, via chunking results)
+- Each embedding result references exactly one JSON file (1:1)
+- When document is deleted, cascade delete chunking results and embedding results
+- When chunking result is deleted, cascade delete embedding results
+- JSON files are NOT automatically deleted (manual cleanup process)
+
+---
+
+## State Transitions
+
+### EmbeddingResult Status State Machine
+
+```
+                    ┌─────────────┐
+                    │   [START]   │
+                    └──────┬──────┘
+                           │
+                           │ Begin vectorization
+                           │
+                    ┌──────▼──────┐
+              ┌────▶│  PROCESSING │◀────┐
+              │     └──────┬──────┘     │
+              │            │            │
+              │            │            │
+    API retry │            │            │ Continue on error
+              │            │            │
+              │     ┌──────▼──────────┐ │
+              │     │ All chunks pass │ │
+              │     └──────┬──────────┘ │
+              │            │            │
+              │            │            │
+              │     ┌──────▼──────────┐ │
+              │     │    SUCCESS      │ │
+              │     │ failed_count=0  │ │
+              │     └─────────────────┘ │
+              │                         │
+              │     ┌─────────────────┐ │
+              │     │ Some chunks fail│ │
+              └─────┤ but some pass   ├─┘
+                    └──────┬──────────┘
+                           │
+                           │
+                    ┌──────▼──────────┐
+                    │ PARTIAL_SUCCESS │
+                    │ failed_count>0  │
+                    │ success_count>0 │
+                    └─────────────────┘
+                    
+                    ┌─────────────────┐
+                    │  All chunks fail│
+                    └──────┬──────────┘
+                           │
+                           │
+                    ┌──────▼──────────┐
+                    │     FAILED      │
+                    │ success_count=0 │
+                    └─────────────────┘
 ```
 
 **Transition Rules**:
-- `PROCESSING → SUCCESS`: All chunks vectorized successfully
-- `PROCESSING → FAILED`: All chunks failed OR critical error (API auth, timeout)
-- `PROCESSING → PARTIAL_SUCCESS`: Some chunks succeeded, some failed (per FR-001 batch handling)
-- Once in terminal state, status never changes (re-vectorization creates new record per FR-024)
-
-**Success Criteria**:
-- `SUCCESS`: `successful_count == total_chunks`, `failed_count == 0`
-- `FAILED`: `successful_count == 0`, `error_message != NULL`
-- `PARTIAL_SUCCESS`: `successful_count > 0 AND failed_count > 0`
+- PROCESSING → SUCCESS: When all chunks vectorized successfully
+- PROCESSING → PARTIAL_SUCCESS: When some chunks fail but at least one succeeds
+- PROCESSING → FAILED: When all chunks fail (after retries exhausted)
+- FAILED/PARTIAL_SUCCESS: Terminal states (no further transitions)
+- Re-vectorization creates new EmbeddingResult record (does not modify existing)
 
 ---
 
-## 6. Data Validation Rules
+## Validation Rules Summary
 
-### Database-Level Constraints
-1. **result_id**: Must be UUID v4 format (validated in application layer)
-2. **model**: CHECK constraint enforces one of four valid models
-3. **status**: CHECK constraint enforces three valid statuses
-4. **vector_dimension**: Must match model's expected dimension (application validation)
-5. **counts**: CHECK constraints ensure non-negative values
-6. **json_file_path**: Must be relative path (application validation)
+### Database Constraints
+
+```sql
+-- Enforce status consistency
+CHECK (
+  (status = 'SUCCESS' AND failed_count = 0) OR
+  (status = 'FAILED' AND successful_count = 0) OR
+  (status = 'PARTIAL_SUCCESS' AND successful_count > 0 AND failed_count > 0)
+)
+
+-- Enforce at least one chunk processed
+CHECK (successful_count + failed_count > 0)
+
+-- Enforce valid model names
+CHECK (model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4'))
+
+-- Enforce valid status values
+CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS'))
+
+-- Enforce valid dimensions
+CHECK (vector_dimension IN (768, 1024, 4096))
+```
 
 ### Application-Level Validation
-```python
-def validate_embedding_result(result: EmbeddingResultCreate):
-    # Model validation
-    assert result.model in EMBEDDING_MODELS, "Invalid model"
-    
-    # Dimension validation
-    expected_dim = EMBEDDING_MODELS[result.model]["dimension"]
-    assert result.vector_dimension == expected_dim, f"Dimension mismatch: expected {expected_dim}"
-    
-    # Status consistency validation
-    if result.status == "SUCCESS":
-        assert result.successful_count > 0, "SUCCESS requires successful_count > 0"
-        assert result.failed_count == 0, "SUCCESS requires failed_count == 0"
-        assert result.error_message is None, "SUCCESS cannot have error_message"
-    
-    elif result.status == "FAILED":
-        assert result.successful_count == 0, "FAILED requires successful_count == 0"
-        assert result.error_message is not None, "FAILED requires error_message"
-    
-    elif result.status == "PARTIAL_SUCCESS":
-        assert result.successful_count > 0, "PARTIAL_SUCCESS requires some success"
-        assert result.failed_count > 0, "PARTIAL_SUCCESS requires some failures"
-    
-    # File path validation
-    assert not os.path.isabs(result.json_file_path), "json_file_path must be relative"
-    assert result.json_file_path.startswith("embedding/"), "Path must start with embedding/"
 
+**Pre-Vectorization**:
+- Validate chunking result exists and is COMPLETED
+- Validate document has active chunking results
+- Validate model name is supported
+- Validate batch size <= 1000
 
-def save_embedding_with_concurrency_control(result_data: dict, session: Session):
-    """
-    NFR-003: Concurrent-safe save operation using row-level locking.
-    Prevents race conditions when multiple requests update same document+model.
-    """
-    # Acquire row-level lock to prevent concurrent updates
-    existing = session.execute(
-        select(EmbeddingResult)
-        .where(
-            EmbeddingResult.document_id == result_data['document_id'],
-            EmbeddingResult.model == result_data['model']
-        )
-        .with_for_update()  # Blocks concurrent transactions until commit
-    ).scalar_one_or_none()
+**Post-Vectorization**:
+- Validate all vectors have same dimension
+- Validate dimension matches model specification
+- Validate JSON file was written successfully
+- Validate database record was created
+
+**Query Validation**:
+- Validate result_id exists before querying
+- Validate pagination parameters (page >= 1, page_size <= 100)
+- Validate date range format (ISO8601)
+- Validate status filter value
+
+---
+
+## Data Migration Plan
+
+### Migration Script
+
+**File**: `backend/migrations/create_embedding_results_table.py`
+
+**Execution Order**: After chunking_results table exists
+
+**Forward Migration**:
+```sql
+CREATE TABLE IF NOT EXISTS embedding_results (
+    result_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    chunking_result_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    status TEXT NOT NULL,
+    successful_count INTEGER NOT NULL,
+    failed_count INTEGER NOT NULL,
+    vector_dimension INTEGER NOT NULL,
+    json_file_path TEXT NOT NULL,
+    processing_time_ms REAL NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    error_message TEXT,
     
-    # Proceed with create or update
-    if existing:
-        for key, value in result_data.items():
-            setattr(existing, key, value)
-        return existing
-    else:
-        new_record = EmbeddingResult(**result_data)
-        session.add(new_record)
-        return new_record
+    FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE,
+    FOREIGN KEY (chunking_result_id) REFERENCES chunking_results(result_id) ON DELETE CASCADE,
+    
+    CHECK (
+        (status = 'SUCCESS' AND failed_count = 0) OR
+        (status = 'FAILED' AND successful_count = 0) OR
+        (status = 'PARTIAL_SUCCESS' AND successful_count > 0 AND failed_count > 0)
+    ),
+    
+    CHECK (successful_count + failed_count > 0),
+    CHECK (model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4')),
+    CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS')),
+    CHECK (vector_dimension IN (768, 1024, 4096))
+);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_doc_model 
+ON embedding_results(document_id, model);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_created_at 
+ON embedding_results(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_status 
+ON embedding_results(status);
+```
+
+**Backward Migration**:
+```sql
+DROP INDEX IF EXISTS idx_embedding_status;
+DROP INDEX IF EXISTS idx_embedding_created_at;
+DROP INDEX IF EXISTS idx_embedding_doc_model;
+DROP TABLE IF EXISTS embedding_results;
 ```
 
 ---
 
-## 7. Performance Considerations
+## References
 
-### Index Usage Analysis
-**Query**: "Get latest embedding for document X with model Y"
-```sql
-SELECT * FROM embedding_results
-WHERE document_id = 'doc-123' AND model = 'bge-m3'
-ORDER BY created_at DESC
-LIMIT 1;
-```
-**Index Used**: `idx_doc_model` (composite) + `idx_created_at` (sorting)  
-**Expected Performance**: <10ms for 10k records
-
-**Query**: "List all SUCCESS embeddings, paginated"
-```sql
-SELECT * FROM embedding_results
-WHERE status = 'SUCCESS'
-ORDER BY created_at DESC
-LIMIT 20 OFFSET 40;
-```
-**Index Used**: `idx_status` + `idx_created_at`  
-**Expected Performance**: <20ms for 10k records
-
-### Data Growth Estimation
-- Average embedding result: ~500 bytes (database row)
-- Average JSON file: ~50KB for 50 chunks × 4096-dim vectors
-- Expected growth: 1000 documents/month × 2 re-vectorizations = 2000 records/month
-- Database size (1 year): 2000 × 12 × 500 bytes = ~12MB
-- File storage (1 year): 2000 × 12 × 50KB = ~1.2GB
+- Feature Specification: `specs/003-vector-embedding/spec.md`
+- Research Document: `specs/003-vector-embedding/research.md`
+- Existing Models:
+  - `backend/src/models/chunking_result.py`
+  - `backend/src/models/document.py`
 
 ---
 
-## Summary
-
-| Entity | Storage | Purpose | Key Indexes |
-|--------|---------|---------|-------------|
-| `embedding_results` | SQLite table | Metadata + query optimization | (doc+model), created_at DESC, status |
-| Vector JSON files | File system | High-dimensional vector data | N/A (accessed via path) |
-| API Request/Response models | In-memory (Pydantic) | Type safety + validation | N/A |
-
-**Critical Design Decisions**:
-1. **Dual Storage**: Database for metadata (fast queries), JSON for vectors (storage efficiency)
-2. **No Foreign Keys**: Implicit relationships to avoid cross-module coupling
-3. **Composite Indexes**: Optimized for "latest embedding by document+model" pattern
-4. **Immutable Records**: Re-vectorization creates new records (preserves history per FR-024)
-
-**Next Phase**: API contract design (contracts/) and quickstart guide (quickstart.md)
+**Status**: ✅ Data model complete. Ready for contract generation.
