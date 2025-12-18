@@ -313,6 +313,7 @@ class Vector(BaseModel):
     text_hash: Optional[str] = Field(None, description="SHA256 hash of source text")
     text_length: int = Field(..., gt=0, description="Character count of source text")
     processing_time_ms: Optional[float] = Field(None, ge=0, description="Processing time")
+    source_text: Optional[str] = Field(None, description="Original source text for this chunk")
     
     @field_validator('dimension')
     @classmethod

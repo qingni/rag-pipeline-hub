@@ -124,6 +124,7 @@ async def embed_single_text(
             text_hash=Vector.create_text_hash(request.text),
             text_length=result.text_length,
             processing_time_ms=result.api_latency_ms,
+            source_text=request.text,  # Include source text
         )
 
         metadata = EmbeddingMetadata(
@@ -257,6 +258,7 @@ async def embed_batch_texts(
                 text_hash=item.text_hash,
                 text_length=item.text_length,
                 processing_time_ms=item.processing_time_ms,
+                source_text=item.source_text,  # Include source text
             )
             for item in result.vectors
         ]
@@ -557,6 +559,7 @@ async def embed_from_chunking_result(
                 text_hash=item.text_hash,
                 text_length=item.text_length,
                 processing_time_ms=item.processing_time_ms,
+                source_text=item.source_text,  # Include source text
             )
             for item in result.vectors
         ]
@@ -764,6 +767,7 @@ async def embed_from_document(
                 text_hash=item.text_hash,
                 text_length=item.text_length,
                 processing_time_ms=item.processing_time_ms,
+                source_text=item.source_text,  # Include source text
             )
             for item in result.vectors
         ]

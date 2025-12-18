@@ -164,7 +164,8 @@ class EmbeddingStorage:
                 "dimension": response.vector.dimension,
                 "text_hash": response.vector.text_hash,
                 "text_length": response.vector.text_length,
-                "processing_time_ms": response.vector.processing_time_ms
+                "processing_time_ms": response.vector.processing_time_ms,
+                "source_text": getattr(response.vector, 'source_text', None)  # Include source text if available
             }
         
         if response.error:
@@ -233,7 +234,8 @@ class EmbeddingStorage:
                     "dimension": v.dimension,
                     "text_hash": v.text_hash,
                     "text_length": v.text_length,
-                    "processing_time_ms": v.processing_time_ms
+                    "processing_time_ms": v.processing_time_ms,
+                    "source_text": getattr(v, 'source_text', None)  # Include source text if available
                 }
                 for v in response.vectors
             ],

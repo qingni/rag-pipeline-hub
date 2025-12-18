@@ -158,6 +158,23 @@
               </t-button>
             </div>
             
+            <!-- 原始文本显示（新增） -->
+            <div v-if="vector.source_text" class="source-text-preview">
+              <div class="source-text-label">原始分块文本</div>
+              <div class="source-text-content" :class="{ 'expanded': expandedSourceTexts.has(idx) }">
+                {{ vector.source_text }}
+              </div>
+              <t-button 
+                v-if="vector.source_text.length > 100"
+                size="small" 
+                variant="text"
+                class="source-text-toggle"
+                @click="toggleSourceText(idx, $event)"
+              >
+                {{ expandedSourceTexts.has(idx) ? '收起' : '展开全文' }}
+              </t-button>
+            </div>
+            
             <!-- 向量可视化（热力图） -->
             <div v-if="viewMode === 'detailed'" class="vector-heatmap">
               <div class="heatmap-label">向量值分布</div>
@@ -286,6 +303,7 @@ const props = defineProps({
 // 视图状态
 const viewMode = ref('detailed') // 'compact' | 'detailed'
 const expandedVectors = ref(new Set())
+const expandedSourceTexts = ref(new Set())  // Track which source texts are expanded
 const currentPage = ref(1)
 const pageSize = ref(10)
 
@@ -422,6 +440,18 @@ function toggleVectorExpand(index, event) {
     expandedVectors.value.delete(index)
   } else {
     expandedVectors.value.add(index)
+  }
+}
+
+function toggleSourceText(index, event) {
+  if (event) {
+    event.stopPropagation?.()
+    event.preventDefault?.()
+  }
+  if (expandedSourceTexts.value.has(index)) {
+    expandedSourceTexts.value.delete(index)
+  } else {
+    expandedSourceTexts.value.add(index)
   }
 }
 
@@ -952,5 +982,45 @@ function downloadVectors(event) {
   padding: 0.125rem 0.5rem;
   border-radius: 4px;
   font-weight: 500;
+}
+
+/* 原始文本预览样式 */
+.source-text-preview {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  background-color: #f9fafb;
+  border-radius: 6px;
+  border-left: 3px solid #3b82f6;
+}
+
+.source-text-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.source-text-content {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.6;
+  max-height: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  transition: max-height 0.3s ease;
+}
+
+.source-text-content.expanded {
+  max-height: none;
+}
+
+.source-text-toggle {
+  margin-top: 0.5rem;
+  font-size: 12px;
+  color: #3b82f6;
 }
 </style>

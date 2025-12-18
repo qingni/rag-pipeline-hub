@@ -54,7 +54,7 @@ EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
     },
     "jina-embeddings-v4": {
         "name": "jina-embeddings-v4",
-        "dimension": 768,
+        "dimension": 2048,
         "description": "Jina AI Embeddings v4，多语言支持",
         "provider": "jina",
         "supports_multilingual": True,
@@ -85,6 +85,7 @@ class DocumentVectorResult:
     text_hash: str
     text_length: int
     processing_time_ms: float
+    source_text: str  # Add original source text
 
 
 @dataclass
@@ -301,6 +302,7 @@ class EmbeddingService:
                         text_hash=self._hash_text(validated_text),
                         text_length=len(validated_text),
                         processing_time_ms=duration_ms,
+                        source_text=validated_text,  # Store original text
                     )
                 )
                 total_retry_count += doc_retry_count
