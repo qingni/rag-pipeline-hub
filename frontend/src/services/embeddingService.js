@@ -150,6 +150,14 @@ const embeddingService = {
   async listResults(params = {}) {
     return apiClient.get('/embedding/results', { params })
   },
+
+  /**
+   * 删除向量化结果
+   * @param {string} resultId - 结果ID
+   */
+  async deleteResult(resultId) {
+    return apiClient.delete(`/embedding/results/${resultId}`)
+  },
 }
 
 export default embeddingService

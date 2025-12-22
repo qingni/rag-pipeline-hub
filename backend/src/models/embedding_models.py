@@ -514,6 +514,7 @@ class EmbeddingResultDetail(BaseModel):
     
     result_id: str = Field(..., description="Unique result identifier")
     document_id: str = Field(..., description="Source document ID")
+    document_name: Optional[str] = Field(None, description="Source document filename")
     chunking_result_id: Optional[str] = Field(None, description="Source chunking result ID")
     model: str = Field(..., description="Embedding model used")
     status: str = Field(..., description="Processing status")

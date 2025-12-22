@@ -331,6 +331,24 @@ class EmbeddingResultDB:
             self.session.commit()
         
         return count
+    
+    def delete_result(self, result_id: str) -> bool:
+        """
+        Delete a single embedding result by result_id.
+        
+        Args:
+            result_id: Unique embedding result identifier
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        stmt = EmbeddingResult.__table__.delete().where(
+            EmbeddingResult.result_id == result_id
+        )
+        result = self.session.execute(stmt)
+        self.session.commit()
+        
+        return result.rowcount > 0
 
 
 def get_embedding_db(session: Session) -> EmbeddingResultDB:

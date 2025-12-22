@@ -1,99 +1,124 @@
 <template>
   <div class="document-embedding-page">
-    <!-- 左侧控制面板 -->
-    <div class="control-panel">
-      <div class="panel-header">
-        <Hash :size="24" class="panel-icon" />
-        <h2 class="panel-title">文档向量化</h2>
-      </div>
-      
-      <div class="panel-content">
-        <!-- 文档选择器 -->
-        <DocumentSelector
-          v-model="store.selectedDocumentId"
-          :documents="store.documentsWithChunking"
-          :loading="loadingDocs"
-        />
-        
-        <!-- 模型选择器 -->
-        <ModelSelector
-          v-model="store.selectedModel"
-          :models="store.availableModels"
-          :loading="loadingModels"
-        />
-        
-        <!-- 高级选项 (可选) -->
-        <t-collapse
-          v-model="advancedExpanded"
-          class="advanced-options"
-          :default-value="[]"
-        >
-          <t-collapse-panel value="advanced" header="高级选项">
-            <div class="options-grid">
-              <div class="option-item">
-                <label class="option-label">最大重试次数</label>
-                <t-input-number
-                  v-model="maxRetries"
-                  :min="0"
-                  :max="10"
-                  :default-value="3"
-                />
-              </div>
-              
-              <div class="option-item">
-                <label class="option-label">超时时间（秒）</label>
-                <t-input-number
-                  v-model="timeout"
-                  :min="10"
-                  :max="300"
-                  :default-value="60"
-                />
-              </div>
-            </div>
-          </t-collapse-panel>
-        </t-collapse>
-        
-        <!-- 开始按钮 -->
-        <t-button
-          theme="primary"
-          size="large"
-          block
-          :loading="store.isProcessing"
-          :disabled="!store.canStartEmbedding"
-          @click="handleStartEmbedding"
-        >
-          <template #icon>
-            <Zap :size="18" />
-          </template>
-          {{ buttonText }}
-        </t-button>
-        
-        <!-- 验证提示 -->
-        <div v-if="!store.canStartEmbedding && !store.isProcessing" class="validation-hint">
-          <AlertCircle :size="14" />
-          <span>{{ validationMessage }}</span>
+    <t-layout>
+      <!-- 左侧控制面板 -->
+      <t-aside width="380px" class="control-panel">
+        <div class="panel-header">
+          <Hash :size="24" class="panel-icon" />
+          <h2 class="panel-title">文档向量化</h2>
         </div>
         
-        <!-- 错误提示 -->
-        <t-alert
-          v-if="store.error"
-          theme="error"
-          :message="store.error"
-          close
-          @close="store.error = null"
-        />
-      </div>
-    </div>
-    
-    <!-- 右侧结果面板 -->
-    <div class="results-panel">
-      <!-- 加载中状态 -->
-      <div v-if="loadingResult" class="loading-overlay">
-        <t-loading size="large" text="正在加载向量化结果..." />
-      </div>
+        <div class="panel-content">
+          <!-- 文档选择器 -->
+          <DocumentSelector
+            v-model="store.selectedDocumentId"
+            :documents="store.documentsWithChunking"
+            :loading="loadingDocs"
+          />
+          
+          <!-- 模型选择器 -->
+          <ModelSelector
+            v-model="store.selectedModel"
+            :models="store.availableModels"
+            :loading="loadingModels"
+          />
+          
+          <!-- 高级选项 (可选) -->
+          <t-collapse
+            v-model="advancedExpanded"
+            class="advanced-options"
+            :default-value="[]"
+          >
+            <t-collapse-panel value="advanced" header="高级选项">
+              <div class="options-grid">
+                <div class="option-item">
+                  <label class="option-label">最大重试次数</label>
+                  <t-input-number
+                    v-model="maxRetries"
+                    :min="0"
+                    :max="10"
+                    :default-value="3"
+                  />
+                </div>
+                
+                <div class="option-item">
+                  <label class="option-label">超时时间（秒）</label>
+                  <t-input-number
+                    v-model="timeout"
+                    :min="10"
+                    :max="300"
+                    :default-value="60"
+                  />
+                </div>
+              </div>
+            </t-collapse-panel>
+          </t-collapse>
+          
+          <!-- 开始按钮 -->
+          <t-button
+            theme="primary"
+            size="large"
+            block
+            :loading="store.isProcessing"
+            :disabled="!store.canStartEmbedding"
+            @click="handleStartEmbedding"
+          >
+            <template #icon>
+              <Zap :size="18" />
+            </template>
+            {{ buttonText }}
+          </t-button>
+          
+          <!-- 验证提示 -->
+          <div v-if="!store.canStartEmbedding && !store.isProcessing" class="validation-hint">
+            <AlertCircle :size="14" />
+            <span>{{ validationMessage }}</span>
+          </div>
+          
+          <!-- 错误提示 -->
+          <t-alert
+            v-if="store.error"
+            theme="error"
+            :message="store.error"
+            close
+            @close="store.error = null"
+          />
+        </div>
+      </t-aside>
       
-      <EmbeddingResults v-else :result="store.currentResult" />
-    </div>
+      <!-- 右侧结果面板 -->
+      <t-content class="main-content">
+        <t-tabs v-model="activeTab" class="full-height-tabs">
+          <!-- Tab 1: 向量化结果 -->
+          <t-tab-panel value="current" label="向量化结果" class="tab-panel-content">
+            <t-row :gutter="16" class="results-row">
+              <!-- 左侧：文档向量结果卡片 -->
+              <t-col :span="12">
+                <EmbeddingResultCard
+                  :result="store.currentResult"
+                  :document-info="currentDocumentInfo"
+                />
+              </t-col>
+              
+              <!-- 右侧：向量详情 -->
+              <t-col :span="12">
+                <EmbeddingResults :result="store.currentResult" />
+              </t-col>
+            </t-row>
+          </t-tab-panel>
+          
+          <!-- Tab 2: 历史记录 -->
+          <t-tab-panel value="history" label="历史记录" class="tab-panel-content">
+            <EmbeddingHistoryList
+              :document-id="store.selectedDocumentId"
+              @view="handleViewHistory"
+              @delete="handleDeleteHistory"
+              @download="handleDownloadHistory"
+            />
+          </t-tab-panel>
+        </t-tabs>
+      </t-content>
+    </t-layout>
   </div>
 </template>
 
@@ -105,9 +130,12 @@ import { useEmbeddingStore } from '@/stores/embedding'
 import DocumentSelector from '@/components/embedding/DocumentSelector.vue'
 import ModelSelector from '@/components/embedding/ModelSelector.vue'
 import EmbeddingResults from '@/components/embedding/EmbeddingResults.vue'
+import EmbeddingResultCard from '@/components/embedding/EmbeddingResultCard.vue'
+import EmbeddingHistoryList from '@/components/embedding/EmbeddingHistoryList.vue'
 
 const store = useEmbeddingStore()
 
+const activeTab = ref('current')
 const loadingDocs = ref(false)
 const loadingModels = ref(false)
 const loadingResult = ref(false)
@@ -130,6 +158,13 @@ const buttonText = computed(() => {
     return '向量化中...'
   }
   return store.currentResult ? '重新向量化' : '开始向量化'
+})
+
+const currentDocumentInfo = computed(() => {
+  if (!store.selectedDocumentId) return null
+  return store.documentsWithChunking.find(
+    doc => doc.document_id === store.selectedDocumentId
+  )
 })
 
 // 监听文档选择变化，自动加载历史向量化结果
@@ -216,31 +251,53 @@ async function handleStartEmbedding() {
     })
     
     MessagePlugin.success('向量化完成')
+    // 切换到当前结果标签页
+    activeTab.value = 'current'
   } catch (error) {
     // Error already handled in store
     console.error('Embedding failed:', error)
   }
 }
+
+async function handleViewHistory(resultId) {
+  try {
+    await store.fetchEmbeddingResultById(resultId)
+    MessagePlugin.success('历史记录加载成功')
+    // 切换到结果标签页
+    activeTab.value = 'current'
+  } catch (error) {
+    MessagePlugin.error(error.message || '加载历史记录失败')
+  }
+}
+
+function handleDeleteHistory(resultId) {
+  // 如果删除的是当前显示的结果，清空
+  if (store.currentResult?.result_id === resultId) {
+    store.clearResults()
+  }
+}
+
+function handleDownloadHistory(item) {
+  // 可以从历史列表直接导出
+  MessagePlugin.info('正在准备导出...')
+  // TODO: 实现从历史记录导出
+}
 </script>
 
 <style scoped>
 .document-embedding-page {
-  display: flex;
-  height: 100%;
-  gap: 1.5rem;
-  padding: 1.5rem;
-  background-color: #f5f6fa;
+  height: 100vh;
+  background-color: var(--td-bg-color-page);
 }
 
 .control-panel {
-  width: 380px;
+  background-color: var(--td-bg-color-container);
+  border-right: 1px solid var(--td-component-border);
+  overflow-y: auto;
+  height: 100vh;
   flex-shrink: 0;
-  background-color: #ffffff;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  min-width: 380px;
+  max-width: 380px;
 }
 
 .panel-header {
@@ -264,13 +321,14 @@ async function handleStartEmbedding() {
 }
 
 .panel-content {
-  flex: 1;
   padding: 1.5rem;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
 .advanced-options {
-  margin-bottom: 1.5rem;
+  margin: 0;
 }
 
 .options-grid {
@@ -296,7 +354,6 @@ async function handleStartEmbedding() {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-top: 0.75rem;
   padding: 0.75rem;
   background-color: #fef3c7;
   border: 1px solid #fde047;
@@ -310,19 +367,41 @@ async function handleStartEmbedding() {
   color: #f59e0b;
 }
 
-.results-panel {
-  flex: 1;
-  overflow: hidden;
-  position: relative;
+.main-content {
+  padding: 0;
+  overflow-y: auto;
+  height: 100vh;
 }
 
-.loading-overlay {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* 标签页全高度布局 */
+.full-height-tabs {
   height: 100%;
-  background-color: #ffffff;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+}
+
+.full-height-tabs :deep(.t-tabs__nav-container) {
+  padding: 16px 24px 0;
+  background-color: var(--td-bg-color-container);
+}
+
+.full-height-tabs :deep(.t-tabs__content) {
+  flex: 1;
+  overflow: hidden;
+}
+
+.tab-panel-content {
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* 结果行样式 */
+.results-row {
+  margin: 0;
+}
+
+.results-row :deep(.t-col) {
+  margin-bottom: 16px;
 }
 </style>

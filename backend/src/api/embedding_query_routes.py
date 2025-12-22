@@ -14,6 +14,7 @@ from ..models.embedding_models import (
     Vector,
     EmbeddingFailure,
 )
+from ..models.document import Document
 from ..storage.embedding_db import EmbeddingResultDB
 from ..storage.embedding_storage import EmbeddingStorage
 import json
@@ -35,7 +36,7 @@ def get_db():
 
 @router.get(
     "/{result_id}",
-    response_model=EmbeddingResultDetail,
+    response_model=EmbeddingResultWithVectors,
     status_code=status.HTTP_200_OK,
     responses={
         404: {"model": ErrorResponse, "description": "Result not found"},
@@ -43,6 +44,7 @@ def get_db():
 )
 async def get_embedding_result(
     result_id: str,
+    include_vectors: bool = Query(True, description="Include vector data from JSON file"),
     db: Session = Depends(get_db),
 ):
     """
@@ -52,10 +54,11 @@ async def get_embedding_result(
     
     Args:
         result_id: Unique embedding result identifier
+        include_vectors: Whether to load vector data from JSON file
         db: Database session
         
     Returns:
-        Complete embedding result metadata
+        Complete embedding result metadata (with vectors if include_vectors=True)
         
     Raises:
         404: Result not found
@@ -74,7 +77,81 @@ async def get_embedding_result(
             },
         )
     
-    return EmbeddingResultDetail.model_validate(result)
+    # Get document name
+    document = db.query(Document).filter(Document.id == result.document_id).first()
+    document_name = document.filename if document else None
+    
+    # Build response dict
+    result_dict = {
+        "result_id": result.result_id,
+        "document_id": result.document_id,
+        "document_name": document_name,
+        "chunking_result_id": result.chunking_result_id,
+        "model": result.model,
+        "status": result.status,
+        "successful_count": result.successful_count,
+        "failed_count": result.failed_count,
+        "vector_dimension": result.vector_dimension,
+        "json_file_path": result.json_file_path,
+        "processing_time_ms": result.processing_time_ms,
+        "created_at": result.created_at,
+        "error_message": result.error_message,
+        "vectors": [],
+        "failures": [],
+        "metadata": None,
+    }
+    
+    # Load vector data from JSON file if requested
+    if include_vectors and result.json_file_path:
+        try:
+            json_path = Path("results") / result.json_file_path
+            
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    json_data = json.load(f)
+                
+                result_dict["vectors"] = json_data.get("vectors", [])
+                result_dict["failures"] = json_data.get("failures", [])
+                
+                json_metadata = json_data.get("metadata", {})
+                result_dict["metadata"] = {
+                    "model": json_metadata.get("model", result.model),
+                    "model_dimension": json_metadata.get("model_dimension", result.vector_dimension),
+                    "batch_size": json_metadata.get("batch_size"),
+                    "successful_count": json_metadata.get("successful_count", result.successful_count),
+                    "failed_count": json_metadata.get("failed_count", result.failed_count),
+                    "retry_count": json_metadata.get("retry_count", 0),
+                    "processing_time_ms": json_metadata.get("processing_time_ms", result.processing_time_ms),
+                    "vectors_per_second": json_metadata.get("vectors_per_second"),
+                }
+            else:
+                import logging
+                logging.warning(f"JSON file not found: {json_path}")
+                result_dict["metadata"] = {
+                    "model": result.model,
+                    "model_dimension": result.vector_dimension,
+                    "batch_size": None,
+                    "successful_count": result.successful_count,
+                    "failed_count": result.failed_count,
+                    "retry_count": 0,
+                    "processing_time_ms": result.processing_time_ms,
+                    "vectors_per_second": None,
+                }
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to load vectors from {result.json_file_path}: {e}")
+            result_dict["metadata"] = {
+                "model": result.model,
+                "model_dimension": result.vector_dimension,
+                "batch_size": None,
+                "successful_count": result.successful_count,
+                "failed_count": result.failed_count,
+                "retry_count": 0,
+                "processing_time_ms": result.processing_time_ms,
+                "vectors_per_second": None,
+            }
+    
+    return EmbeddingResultWithVectors(**result_dict)
 
 
 @router.get(
@@ -123,10 +200,15 @@ async def get_latest_embedding_result(
             },
         )
     
+    # Get document name
+    document = db.query(Document).filter(Document.id == result.document_id).first()
+    document_name = document.filename if document else None
+    
     # Convert to dict for modification
     result_dict = {
         "result_id": result.result_id,
         "document_id": result.document_id,
+        "document_name": document_name,
         "chunking_result_id": result.chunking_result_id,
         "model": result.model,
         "status": result.status,
@@ -256,11 +338,22 @@ async def list_embedding_results(
         page_size=page_size
     )
     
-    # Build response
+    # Get document names for each result
+    document_ids = list(set(r.document_id for r in results))
+    documents = db.query(Document).filter(Document.id.in_(document_ids)).all()
+    document_map = {str(doc.id): doc.filename for doc in documents}
+    
+    # Build response with document names
     total_pages = (total_count + page_size - 1) // page_size
     
+    result_details = []
+    for r in results:
+        detail_dict = EmbeddingResultDetail.model_validate(r).model_dump()
+        detail_dict['document_name'] = document_map.get(r.document_id, None)
+        result_details.append(EmbeddingResultDetail(**detail_dict))
+    
     return EmbeddingResultListResponse(
-        results=[EmbeddingResultDetail.model_validate(r) for r in results],
+        results=result_details,
         pagination=PaginationMeta(
             total_count=total_count,
             page=page,
@@ -348,3 +441,69 @@ async def get_processing_stats(
     stats = db_query.get_processing_stats(date_from, date_to)
     
     return stats
+
+
+@router.delete(
+    "/{result_id}",
+    status_code=status.HTTP_200_OK,
+    responses={
+        404: {"model": ErrorResponse, "description": "Result not found"},
+    },
+)
+async def delete_embedding_result(
+    result_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Delete an embedding result by ID.
+    
+    This will remove the database record and optionally the associated JSON file.
+    
+    Args:
+        result_id: Unique embedding result identifier
+        db: Database session
+        
+    Returns:
+        Success message
+        
+    Raises:
+        404: Result not found
+    """
+    db_query = EmbeddingResultDB(db)
+    result = db_query.get_by_result_id(result_id)
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "RESULT_NOT_FOUND",
+                    "message": f"Embedding result '{result_id}' not found"
+                }
+            },
+        )
+    
+    # Store JSON file path before deleting from DB
+    json_file_path = result.json_file_path
+    
+    # Delete from database
+    db_query.delete_result(result_id)
+    
+    # Optionally delete the JSON file
+    if json_file_path:
+        try:
+            json_path = Path("results") / json_file_path
+            if json_path.exists():
+                json_path.unlink()
+                import logging
+                logging.info(f"Deleted JSON file: {json_path}")
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to delete JSON file {json_file_path}: {e}")
+    
+    return {
+        "success": True,
+        "message": f"Embedding result '{result_id}' deleted successfully",
+        "result_id": result_id
+    }
+

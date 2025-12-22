@@ -43,3 +43,15 @@ body {
 .spinner {
   @apply inline-block w-6 h-6 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin;
 }
+
+/* TDesign 文本按钮图标垂直居中 */
+.t-button--variant-text.t-size-s {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.t-button--variant-text.t-size-s svg {
+  vertical-align: middle;
+  display: inline-block;
+}

@@ -11,6 +11,7 @@ export const useEmbeddingStore = defineStore('embedding', () => {
   const selectedModel = ref('qwen3-embedding-8b')
   const isProcessing = ref(false)
   const embeddingResults = ref(null)
+  const embeddingHistory = ref([])  // 新增：历史记录列表
   const documentsWithChunking = ref([])
   const availableModels = ref([])
   const error = ref(null)
@@ -155,12 +156,101 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     clearResults()
   }
 
+  async function fetchEmbeddingHistory(documentId = null) {
+    try {
+      error.value = null
+      const params = {
+        page: 1,
+        page_size: 100
+      }
+      if (documentId) {
+        params.document_id = documentId
+      }
+      
+      const response = await embeddingService.listResults(params)
+      
+      // Handle response format: { results: [...], pagination: {...} }
+      const results = response.data?.results || response.results || []
+      embeddingHistory.value = results
+      
+      return embeddingHistory.value
+    } catch (err) {
+      const errorMessage = err.message || '获取历史记录失败'
+      error.value = errorMessage
+      throw err
+    }
+  }
+
+  async function fetchEmbeddingResultById(resultId) {
+    try {
+      error.value = null
+      const response = await embeddingService.getResultById(resultId)
+      
+      const resultData = response.data || response
+      
+      // 构建 documentInfo，使用 API 返回的 document_name
+      let documentInfo = null
+      if (resultData.document_name) {
+        documentInfo = {
+          filename: resultData.document_name,
+          document_id: resultData.document_id
+        }
+      } else if (resultData.document_id) {
+        // 如果 API 没有返回 document_name，尝试从已加载的文档列表中查找
+        const doc = documentsWithChunking.value.find(
+          d => d.document_id === resultData.document_id
+        )
+        if (doc) {
+          documentInfo = {
+            filename: doc.filename,
+            document_id: doc.document_id
+          }
+        }
+      }
+      
+      embeddingResults.value = {
+        ...resultData,
+        documentInfo: documentInfo
+      }
+      
+      return embeddingResults.value
+    } catch (err) {
+      const errorMessage = err.message || '获取向量化结果失败'
+      error.value = errorMessage
+      throw err
+    }
+  }
+
+  async function deleteEmbeddingResult(resultId) {
+    try {
+      error.value = null
+      await embeddingService.deleteResult(resultId)
+      
+      // 从历史记录中移除
+      embeddingHistory.value = embeddingHistory.value.filter(
+        item => item.result_id !== resultId
+      )
+      
+      // 如果删除的是当前结果，清空
+      if (embeddingResults.value?.result_id === resultId) {
+        clearResults()
+      }
+      
+      return true
+    } catch (err) {
+      const errorMessage = err.message || '删除失败'
+      error.value = errorMessage
+      throw err
+    }
+  }
+
   return {
     // State
     selectedDocumentId,
     selectedModel,
     isProcessing,
     embeddingResults,
+    embeddingHistory,  // 新增
     documentsWithChunking,
     availableModels,
     error,
@@ -174,6 +264,9 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     fetchDocumentsWithChunking,
     fetchModels,
     fetchLatestEmbeddingResult,
+    fetchEmbeddingHistory,  // 新增
+    fetchEmbeddingResultById,  // 新增
+    deleteEmbeddingResult,  // 新增
     startEmbedding,
     clearResults,
     resetSelection
