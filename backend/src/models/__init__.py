@@ -1,45 +1,46 @@
-"""Models package."""
-from .document import Document
-from .processing_result import ProcessingResult
-from .chunking_task import ChunkingTask, TaskStatus, StrategyType
-from .chunking_strategy import ChunkingStrategy
-from .chunking_result import ChunkingResult, ResultStatus
-from .chunk import Chunk
-from .embedding_models import (
-    EmbeddingResult,
-    ResponseStatus,
-    ErrorType,
-    SingleEmbeddingRequest,
-    BatchEmbeddingRequest,
-    ChunkingResultEmbeddingRequest,
-    DocumentEmbeddingRequest,
-    SingleEmbeddingResponse,
-    BatchEmbeddingResponse,
-    EmbeddingResultDetail,
-    EmbeddingResultListResponse,
-    PaginationMeta,
+"""
+Vector Index Data Models Package
+"""
+
+from .vector_index import (
+    VectorIndex,
+    VectorIndexSchema,
+    CreateIndexRequest,
+    IndexListResponse,
+    IndexResponse,
+    IndexProvider,
+    IndexStatus,
+    MetricType
+)
+from .index_statistics import (
+    IndexStatistics,
+    IndexStatisticsSchema,
+    StatisticsResponse
+)
+from .query_history import (
+    QueryHistory,
+    QueryHistorySchema,
+    QueryHistoryListResponse
 )
 
 __all__ = [
-    "Document",
-    "ProcessingResult",
-    "ChunkingTask",
-    "TaskStatus",
-    "StrategyType",
-    "ChunkingStrategy",
-    "ChunkingResult",
-    "ResultStatus",
-    "Chunk",
-    "EmbeddingResult",
-    "ResponseStatus",
-    "ErrorType",
-    "SingleEmbeddingRequest",
-    "BatchEmbeddingRequest",
-    "ChunkingResultEmbeddingRequest",
-    "DocumentEmbeddingRequest",
-    "SingleEmbeddingResponse",
-    "BatchEmbeddingResponse",
-    "EmbeddingResultDetail",
-    "EmbeddingResultListResponse",
-    "PaginationMeta",
+    # Vector Index models
+    "VectorIndex",
+    "VectorIndexSchema",
+    "CreateIndexRequest",
+    "IndexListResponse",
+    "IndexResponse",
+    "IndexProvider",
+    "IndexStatus",
+    "MetricType",
+    
+    # Statistics models
+    "IndexStatistics",
+    "IndexStatisticsSchema",
+    "StatisticsResponse",
+    
+    # Query history models
+    "QueryHistory",
+    "QueryHistorySchema",
+    "QueryHistoryListResponse",
 ]

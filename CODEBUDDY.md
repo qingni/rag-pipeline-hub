@@ -22,6 +22,7 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+ (backend), JavaScript/ES2020+ (frontend): Follow standard conventions
 
 ## Recent Changes
+- 004-vector-index: Added Python 3.11
 
 - 003-vector-embedding: Added Python 3.11+ (backend), JavaScript/ES2020+ (frontend)
 

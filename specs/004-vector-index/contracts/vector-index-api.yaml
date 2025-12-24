@@ -1,0 +1,733 @@
+openapi: 3.0.3
+info:
+  title: Vector Index API
+  description: |
+    向量索引模块的 RESTful API，支持 Milvus 和 FAISS 双向量数据库。
+    
+    **核心功能**：
+    - 创建和管理向量索引
+    - 向量数据的增删改查
+    - 高性能相似度检索
+    - 索引统计和监控
+    
+    **技术栈**：
+    - 主要向量数据库: Milvus 2.3.4
+    - 备选向量库: FAISS 1.7.4
+    - Web框架: FastAPI 0.104.1
+    - 元数据存储: PostgreSQL 14+
+  version: 1.0.0
+  contact:
+    name: RAG Framework Team
+    email: support@example.com
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Development server
+  - url: https://api.example.com/api/v1
+    description: Production server
+
+tags:
+  - name: Indexes
+    description: 索引管理操作
+  - name: Vectors
+    description: 向量数据操作
+  - name: Search
+    description: 向量检索操作
+  - name: Statistics
+    description: 统计和监控
+
+paths:
+  /indexes:
+    get:
+      tags:
+        - Indexes
+      summary: 列出所有索引
+      description: 获取当前系统中所有向量索引的列表
+      parameters:
+        - name: provider
+          in: query
+          description: 过滤特定Provider的索引
+          schema:
+            type: string
+            enum: [milvus, faiss]
+        - name: namespace
+          in: query
+          description: 过滤特定命名空间的索引
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: 过滤特定状态的索引
+          schema:
+            type: string
+            enum: [building, ready, updating, error]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: 成功返回索引列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      indexes:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/VectorIndex'
+                      total:
+                        type: integer
+                        example: 15
+                      limit:
+                        type: integer
+                        example: 50
+                      offset:
+                        type: integer
+                        example: 0
+                  timestamp:
+                    type: string
+                    format: date-time
+
+    post:
+      tags:
+        - Indexes
+      summary: 创建新索引
+      description: 创建一个新的向量索引（支持Milvus或FAISS）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIndexRequest'
+      responses:
+        '201':
+          description: 索引创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 索引名称已存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /indexes/{indexName}:
+    get:
+      tags:
+        - Indexes
+      summary: 获取索引详情
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      responses:
+        '200':
+          description: 成功返回索引详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/VectorIndex'
+                  timestamp:
+                    type: string
+                    format: date-time
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Indexes
+      summary: 删除索引
+      description: 删除指定的向量索引及其所有数据
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      responses:
+        '200':
+          description: 索引删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /indexes/{indexName}/vectors:
+    post:
+      tags:
+        - Vectors
+      summary: 添加向量
+      description: 向索引中批量添加向量数据
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddVectorsRequest'
+      responses:
+        '200':
+          description: 向量添加成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      inserted_count:
+                        type: integer
+                        example: 100
+                      index_status:
+                        type: string
+                        example: ready
+                  timestamp:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Vectors
+      summary: 删除向量
+      description: 从索引中删除指定的向量
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vector_ids:
+                  type: array
+                  items:
+                    type: string
+                  example: ["vec_001", "vec_002", "vec_003"]
+      responses:
+        '200':
+          description: 向量删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      deleted_count:
+                        type: integer
+                        example: 3
+                  timestamp:
+                    type: string
+                    format: date-time
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /indexes/{indexName}/search:
+    post:
+      tags:
+        - Search
+      summary: 向量相似度检索
+      description: 在指定索引中执行向量相似度搜索
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: 检索成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SearchResult'
+                      query_latency_ms:
+                        type: number
+                        format: float
+                        example: 42.3
+                      total_count:
+                        type: integer
+                        example: 5
+                  timestamp:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /indexes/{indexName}/batch-search:
+    post:
+      tags:
+        - Search
+      summary: 批量向量检索
+      description: 一次请求提交多个查询向量
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query_vectors:
+                  type: array
+                  items:
+                    type: array
+                    items:
+                      type: number
+                  minItems: 1
+                  maxItems: 100
+                top_k:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 5
+                threshold:
+                  type: number
+                  format: float
+                  minimum: 0
+                  maximum: 1
+                filter_expr:
+                  type: string
+                  description: Milvus过滤表达式
+      responses:
+        '200':
+          description: 批量检索成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/SearchResult'
+                      query_latency_ms:
+                        type: number
+                        example: 125.7
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /indexes/{indexName}/stats:
+    get:
+      tags:
+        - Statistics
+      summary: 获取索引统计信息
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      responses:
+        '200':
+          description: 成功返回统计信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/IndexStatistics'
+                  timestamp:
+                    type: string
+                    format: date-time
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /indexes/{indexName}/persist:
+    post:
+      tags:
+        - Indexes
+      summary: 手动触发索引持久化
+      description: 强制保存索引到磁盘（主要用于FAISS）
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      responses:
+        '200':
+          description: 持久化成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      persist_duration_s:
+                        type: number
+                        example: 2.35
+                      file_size_mb:
+                        type: number
+                        example: 11.5
+                  timestamp:
+                    type: string
+                    format: date-time
+
+components:
+  parameters:
+    IndexName:
+      name: indexName
+      in: path
+      required: true
+      description: 索引名称
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9_-]+$'
+
+  schemas:
+    VectorIndex:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        name:
+          type: string
+          example: legal_docs_index
+        provider:
+          type: string
+          enum: [milvus, faiss]
+          example: milvus
+        dimension:
+          type: integer
+          enum: [128, 256, 512, 768, 1536, 3072]
+          example: 1536
+        index_type:
+          type: string
+          example: HNSW
+        metric_type:
+          type: string
+          enum: [cosine, euclidean, dot_product]
+          example: cosine
+        index_params:
+          type: object
+          example:
+            M: 16
+            efConstruction: 200
+        namespace:
+          type: string
+          example: legal_department
+        vector_count:
+          type: integer
+          example: 125430
+        status:
+          type: string
+          enum: [building, ready, updating, error]
+          example: ready
+        created_at:
+          type: string
+          format: date-time
+          example: '2025-12-23T08:00:00Z'
+        updated_at:
+          type: string
+          format: date-time
+          example: '2025-12-23T10:30:00Z'
+
+    CreateIndexRequest:
+      type: object
+      required:
+        - name
+        - provider
+        - dimension
+        - index_type
+        - metric_type
+      properties:
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]+$'
+          example: my_first_index
+        provider:
+          type: string
+          enum: [milvus, faiss]
+          example: milvus
+        dimension:
+          type: integer
+          enum: [128, 256, 512, 768, 1536, 3072]
+          example: 1536
+        index_type:
+          type: string
+          description: |
+            Milvus: FLAT, IVF_FLAT, IVF_PQ, HNSW
+            FAISS: IndexFlatIP, IndexFlatL2, IndexIVFPQ
+          example: HNSW
+        metric_type:
+          type: string
+          enum: [cosine, euclidean, dot_product]
+          example: cosine
+        index_params:
+          type: object
+          description: Provider-specific parameters
+          example:
+            M: 16
+            efConstruction: 200
+        namespace:
+          type: string
+          default: default
+          example: default
+
+    VectorData:
+      type: object
+      required:
+        - vector_id
+        - embedding
+      properties:
+        vector_id:
+          type: string
+          example: vec_001
+        embedding:
+          type: array
+          items:
+            type: number
+            format: float
+          minItems: 128
+          maxItems: 3072
+        document_id:
+          type: string
+          example: doc_12345
+        text_content:
+          type: string
+          maxLength: 4096
+          example: Sample text content from document
+        chunk_index:
+          type: integer
+          minimum: 0
+          example: 3
+        metadata:
+          type: object
+          maxProperties: 20
+          example:
+            source: sample.pdf
+            page: 5
+            category: legal
+
+    AddVectorsRequest:
+      type: object
+      required:
+        - vectors
+      properties:
+        vectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/VectorData'
+          minItems: 1
+          maxItems: 10000
+
+    SearchRequest:
+      type: object
+      required:
+        - query_vector
+      properties:
+        query_vector:
+          type: array
+          items:
+            type: number
+            format: float
+          minItems: 128
+          maxItems: 3072
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 5
+        threshold:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Minimum similarity score threshold
+        filter_expr:
+          type: string
+          description: Milvus filter expression (e.g., "category == 'legal'")
+          example: "page > 10 and category == 'legal'"
+        search_params:
+          type: object
+          description: Provider-specific search parameters
+          example:
+            ef: 200
+
+    SearchResult:
+      type: object
+      properties:
+        vector_id:
+          type: string
+          example: vec_00789
+        score:
+          type: number
+          format: float
+          example: 0.9523
+        distance:
+          type: number
+          format: float
+          example: 0.0477
+        document_id:
+          type: string
+          example: doc_12345
+        text_content:
+          type: string
+          example: The contract stipulates that...
+        metadata:
+          type: object
+          example:
+            source: contract_v2.pdf
+            page: 5
+            category: legal
+        rank:
+          type: integer
+          example: 1
+
+    IndexStatistics:
+      type: object
+      properties:
+        vector_count:
+          type: integer
+          example: 125430
+        index_size_mb:
+          type: number
+          format: float
+          example: 1099.2
+        avg_query_latency_ms:
+          type: number
+          format: float
+          example: 38.7
+        query_count_24h:
+          type: integer
+          example: 3420
+        error_count_24h:
+          type: integer
+          example: 2
+        last_persist_at:
+          type: string
+          format: date-time
+          example: '2025-12-23T10:00:00Z'
+
+    SuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        data:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: error
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: INDEX_NOT_FOUND
+            message:
+              type: string
+              example: Index 'my_index' does not exist
+            details:
+              type: object
+        timestamp:
+          type: string
+          format: date-time
+
+  responses:
+    NotFound:
+      description: 资源未找到
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            error:
+              code: INDEX_NOT_FOUND
+              message: Index 'my_index' does not exist
+            timestamp: '2025-12-23T10:00:00Z'
+
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            error:
+              code: INVALID_DIMENSION
+              message: Vector dimension (512) does not match index dimension (1536)
+              details:
+                expected: 1536
+                received: 512
+            timestamp: '2025-12-23T10:00:00Z'
+
+security: []

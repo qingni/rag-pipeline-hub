@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     # Milvus
     MILVUS_HOST: str = "localhost"
     MILVUS_PORT: int = 19530
+    MILVUS_USER: str = ""
+    MILVUS_PASSWORD: str = ""
+    MILVUS_TIMEOUT: int = 30
+    
+    # FAISS
+    FAISS_INDEX_DIR: str = "data/faiss_indexes"
+    
+    # Vector Index
+    VECTOR_INDEX_RESULTS_DIR: str = "results/vector_index"
     
     # Pinecone
     PINECONE_API_KEY: Optional[str] = None

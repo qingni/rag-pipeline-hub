@@ -1,0 +1,940 @@
+openapi: 3.0.3
+info:
+  title: 向量索引模块 API
+  description: |
+    RAG系统向量索引模块的RESTful API规范。
+    提供向量索引的创建、管理、检索和统计功能。
+    遵循系统宪章的统一API标准化原则。
+  version: 1.0.0
+  contact:
+    name: RAG Framework Team
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: 本地开发服务器
+  - url: https://api.example.com/api/v1
+    description: 生产环境
+
+tags:
+  - name: indexes
+    description: 索引管理操作
+  - name: vectors
+    description: 向量数据操作
+  - name: search
+    description: 向量检索操作
+  - name: statistics
+    description: 统计和监控
+
+paths:
+  /indexes:
+    get:
+      tags:
+        - indexes
+      summary: 获取索引列表
+      description: 获取系统中所有向量索引的列表
+      parameters:
+        - name: namespace
+          in: query
+          description: 过滤特定命名空间的索引
+          required: false
+          schema:
+            type: string
+            example: "default"
+        - name: status
+          in: query
+          description: 过滤特定状态的索引
+          required: false
+          schema:
+            type: string
+            enum: [CREATING, READY, UPDATING, ERROR]
+        - name: limit
+          in: query
+          description: 返回结果数量限制
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: 分页偏移量
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: 成功返回索引列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexListResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - indexes
+      summary: 创建新索引
+      description: 创建一个新的向量索引实例
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIndexRequest'
+      responses:
+        '201':
+          description: 索引创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: 索引名称已存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/{indexName}:
+    get:
+      tags:
+        - indexes
+      summary: 获取索引详情
+      description: 获取指定索引的详细信息
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      responses:
+        '200':
+          description: 成功返回索引详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - indexes
+      summary: 删除索引
+      description: 删除指定的索引及其所有数据
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      responses:
+        '200':
+          description: 索引删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/{indexName}/vectors:
+    post:
+      tags:
+        - vectors
+      summary: 添加向量
+      description: 向索引中添加一个或多个向量
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddVectorsRequest'
+      responses:
+        '201':
+          description: 向量添加成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddVectorsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - vectors
+      summary: 删除向量
+      description: 从索引中删除指定的向量
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteVectorsRequest'
+      responses:
+        '200':
+          description: 向量删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/{indexName}/vectors/{vectorId}:
+    put:
+      tags:
+        - vectors
+      summary: 更新向量
+      description: 更新指定向量的数据和元数据
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+        - name: vectorId
+          in: path
+          required: true
+          description: 向量ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVectorRequest'
+      responses:
+        '200':
+          description: 向量更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VectorResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/{indexName}/search:
+    post:
+      tags:
+        - search
+      summary: 向量相似度搜索
+      description: 执行向量相似度搜索，返回TopK个最相似的结果
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: 搜索成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/{indexName}/batch-search:
+    post:
+      tags:
+        - search
+      summary: 批量向量搜索
+      description: 一次提交多个查询向量进行批量搜索
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchSearchRequest'
+      responses:
+        '200':
+          description: 批量搜索成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/{indexName}/stats:
+    get:
+      tags:
+        - statistics
+      summary: 获取索引统计信息
+      description: 获取索引的性能统计和使用情况
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      responses:
+        '200':
+          description: 成功返回统计信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatisticsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/{indexName}/persist:
+    post:
+      tags:
+        - indexes
+      summary: 持久化索引
+      description: 手动触发索引持久化到磁盘
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      responses:
+        '200':
+          description: 持久化成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/{indexName}/export:
+    post:
+      tags:
+        - indexes
+      summary: 导出索引
+      description: 导出索引数据用于迁移
+      parameters:
+        - $ref: '#/components/parameters/IndexName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                export_path:
+                  type: string
+                  description: 导出路径
+                  example: "/exports/index_backup.zip"
+                include_metadata:
+                  type: boolean
+                  description: 是否包含元数据
+                  default: true
+      responses:
+        '200':
+          description: 导出成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /indexes/import:
+    post:
+      tags:
+        - indexes
+      summary: 导入索引
+      description: 从导出文件导入索引
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 索引导出文件
+                index_name:
+                  type: string
+                  description: 新索引名称（可选，默认使用原名称）
+      responses:
+        '201':
+          description: 导入成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  parameters:
+    IndexName:
+      name: indexName
+      in: path
+      required: true
+      description: 索引名称
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9_-]{3,100}$'
+        example: "document_embeddings"
+
+  schemas:
+    CreateIndexRequest:
+      type: object
+      required:
+        - name
+        - dimension
+      properties:
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]{3,100}$'
+          description: 索引名称
+          example: "document_embeddings"
+        dimension:
+          type: integer
+          minimum: 128
+          maximum: 4096
+          description: 向量维度
+          example: 1536
+        index_type:
+          type: string
+          enum: [FLAT, IVF_FLAT, IVF_PQ, HNSW]
+          default: "FLAT"
+          description: 索引算法类型
+        metric_type:
+          type: string
+          enum: [COSINE, EUCLIDEAN, DOT_PRODUCT]
+          default: "COSINE"
+          description: 相似度度量方法
+        provider:
+          type: string
+          enum: [FAISS, MILVUS]
+          default: "FAISS"
+          description: 向量引擎提供商
+        namespace:
+          type: string
+          default: "default"
+          description: 命名空间
+        config:
+          type: object
+          description: 索引配置参数
+          properties:
+            nlist:
+              type: integer
+              default: 100
+              description: IVF聚类中心数
+            nprobe:
+              type: integer
+              default: 10
+              description: 查询时探测的聚类数
+            M:
+              type: integer
+              default: 8
+              description: PQ压缩的子向量数
+            max_vectors:
+              type: integer
+              default: 1000000
+              description: 最大向量数量
+
+    AddVectorsRequest:
+      type: object
+      required:
+        - vectors
+      properties:
+        vectors:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          description: 向量列表
+          items:
+            type: object
+            required:
+              - values
+            properties:
+              id:
+                type: string
+                format: uuid
+                description: 向量ID（可选，系统自动生成）
+              values:
+                type: array
+                items:
+                  type: number
+                  format: float
+                description: 向量数值
+                example: [0.1, 0.2, 0.3]
+              document_id:
+                type: string
+                description: 关联文档ID
+              chunk_id:
+                type: string
+                description: 关联分块ID
+              text:
+                type: string
+                maxLength: 10000
+                description: 文本内容
+              metadata:
+                type: object
+                description: 自定义元数据
+                example:
+                  source: "document.pdf"
+                  page: 5
+              namespace:
+                type: string
+                default: "default"
+                description: 命名空间
+
+    SearchRequest:
+      type: object
+      required:
+        - query_vector
+      properties:
+        query_vector:
+          type: array
+          items:
+            type: number
+            format: float
+          description: 查询向量
+          example: [0.1, 0.2, 0.3]
+        k:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 5
+          description: 返回结果数量
+        threshold:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: 相似度阈值
+          example: 0.8
+        namespace:
+          type: string
+          default: "default"
+          description: 命名空间
+        filters:
+          type: object
+          description: 元数据过滤条件
+          example:
+            source: "document.pdf"
+            page: {"$gte": 1, "$lte": 10}
+        include_metadata:
+          type: boolean
+          default: true
+          description: 是否返回元数据
+        include_text:
+          type: boolean
+          default: true
+          description: 是否返回文本内容
+
+    BatchSearchRequest:
+      type: object
+      required:
+        - queries
+      properties:
+        queries:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: 查询向量列表
+          items:
+            $ref: '#/components/schemas/SearchRequest'
+
+    UpdateVectorRequest:
+      type: object
+      properties:
+        values:
+          type: array
+          items:
+            type: number
+            format: float
+          description: 新的向量数值
+        text:
+          type: string
+          maxLength: 10000
+          description: 新的文本内容
+        metadata:
+          type: object
+          description: 新的元数据
+
+    DeleteVectorsRequest:
+      type: object
+      required:
+        - vector_ids
+      properties:
+        vector_ids:
+          type: array
+          minItems: 1
+          description: 要删除的向量ID列表
+          items:
+            type: string
+            format: uuid
+        namespace:
+          type: string
+          description: 命名空间
+
+    IndexResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            dimension:
+              type: integer
+            index_type:
+              type: string
+            metric_type:
+              type: string
+            provider:
+              type: string
+            vector_count:
+              type: integer
+            namespace:
+              type: string
+            status:
+              type: string
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+            index_size_bytes:
+              type: integer
+            config:
+              type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    IndexListResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            indexes:
+              type: array
+              items:
+                $ref: '#/components/schemas/IndexResponse/properties/data'
+            total:
+              type: integer
+              description: 总数量
+            limit:
+              type: integer
+            offset:
+              type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    AddVectorsResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            added_count:
+              type: integer
+              description: 成功添加的向量数量
+            failed_count:
+              type: integer
+              description: 失败的向量数量
+            vector_ids:
+              type: array
+              description: 添加的向量ID列表
+              items:
+                type: string
+                format: uuid
+            errors:
+              type: array
+              description: 错误详情
+              items:
+                type: object
+                properties:
+                  index:
+                    type: integer
+                  error:
+                    type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    SearchResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            results:
+              type: array
+              items:
+                type: object
+                properties:
+                  vector_id:
+                    type: string
+                    format: uuid
+                  score:
+                    type: number
+                    format: float
+                    description: 相似度分数
+                  document_id:
+                    type: string
+                  chunk_id:
+                    type: string
+                  text:
+                    type: string
+                  metadata:
+                    type: object
+                  namespace:
+                    type: string
+            query_time_ms:
+              type: integer
+              description: 查询耗时（毫秒）
+        timestamp:
+          type: string
+          format: date-time
+
+    BatchSearchResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            results:
+              type: array
+              description: 每个查询的结果
+              items:
+                $ref: '#/components/schemas/SearchResponse/properties/data'
+            total_query_time_ms:
+              type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    StatisticsResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            index_id:
+              type: string
+              format: uuid
+            vector_count:
+              type: integer
+            index_size_bytes:
+              type: integer
+            avg_query_time_ms:
+              type: number
+              format: float
+            query_count_total:
+              type: integer
+            query_count_24h:
+              type: integer
+            add_count_total:
+              type: integer
+            delete_count_total:
+              type: integer
+            memory_usage_bytes:
+              type: integer
+            last_query_at:
+              type: string
+              format: date-time
+        timestamp:
+          type: string
+          format: date-time
+
+    VectorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            vector_id:
+              type: integer
+            document_id:
+              type: string
+            chunk_id:
+              type: string
+            text:
+              type: string
+            metadata:
+              type: object
+            namespace:
+              type: string
+            created_at:
+              type: string
+              format: date-time
+        timestamp:
+          type: string
+          format: date-time
+
+    ExportResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            export_path:
+              type: string
+            file_size_bytes:
+              type: integer
+            vector_count:
+              type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    SuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            message:
+              type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "error"
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: 错误代码
+              example: "INVALID_DIMENSION"
+            message:
+              type: string
+              description: 错误消息
+              example: "向量维度不匹配"
+            details:
+              type: object
+              description: 错误详情
+        timestamp:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: "error"
+            error:
+              code: "INVALID_PARAMETER"
+              message: "向量维度不匹配"
+              details:
+                expected: 1536
+                received: 1024
+            timestamp: "2025-12-22T10:00:00Z"
+
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: "error"
+            error:
+              code: "INDEX_NOT_FOUND"
+              message: "索引不存在"
+            timestamp: "2025-12-22T10:00:00Z"
+
+    InternalServerError:
+      description: 服务器内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: "error"
+            error:
+              code: "INTERNAL_ERROR"
+              message: "服务器内部错误"
+            timestamp: "2025-12-22T10:00:00Z"
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API密钥认证（未来扩展）
+
+security:
+  - ApiKeyAuth: []

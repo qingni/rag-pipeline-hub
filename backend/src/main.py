@@ -21,6 +21,11 @@ async def lifespan(app: FastAPI):
     from .storage.database import init_db, SessionLocal
     from .utils.init_strategies import init_default_strategies
     
+    # Import all models to ensure they are registered with SQLAlchemy
+    from .models import document, processing_result, chunk, chunking_result
+    from .models import chunking_strategy, chunking_task, embedding_models
+    from .models import vector_index, index_statistics, query_history
+    
     # Initialize database tables
     init_db()
     
@@ -99,6 +104,7 @@ async def health_check():
 from .api import documents, loading, parsing, processing, chunking
 from .api import chunking_preview, chunking_history
 from .api import embedding_routes, embedding_query_routes
+from .api import vector_index
 
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
 app.include_router(loading.router, prefix="/api/v1/processing", tags=["Processing - Load"])
@@ -109,8 +115,9 @@ app.include_router(chunking_preview.router, prefix="/api/v1/chunking", tags=["Ch
 app.include_router(chunking_history.router, prefix="/api/v1/chunking", tags=["Chunking - History"])
 app.include_router(embedding_routes.router, prefix="/api/v1", tags=["Embedding"])
 app.include_router(embedding_query_routes.router, prefix="/api/v1", tags=["Embedding - Queries"])
+app.include_router(vector_index.router, prefix="/api", tags=["Vector Index"])
 
-# More routers will be added for indexing, search, generation
+# More routers will be added for search, generation
 
 
 if __name__ == "__main__":
