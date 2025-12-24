@@ -38,14 +38,14 @@ class MilvusConfig:
 class FAISSConfig:
     """FAISS 配置类"""
     
-    index_dir: str = "data/faiss_indexes"
+    index_dir: str = "results/vector_index/faiss"
     
     def __init__(
         self,
         index_dir: Optional[str] = None
     ):
         """从环境变量或参数初始化配置"""
-        self.index_dir = index_dir or os.getenv("FAISS_INDEX_DIR", "data/faiss_indexes")
+        self.index_dir = index_dir or os.getenv("FAISS_INDEX_DIR", "results/vector_index/faiss")
         
         # 确保目录存在
         os.makedirs(self.index_dir, exist_ok=True)

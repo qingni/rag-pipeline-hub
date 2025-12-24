@@ -17,6 +17,7 @@ class IndexConfig:
     dimension: int
     metric_type: str = "cosine"
     index_type: Optional[str] = None
+    num_vectors: int = 0  # 预期向量数量，用于动态调整索引参数
 
 
 @dataclass

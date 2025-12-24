@@ -1,95 +1,46 @@
 # Implementation Plan: 向量索引模块
 
-**Branch**: `004-vector-index` | **Date**: 2025-12-23 | **Spec**: [spec.md](./spec.md)
+**Branch**: `004-vector-index` | **Date**: 2025-12-24 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/004-vector-index/spec.md`
 
-**Note**: This plan has been regenerated based on the updated technical priority: Milvus as primary, FAISS as fallback.
+**Note**: 本计划基于 2024-12-24 澄清的需求重新规划，重点关注前端界面和向量化任务集成。
 
 ## Summary
 
-向量索引模块是RAG系统的核心检索引擎，负责构建、管理和查询向量索引。**技术选型已调整为：Milvus 2.3.4 作为主要向量数据库，FAISS 1.7.4 作为轻量级备选方案**。系统支持多种索引算法（FLAT, IVF_FLAT, IVF_PQ, HNSW），提供高性能的相似度检索能力（<50ms查询延迟，>100 QPS），并通过PostgreSQL管理索引元数据。
+向量索引模块实现 RAG 系统的核心检索能力。基于澄清的需求：
+- **前端布局**：左右分栏（左侧配置区 + 右侧双Tab结果区），样式参考文档向量化模块
+- **数据源**：下拉选择已完成的向量化任务，自动获取向量数据
+- **向量数据库**：支持 Milvus（生产）+ FAISS（开发）
+- **索引算法**：FLAT / IVF_FLAT / IVF_PQ / HNSW
+- **历史记录**：支持查看详情 + 删除操作
+
+技术方案采用 Milvus 作为主要向量数据库，FAISS 作为轻量级备选，通过 Provider Pattern 实现多后端支持。
 
 ## Technical Context
 
-**Language/Version**: Python 3.11  
-**Primary Dependencies**: 
-  - **Milvus 2.3.4** (pymilvus) - 主要向量数据库
-  - FAISS 1.7.4 (faiss-cpu) - 备选向量索引库
-  - FastAPI 0.104.1 - Web框架
-  - SQLAlchemy 2.0.23 - ORM
-  - PostgreSQL 14+ - 元数据存储
-  
-**Storage**: 
-  - **Milvus分布式存储（主）**: MinIO/S3或本地磁盘，支持自动分片和持久化
-  - FAISS本地文件存储（备）: `.index`二进制文件 + PostgreSQL元数据
-  
-**Testing**: pytest + pytest-asyncio（异步测试）  
-**Target Platform**: Linux server (Docker容器化部署)
-  - **macOS 开发环境**: 需要使用 Colima 启动 Docker 运行时
-  - **Linux 生产环境**: 直接使用系统 Docker
-  - **Windows**: 推荐 Docker Desktop 或 WSL2 + Docker  
-**Project Type**: Web application (FastAPI backend + Vue3 frontend)  
-
-**Performance Goals**:
-  - **查询延迟**: <50ms (P95) with Milvus HNSW索引
-  - **吞吐量**: >100 QPS (并发查询)
-  - **索引构建速度**: >2000 vectors/s (1536维)
-  - **检索精度**: >98% recall@K (与暴力搜索对比)
-  
-**Constraints**:
-  - **并发控制**: Milvus原生MVCC（多读多写），FAISS使用RWLock（10读1写）
-  - **内存占用**: 索引大小 <150% 原始向量数据
-  - **持久化延迟**: Milvus自动flush，FAISS每1000次更新或5分钟触发
-  - **高可用**: Milvus支持主从复制，FAISS依赖应用层备份
-  
-**Scale/Scope**:
-  - **Milvus方案**: 支持亿级向量（1B+ vectors）
-  - **FAISS方案**: 适合百万级向量（1M vectors）
-  - **索引数量**: 支持多租户，每个用户/项目独立索引
-  - **向量维度**: 128-1536 (可配置)
+**Language/Version**: Python 3.11 (后端) + Vue 3 + Vite (前端)  
+**Primary Dependencies**: FastAPI 0.104.1, pymilvus 2.3.4, faiss-cpu 1.7.4, TDesign Vue Next, Pinia  
+**Storage**: PostgreSQL 14+ (元数据) + Milvus/FAISS (向量数据) + JSON (结果持久化)  
+**Testing**: pytest (后端), Vitest (前端)  
+**Target Platform**: Linux/macOS 服务器 + 现代浏览器  
+**Project Type**: Web Application (frontend + backend)  
+**Performance Goals**: 单次查询 <100ms (P95)，索引构建 >1000 vec/s  
+**Constraints**: <200ms P95 查询延迟，支持 10 并发读  
+**Scale/Scope**: 10K-100万向量规模，单租户
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-### ✅ I. 模块化架构
-- [x] 向量索引作为独立功能模块设计
-- [x] 通过明确的API接口与其他模块通信（Embedding Service、Document Service）
-- [x] 独立的服务层实现：`vector_index_service.py`
-- [x] 支持插件化扩展：多Provider架构（Milvus主、FAISS备）
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| **I. 模块化架构** | ✅ PASS | 独立 `vector_index_service.py`，Provider Pattern 支持多后端 |
+| **II. 多提供商支持** | ✅ PASS | 支持 Milvus + FAISS 两种向量数据库 |
+| **III. 结果持久化** | ✅ PASS | JSON 格式保存索引配置和操作日志 |
+| **IV. 用户体验优先** | ✅ PASS | Vue3 + TDesign，左右分栏布局，与向量化模块一致 |
+| **V. API标准化** | ✅ PASS | RESTful API，统一响应格式，OpenAPI 文档 |
 
-### ✅ II. 多提供商支持
-- [x] **向量数据库Provider**：Milvus（主）+ FAISS（备）
-- [x] **索引算法**：FLAT, IVF_FLAT, IVF_PQ, HNSW（Milvus）/ IndexFlatIP, IndexIVFPQ（FAISS）
-- [x] **相似度计算**：余弦相似度（默认）、欧氏距离、点积
-- [x] Provider选择逻辑：基于配置文件或运行时参数
-
-### ✅ III. 结果持久化 (NON-NEGOTIABLE)
-- [x] **索引构建结果**：保存为JSON（`索引名_timestamp.json`）
-- [x] **查询结果**：保存为JSON（`query_result_timestamp.json`）
-- [x] **索引持久化**：Milvus自动持久化 / FAISS `.index`文件
-- [x] **元数据持久化**：PostgreSQL存储索引配置和统计信息
-
-### ✅ IV. 用户体验优先
-- [x] 前端技术栈：Vue3 + Vite + TDesign Vue Next
-- [x] 页面布局：左侧导航栏 + 右侧内容区域
-- [x] 功能页面：左侧控制面板（索引管理、查询参数）+ 右侧内容显示（查询结果、可视化）
-- [x] 用户功能：索引列表查看、创建索引、向量搜索、结果预览、性能统计
-
-### ✅ V. API标准化
-- [x] 基于FastAPI的RESTful API
-- [x] 统一响应格式：`{status, data, timestamp}`
-- [x] 统一错误处理：HTTP状态码 + 错误详情
-- [x] API文档：自动生成OpenAPI/Swagger文档
-- [x] 加载状态管理：异步任务状态跟踪
-
-### 🔍 Gates Summary
-**Status**: ✅ **PASS** - 所有宪章要求均满足
-- 模块化架构完全对齐
-- 多Provider支持符合扩展性原则
-- 结果持久化机制完整
-- 前端使用标准技术栈
-- API设计遵循RESTful规范
+**Constitution Gate**: ✅ PASSED
 
 ## Project Structure
 
@@ -97,105 +48,101 @@
 
 ```text
 specs/004-vector-index/
-├── plan.md              # This file (implementation plan)
-├── research.md          # Phase 0 output (technical decisions)
-├── data-model.md        # Phase 1 output (entities and database schema)
-├── quickstart.md        # Phase 1 output (setup and usage guide)
-├── contracts/           # Phase 1 output (API contracts)
-│   └── vector-index-api.yaml  # OpenAPI specification
-└── tasks.md             # Phase 2 output (NOT created yet)
+├── plan.md              # 本文件 - 实现计划
+├── research.md          # Phase 0 - 技术调研
+├── data-model.md        # Phase 1 - 数据模型设计
+├── quickstart.md        # Phase 1 - 快速开始指南
+├── contracts/           # Phase 1 - API 契约
+│   ├── api-contract.yaml
+│   └── vector-index-api.yaml
+├── tasks.md             # Phase 2 - 任务分解
+└── checklists/
+    └── requirements.md
 ```
 
 ### Source Code (repository root)
 
 ```text
-# Web application structure (backend + frontend)
-
 backend/
 ├── src/
-│   ├── models/
-│   │   └── vector_index.py          # VectorIndex, IndexMetadata models
-│   ├── services/
-│   │   ├── vector_index_service.py  # Main service orchestration
-│   │   ├── providers/
-│   │   │   ├── base_provider.py     # Abstract Provider interface
-│   │   │   ├── milvus_provider.py   # Milvus implementation (PRIMARY)
-│   │   │   └── faiss_provider.py    # FAISS implementation (FALLBACK)
-│   │   └── index_registry.py        # Index management registry
 │   ├── api/
-│   │   └── routes/
-│   │       └── vector_index.py      # REST endpoints
-│   └── utils/
-│       ├── vector_utils.py          # Vector normalization, validation
-│       └── similarity.py            # Similarity metrics
+│   │   └── vector_index.py          # API 路由 (已存在)
+│   ├── models/
+│   │   ├── vector_index.py          # SQLAlchemy 模型 (已存在)
+│   │   ├── index_statistics.py      # 统计模型 (已存在)
+│   │   └── query_history.py         # 查询历史模型 (已存在)
+│   ├── services/
+│   │   ├── vector_index_service.py  # 核心服务 (已存在)
+│   │   ├── index_registry.py        # 索引注册表 (已存在)
+│   │   └── providers/
+│   │       ├── base_provider.py     # Provider 基类 (需创建)
+│   │       ├── faiss_provider.py    # FAISS 实现 (已存在)
+│   │       └── milvus_provider.py   # Milvus 实现 (需创建)
+│   └── exceptions/
+│       └── vector_index_errors.py   # 错误定义 (已存在)
 └── tests/
-    ├── unit/
-    │   ├── test_milvus_provider.py
-    │   ├── test_faiss_provider.py
-    │   └── test_vector_index_service.py
-    ├── integration/
-    │   ├── test_index_api.py
-    │   └── test_provider_switching.py
-    └── contract/
-        └── test_api_contracts.py
+    └── test_vector_index/           # 测试用例 (需创建)
 
 frontend/
 ├── src/
+│   ├── views/
+│   │   └── VectorIndex.vue          # 主页面 (已存在，需重构)
 │   ├── components/
-│   │   ├── VectorIndex/
-│   │   │   ├── IndexList.vue        # 索引列表（t-table）
-│   │   │   ├── IndexCreate.vue      # 创建索引（t-form）
-│   │   │   ├── VectorSearch.vue     # 向量搜索（t-input, t-slider）
-│   │   │   └── SearchResults.vue    # 搜索结果（t-card, t-list）
-│   ├── pages/
-│   │   └── VectorIndexPage.vue      # 主页面（左侧面板 + 右侧内容）
+│   │   └── VectorIndex/
+│   │       ├── IndexConfigPanel.vue     # 左侧配置面板 (需创建)
+│   │       ├── VectorTaskSelector.vue   # 向量化任务选择器 (需创建)
+│   │       ├── DatabaseSelector.vue     # 数据库选择器 (需创建)
+│   │       ├── AlgorithmSelector.vue    # 算法选择器 (需创建)
+│   │       ├── IndexResultCard.vue      # 索引结果卡片 (需创建)
+│   │       └── IndexHistoryList.vue     # 历史记录列表 (需创建)
 │   ├── services/
-│   │   └── vectorIndexApi.js        # API调用封装
+│   │   └── vectorIndexApi.js        # API 服务 (已存在，需扩展)
 │   └── stores/
-│       └── vectorIndexStore.js      # Pinia状态管理
+│       └── vectorIndexStore.js      # Pinia Store (已存在，需扩展)
 └── tests/
-    └── components/
-        └── VectorIndex/
-            └── IndexList.spec.js
-
-# Database
-migrations/
-└── vector_index/
-    ├── 001_create_vector_indexes_table.sql
-    ├── 002_create_index_statistics_table.sql
-    └── 003_create_vector_metadata_table.sql
+    └── components/                   # 组件测试 (需创建)
 ```
 
-**Structure Decision**: 
-采用标准Web应用架构，后端使用Provider模式实现多向量数据库支持（Milvus主、FAISS备），前端基于TDesign组件库构建用户界面。索引管理通过Registry模式实现多索引支持。
+**Structure Decision**: Web Application 结构，前后端分离。前端参考 `DocumentEmbedding.vue` 的布局模式，后端复用现有 Provider Pattern。
+
+## Key Design Decisions
+
+### 1. 数据源集成 - 向量化任务选择
+
+**Decision**: 通过 API 获取已完成的向量化任务列表，用户选择后自动加载向量数据
+
+**Implementation**:
+```python
+# API: GET /api/v1/vector-index/embedding-tasks
+# 返回所有状态为 SUCCESS 的 EmbeddingResult 列表
+```
+
+### 2. 前端组件复用
+
+**Decision**: 复用 `DocumentEmbedding.vue` 的布局模式和组件结构
+
+**Components to Create**:
+- `VectorTaskSelector.vue` - 类似 `DocumentSelector.vue`
+- `DatabaseSelector.vue` - 类似 `ModelSelector.vue`
+- `IndexHistoryList.vue` - 类似 `EmbeddingHistoryList.vue`
+
+### 3. Provider Pattern 扩展
+
+**Decision**: 定义 `BaseProvider` 抽象类，FAISS 和 Milvus 均实现该接口
+
+**Interface**:
+```python
+class BaseProvider(ABC):
+    @abstractmethod
+    def create_index(self, config: IndexConfig) -> str: ...
+    @abstractmethod
+    def insert_vectors(self, index_id: str, vectors: List[Vector]) -> int: ...
+    @abstractmethod
+    def search_vectors(self, index_id: str, query: SearchQuery) -> List[SearchResult]: ...
+    @abstractmethod
+    def delete_vectors(self, index_id: str, vector_ids: List[str]) -> int: ...
+```
 
 ## Complexity Tracking
 
-> **本节留空 - 无宪章违规需要证明**
-
-所有设计决策均符合系统宪章要求，无额外复杂性引入：
-- 模块化架构与现有系统一致
-- Provider模式符合多提供商支持原则
-- 使用现有技术栈（FastAPI, Vue3, PostgreSQL）
-- API设计遵循RESTful标准
-
-**技术选型变更说明**：
-- **变更内容**：从"FAISS为主，Milvus为备"调整为"Milvus为主，FAISS为备"
-- **变更原因**：
-  1. 生产级需求：Milvus提供企业级特性（分布式、高可用、监控）
-  2. 性能提升：原生并发支持，>100 QPS，支持亿级向量
-  3. 运维简化：自动持久化、元数据管理、集群部署
-  4. 扩展性：满足未来大规模数据增长需求
-- **影响评估**：
-  - 部署复杂度略增（需Docker容器运行Milvus）
-  - 开发环境可继续使用FAISS（轻量级）
-  - API层保持Provider抽象，切换透明
-  - 性能提升2-100倍（根据场景）
-
-| 维度 | Milvus方案 | FAISS方案 | 优势 |
-|------|-----------|----------|------|
-| 查询延迟 | <50ms (HNSW) | <100ms (IVF) | 2倍提升 |
-| 吞吐量 | >100 QPS | ~20 QPS | 5倍提升 |
-| 并发模型 | MVCC（多读多写） | RWLock（10读1写） | 并发能力强 |
-| 规模上限 | 亿级 | 百万级 | 100倍扩展 |
-| 运维成本 | 中等（Docker部署） | 低（进程内） | FAISS更简单 |
+> 无宪章违规，无需记录

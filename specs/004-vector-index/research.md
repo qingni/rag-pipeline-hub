@@ -307,11 +307,203 @@ Embedding Service → Vector Index Service → Search API
 | Web框架 | FastAPI | 0.104.1 | 后端API |
 | ORM | SQLAlchemy | 2.0.23 | 数据库操作 |
 
+## 前端设计研究 (2024-12-24 补充)
+
+### 1. 布局方案
+
+**Decision**: 采用左右分栏布局，参考 `DocumentEmbedding.vue`
+
+**Rationale**:
+- 与现有向量化模块保持一致的用户体验
+- 左侧配置区固定宽度（380px），右侧内容区自适应
+- 右侧采用双Tab设计（索引结果 + 历史记录）
+
+**Layout Structure**:
+```vue
+<t-layout>
+  <t-aside width="380px">
+    <!-- 索引配置面板 -->
+    <VectorTaskSelector />      <!-- 选择向量化任务 -->
+    <DatabaseSelector />        <!-- 选择向量数据库 -->
+    <AlgorithmSelector />       <!-- 选择索引算法 -->
+    <t-button>开始索引</t-button>
+  </t-aside>
+  
+  <t-content>
+    <t-tabs>
+      <t-tab-panel label="索引结果">
+        <IndexResultCard />
+      </t-tab-panel>
+      <t-tab-panel label="历史记录">
+        <IndexHistoryList />
+      </t-tab-panel>
+    </t-tabs>
+  </t-content>
+</t-layout>
+```
+
+### 2. 组件设计
+
+#### VectorTaskSelector (向量化任务选择器)
+
+**功能**:
+- 下拉选择已完成的向量化任务
+- 显示任务名称、文档名称、创建时间
+- 选择后自动获取向量数据元信息（维度、数量）
+
+**API 依赖**:
+```
+GET /api/v1/vector-index/embedding-tasks?status=SUCCESS
+```
+
+**数据结构**:
+```typescript
+interface VectorTask {
+  result_id: string;
+  document_id: string;
+  document_name: string;
+  model: string;
+  vector_dimension: number;
+  successful_count: number;
+  created_at: string;
+}
+```
+
+#### DatabaseSelector (数据库选择器)
+
+**功能**:
+- 单选 Milvus 或 FAISS
+- 显示各数据库的特点说明
+- 根据选择动态调整可用算法
+
+**选项**:
+| 数据库 | 描述 | 推荐场景 |
+|--------|------|----------|
+| Milvus | 生产级向量数据库，支持分布式 | 生产环境、大规模数据 |
+| FAISS | 轻量级本地索引库 | 开发环境、小规模测试 |
+
+#### AlgorithmSelector (算法选择器)
+
+**功能**:
+- 根据选择的数据库显示可用算法
+- 显示算法特点和适用场景
+- 提供参数配置（高级选项）
+
+**算法矩阵**:
+| 算法 | Milvus | FAISS | 特点 |
+|------|--------|-------|------|
+| FLAT | ✅ | ✅ | 精确搜索，适合小规模 |
+| IVF_FLAT | ✅ | ✅ | 平衡方案，中等规模 |
+| IVF_PQ | ✅ | ✅ | 压缩存储，大规模 |
+| HNSW | ✅ | ❌ | 高性能，低延迟 |
+
+#### IndexResultCard (索引结果卡片)
+
+**功能**:
+- 显示当前索引的详细信息
+- 索引状态（构建中/就绪/错误）
+- 统计信息（向量数量、索引大小、查询延迟）
+- 操作按钮（持久化、导出、删除）
+
+#### IndexHistoryList (历史记录列表)
+
+**功能**:
+- 分页展示索引操作历史
+- 支持查看详情
+- 支持删除记录
+- 时间排序（最新在前）
+
+**操作**:
+- 查看详情：展开显示完整配置和统计
+- 删除记录：确认后删除索引及数据
+
+### 3. 状态管理 (Pinia Store)
+
+**扩展 vectorIndexStore.js**:
+
+```javascript
+export const useVectorIndexStore = defineStore('vectorIndex', {
+  state: () => ({
+    // 向量化任务列表
+    vectorTasks: [],
+    selectedTaskId: null,
+    
+    // 配置选项
+    selectedDatabase: 'milvus',  // milvus | faiss
+    selectedAlgorithm: 'HNSW',
+    algorithmParams: {},
+    
+    // 索引结果
+    currentIndex: null,
+    indexHistory: [],
+    
+    // 状态
+    isCreating: false,
+    error: null
+  }),
+  
+  getters: {
+    availableAlgorithms: (state) => {
+      if (state.selectedDatabase === 'milvus') {
+        return ['FLAT', 'IVF_FLAT', 'IVF_PQ', 'HNSW'];
+      }
+      return ['FLAT', 'IVF_FLAT', 'IVF_PQ'];
+    },
+    
+    canStartIndexing: (state) => {
+      return state.selectedTaskId && 
+             state.selectedDatabase && 
+             state.selectedAlgorithm &&
+             !state.isCreating;
+    }
+  },
+  
+  actions: {
+    async fetchVectorTasks() { /* ... */ },
+    async createIndex() { /* ... */ },
+    async fetchIndexHistory() { /* ... */ },
+    async deleteIndex(indexId) { /* ... */ }
+  }
+});
+```
+
+### 4. API 扩展需求
+
+**新增后端 API**:
+
+1. **获取已完成的向量化任务**
+   ```
+   GET /api/v1/embedding/results?status=SUCCESS
+   ```
+
+2. **根据向量化任务创建索引**
+   ```
+   POST /api/v1/vector-index/indexes/from-embedding
+   Body: {
+     "embedding_result_id": "xxx",
+     "provider": "milvus",
+     "index_type": "HNSW",
+     "index_params": { "M": 16, "efConstruction": 200 }
+   }
+   ```
+
+3. **获取索引历史记录**
+   ```
+   GET /api/v1/vector-index/indexes/history
+   Query: page, page_size, sort_by
+   ```
+
+4. **删除索引记录**
+   ```
+   DELETE /api/v1/vector-index/indexes/{index_id}
+   ```
+
 ## 下一步行动
 
 1. ✅ Phase 0 完成：技术选型确定
-2. ⏭️ Phase 1: 设计数据模型和API契约
-3. ⏭️ Phase 2: 任务分解和实现计划
+2. ✅ Phase 0 补充：前端设计研究完成
+3. ⏭️ Phase 1: 更新数据模型和API契约
+4. ⏭️ Phase 2: 任务分解和实现计划
 
 ## 参考资料
 

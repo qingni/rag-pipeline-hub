@@ -1,7 +1,7 @@
 # Quickstart Guide: 向量索引模块
 
 **Feature**: 004-vector-index  
-**Last Updated**: 2025-12-23  
+**Last Updated**: 2025-12-24  
 **Estimated Setup Time**: 15-30 minutes
 
 ## Overview
@@ -9,6 +9,58 @@
 本指南将帮助你快速搭建和使用向量索引模块。系统支持两种向量数据库：
 - **Milvus**（推荐）：生产环境，高性能，分布式
 - **FAISS**：开发环境，轻量级，易于调试
+
+**2024-12-24 更新**：新增从向量化任务创建索引的工作流程。
+
+## 快速开始（推荐流程）
+
+### 前置条件
+
+1. 已完成文档向量化（至少有一个状态为 SUCCESS 的向量化任务）
+2. 后端服务运行中（`http://localhost:8000`）
+3. 前端服务运行中（`http://localhost:5173`）
+
+### 步骤 1：访问向量索引页面
+
+```
+http://localhost:5173/vector-index
+```
+
+### 步骤 2：选择向量化任务
+
+在左侧配置面板的「向量化任务」下拉框中：
+- 选择一个已完成的向量化任务
+- 系统自动显示任务详情（文档名称、模型、向量维度、向量数量）
+
+### 步骤 3：选择向量数据库
+
+| 选项 | 适用场景 |
+|------|----------|
+| **Milvus** | 生产环境、大规模数据（>10K向量） |
+| **FAISS** | 开发测试、小规模数据（<10K向量） |
+
+### 步骤 4：选择索引算法
+
+| 算法 | 特点 | 推荐场景 |
+|------|------|----------|
+| **FLAT** | 精确搜索，无损失 | <10K 向量 |
+| **IVF_FLAT** | 平衡精度和速度 | 10K-100K 向量 |
+| **IVF_PQ** | 压缩存储，节省内存 | >100K 向量 |
+| **HNSW** | 最快查询速度 | 对延迟敏感的场景 |
+
+### 步骤 5：开始索引
+
+点击「开始索引」按钮，系统将：
+1. 读取向量化结果中的向量数据
+2. 创建向量索引配置
+3. 批量导入向量到选定的数据库
+4. 构建索引结构
+5. 更新统计信息
+
+### 步骤 6：查看结果
+
+- **索引结果 Tab**：显示当前索引的详细信息和统计
+- **历史记录 Tab**：查看所有索引操作历史，支持查看详情和删除
 
 ## Prerequisites
 
@@ -201,7 +253,79 @@ python -m uvicorn main:app --reload --port 8000
 # API 文档: http://localhost:8000/docs
 ```
 
-### 2. 创建索引
+### 2. 从向量化任务创建索引（推荐方式）
+
+#### Step 1: 获取可用的向量化任务
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/vector-index/embedding-tasks?status=SUCCESS"
+```
+
+**Response**:
+```json
+{
+  "status": "success",
+  "data": {
+    "tasks": [
+      {
+        "result_id": "emb_001",
+        "document_id": "doc_12345",
+        "document_name": "contract_v2.pdf",
+        "model": "bge-m3",
+        "vector_dimension": 1024,
+        "successful_count": 150,
+        "status": "SUCCESS",
+        "created_at": "2025-12-24T08:00:00Z"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+#### Step 2: 创建索引
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/vector-index/indexes/from-embedding" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "embedding_result_id": "emb_001",
+    "provider": "MILVUS",
+    "index_type": "HNSW",
+    "metric_type": "COSINE",
+    "index_params": {
+      "M": 16,
+      "efConstruction": 200
+    }
+  }'
+```
+
+**Response**:
+```json
+{
+  "status": "success",
+  "data": {
+    "id": "idx_001",
+    "name": "contract_v2_index",
+    "provider": "milvus",
+    "dimension": 1024,
+    "index_type": "HNSW",
+    "vector_count": 150,
+    "status": "building",
+    "source_document_name": "contract_v2.pdf",
+    "source_model": "bge-m3",
+    "created_at": "2025-12-24T10:00:00Z"
+  }
+}
+```
+
+#### Step 3: 查看索引历史
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/vector-index/indexes/history?page=1&page_size=20"
+```
+
+### 3. 手动创建索引（高级用法）
 
 #### 使用 Milvus
 

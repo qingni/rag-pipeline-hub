@@ -188,10 +188,13 @@ class MilvusProvider(BaseProvider):
             # 生成向量 ID
             vector_ids = [str(uuid.uuid4()) for _ in range(len(vectors))]
             
+            # 获取维度信息
+            expected_dim = collection.schema.fields[1].params.get("dim", vectors.shape[1] if len(vectors) > 0 else 0)
+            
             # 验证和归一化向量
             normalized_vectors = []
             for i, vec in enumerate(vectors):
-                validate_vector(vec)
+                validate_vector(vec, expected_dim)
                 normalized_vectors.append(normalize_vector(vec).tolist())
             
             # 准备数据
@@ -239,8 +242,11 @@ class MilvusProvider(BaseProvider):
             # 加载 collection 到内存
             collection.load()
             
+            # 获取维度信息
+            expected_dim = collection.schema.fields[1].params.get("dim", len(query_vector))
+            
             # 验证和归一化查询向量
-            validate_vector(query_vector)
+            validate_vector(query_vector, expected_dim)
             query_vec = normalize_vector(query_vector).tolist()
             
             # 准备搜索参数

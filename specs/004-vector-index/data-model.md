@@ -1,7 +1,7 @@
 # Data Model: 向量索引模块
 
 **Feature**: 004-vector-index  
-**Date**: 2025-12-23  
+**Date**: 2025-12-24 (Updated)  
 **Status**: Design Phase
 
 ## Overview
@@ -10,7 +10,7 @@
 1. **Milvus/FAISS层**：存储向量数据和基础元数据（向量ID、文档ID、命名空间等）
 2. **PostgreSQL层**：存储索引配置、统计信息、查询历史和复杂元数据
 
-这种分层设计确保向量检索性能的同时，提供灵活的元数据管理和查询能力。
+**2024-12-24 更新**：新增与向量化任务（EmbeddingResult）的关联关系，支持从已完成的向量化任务创建索引。
 
 ## Core Entities
 
@@ -24,14 +24,14 @@
 |-------|------|----------|-------------|------------|
 | id | UUID | Yes | 索引唯一标识符 | UUID v4 |
 | name | String(255) | Yes | 索引名称（用户可读） | ^[a-zA-Z0-9_-]+$, unique |
-| provider | Enum | Yes | 向量数据库提供商 | `milvus` \| `faiss` |
-| dimension | Integer | Yes | 向量维度 | 128, 256, 512, 768, 1536, 3072 |
+| provider | Enum | Yes | 向量数据库提供商 | `MILVUS` \| `FAISS` |
+| dimension | Integer | Yes | 向量维度 | 128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096 |
 | index_type | String(50) | Yes | 索引算法类型 | Milvus: FLAT/IVF_FLAT/IVF_PQ/HNSW<br>FAISS: IndexFlatIP/IndexIVFPQ |
 | metric_type | Enum | Yes | 相似度度量方法 | `cosine` \| `euclidean` \| `dot_product` |
 | index_params | JSON | No | 索引算法参数 | Provider-specific config |
 | namespace | String(255) | No | 命名空间（用于多租户） | Default: "default" |
 | vector_count | Integer | Yes | 当前向量数量 | >= 0, auto-updated |
-| status | Enum | Yes | 索引状态 | `building` \| `ready` \| `updating` \| `error` |
+| status | Enum | Yes | 索引状态 | `BUILDING` \| `READY` \| `UPDATING` \| `ERROR` |
 | file_path | String(512) | No | 索引文件路径（仅FAISS） | Absolute path to .index file |
 | milvus_collection | String(255) | No | Milvus Collection名称 | 仅Provider=milvus时有效 |
 | created_at | DateTime | Yes | 创建时间 | ISO 8601 UTC |
@@ -43,7 +43,7 @@
 {
   "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "name": "legal_docs_index",
-  "provider": "milvus",
+  "provider": "MILVUS",
   "dimension": 1536,
   "index_type": "HNSW",
   "metric_type": "cosine",
@@ -53,7 +53,7 @@
   },
   "namespace": "legal_department",
   "vector_count": 125430,
-  "status": "ready",
+  "status": "READY",
   "milvus_collection": "legal_docs_index_col",
   "created_at": "2025-12-23T08:00:00Z",
   "updated_at": "2025-12-23T10:30:00Z",
@@ -63,11 +63,11 @@
 
 **State Transitions**:
 ```
-[Create] → building → ready
+[Create] → BUILDING → READY
               ↓          ↓
-              error ← updating ← [Update/Delete]
+              ERROR ← UPDATING ← [Update/Delete]
                          ↓
-                       ready
+                       READY
 ```
 
 ---
@@ -224,14 +224,26 @@
 
 ```mermaid
 erDiagram
+    EmbeddingResult ||--o{ VectorIndex : "source_of"
     VectorIndex ||--o{ Vector : contains
     VectorIndex ||--|| IndexStatistics : has
     VectorIndex ||--o{ QueryHistory : logs
     Vector }o--|| Document : references
     
+    EmbeddingResult {
+        string result_id PK
+        string document_id FK
+        string model
+        int vector_dimension
+        int successful_count
+        string status
+        datetime created_at
+    }
+    
     VectorIndex {
         uuid id PK
         string name UK
+        string embedding_result_id FK
         enum provider
         int dimension
         string index_type
@@ -274,29 +286,77 @@ erDiagram
     }
 ```
 
+## 新增：与向量化任务的关联 (2024-12-24)
+
+### VectorIndex 扩展字段
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| embedding_result_id | String(36) | No | 关联的向量化任务ID |
+| source_document_name | String(255) | No | 源文档名称（冗余存储，便于展示） |
+| source_model | String(50) | No | 源向量化模型（冗余存储） |
+
+### 数据流说明
+
+```
+EmbeddingResult (已完成的向量化任务)
+    ↓ 用户选择
+VectorIndex (创建索引配置)
+    ↓ 读取向量数据
+Milvus/FAISS (存储向量)
+    ↓ 构建索引
+IndexStatistics (记录统计)
+```
+
+### 前端数据流
+
+1. **获取向量化任务列表**: `GET /api/v1/vector-index/embedding-tasks?status=SUCCESS`
+2. **用户选择任务**: 获取 `embedding_result_id`
+3. **创建索引**: `POST /api/v1/vector-index/indexes/from-embedding`
+4. **读取向量数据**: 从 JSON 结果文件加载向量
+5. **插入向量数据库**: 批量写入 Milvus/FAISS
+6. **更新统计信息**: 记录向量数量、索引大小等
+
 ## Database Schema (PostgreSQL)
 
 ### Tables
 
 ```sql
--- 向量索引配置表
+-- 向量索引配置表 (2024-12-24 更新：添加 embedding_result_id 关联)
 CREATE TABLE vector_indexes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) UNIQUE NOT NULL,
-    provider VARCHAR(20) NOT NULL CHECK (provider IN ('milvus', 'faiss')),
-    dimension INTEGER NOT NULL CHECK (dimension IN (128, 256, 512, 768, 1536, 3072)),
+    
+    -- 数据源关联 (新增)
+    embedding_result_id VARCHAR(36) REFERENCES embedding_results(result_id),
+    source_document_name VARCHAR(255),  -- 冗余存储，便于展示
+    source_model VARCHAR(50),           -- 冗余存储
+    
+    -- 索引配置
+    provider VARCHAR(20) NOT NULL CHECK (provider IN ('MILVUS', 'FAISS')),
+    dimension INTEGER NOT NULL CHECK (dimension IN (128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096)),
     index_type VARCHAR(50) NOT NULL,
     metric_type VARCHAR(20) NOT NULL CHECK (metric_type IN ('cosine', 'euclidean', 'dot_product')),
     index_params JSONB DEFAULT '{}',
     namespace VARCHAR(255) DEFAULT 'default',
+    
+    -- 状态和统计
     vector_count INTEGER DEFAULT 0 CHECK (vector_count >= 0),
-    status VARCHAR(20) NOT NULL CHECK (status IN ('building', 'ready', 'updating', 'error')),
+    status VARCHAR(20) NOT NULL CHECK (status IN ('BUILDING', 'READY', 'UPDATING', 'ERROR')),
+    error_message TEXT,  -- 错误信息 (新增)
+    
+    -- Provider 特定字段
     file_path VARCHAR(512),  -- FAISS only
     milvus_collection VARCHAR(255),  -- Milvus only
+    
+    -- 审计字段
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(255)
 );
+
+-- 新增索引
+CREATE INDEX idx_vector_indexes_embedding_result ON vector_indexes(embedding_result_id);
 
 -- 索引统计信息表
 CREATE TABLE index_statistics (
@@ -406,8 +466,8 @@ index_params = {
 
 ```python
 class VectorIndexValidator:
-    VALID_DIMENSIONS = [128, 256, 512, 768, 1536, 3072]
-    VALID_PROVIDERS = ["milvus", "faiss"]
+    VALID_DIMENSIONS = [128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096]
+    VALID_PROVIDERS = ["MILVUS", "FAISS"]
     VALID_METRIC_TYPES = ["cosine", "euclidean", "dot_product"]
     
     MILVUS_INDEX_TYPES = ["FLAT", "IVF_FLAT", "IVF_PQ", "HNSW"]
@@ -492,7 +552,7 @@ def validate_vector(vector: list, expected_dim: int):
 ```sql
 -- Sample index (FAISS for development)
 INSERT INTO vector_indexes (name, provider, dimension, index_type, metric_type, namespace, status)
-VALUES ('dev_test_index', 'faiss', 1536, 'IndexFlatIP', 'cosine', 'default', 'ready');
+VALUES ('dev_test_index', 'FAISS', 1536, 'IndexFlatIP', 'COSINE', 'default', 'READY');
 
 -- Sample statistics
 INSERT INTO index_statistics (index_id, vector_count, index_size_bytes, avg_query_latency_ms)
@@ -506,13 +566,13 @@ SELECT id, 1000, 9216000, 25.3 FROM vector_indexes WHERE name = 'dev_test_index'
 INSERT INTO vector_indexes (name, provider, dimension, index_type, metric_type, index_params, namespace, status)
 VALUES (
     'legal_docs_index',
-    'milvus',
+    'MILVUS',
     1536,
     'HNSW',
-    'cosine',
+    'COSINE',
     '{"M": 16, "efConstruction": 200}',
     'legal_department',
-    'ready'
+    'READY'
 );
 ```
 

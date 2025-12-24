@@ -5,7 +5,9 @@ info:
     RAG系统向量索引模块的RESTful API规范。
     提供向量索引的创建、管理、检索和统计功能。
     遵循系统宪章的统一API标准化原则。
-  version: 1.0.0
+    
+    **2024-12-24 更新**: 新增从向量化任务创建索引的 API。
+  version: 1.1.0
   contact:
     name: RAG Framework Team
 
@@ -24,8 +26,136 @@ tags:
     description: 向量检索操作
   - name: statistics
     description: 统计和监控
+  - name: embedding-integration
+    description: 向量化任务集成 (新增)
 
 paths:
+  # ============ 新增：向量化任务集成 API ============
+  /vector-index/embedding-tasks:
+    get:
+      tags:
+        - embedding-integration
+      summary: 获取可用的向量化任务列表
+      description: 获取所有已完成的向量化任务，用于创建索引时选择数据源
+      parameters:
+        - name: status
+          in: query
+          description: 过滤任务状态
+          required: false
+          schema:
+            type: string
+            enum: [SUCCESS, PARTIAL_SUCCESS]
+            default: SUCCESS
+        - name: limit
+          in: query
+          description: 返回结果数量限制
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: 分页偏移量
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: 成功返回向量化任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingTaskListResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /vector-index/indexes/from-embedding:
+    post:
+      tags:
+        - embedding-integration
+      summary: 从向量化任务创建索引
+      description: |
+        基于已完成的向量化任务创建向量索引。
+        系统会自动读取向量化结果中的向量数据并导入到选定的向量数据库。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIndexFromEmbeddingRequest'
+      responses:
+        '201':
+          description: 索引创建任务已启动
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: 向量化任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /vector-index/indexes/history:
+    get:
+      tags:
+        - indexes
+      summary: 获取索引历史记录
+      description: 获取索引操作的历史记录列表，支持分页和排序
+      parameters:
+        - name: page
+          in: query
+          description: 页码（从1开始）
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          description: 每页数量
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: sort_by
+          in: query
+          description: 排序字段
+          required: false
+          schema:
+            type: string
+            enum: [created_at, updated_at, name, vector_count]
+            default: created_at
+        - name: sort_order
+          in: query
+          description: 排序方向
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: 成功返回历史记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexHistoryResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ============ 原有 API ============
   /indexes:
     get:
       tags:
@@ -46,7 +176,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [CREATING, READY, UPDATING, ERROR]
+            enum: [BUILDING, READY, UPDATING, ERROR]
         - name: limit
           in: query
           description: 返回结果数量限制
@@ -408,6 +538,196 @@ components:
         example: "document_embeddings"
 
   schemas:
+    # ============ 新增：向量化任务集成相关 Schema ============
+    EmbeddingTaskListResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            tasks:
+              type: array
+              items:
+                $ref: '#/components/schemas/EmbeddingTaskSummary'
+            total:
+              type: integer
+              description: 总数量
+            limit:
+              type: integer
+            offset:
+              type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    EmbeddingTaskSummary:
+      type: object
+      description: 向量化任务摘要信息
+      properties:
+        result_id:
+          type: string
+          description: 向量化结果ID
+          example: "emb_001"
+        document_id:
+          type: string
+          description: 文档ID
+        document_name:
+          type: string
+          description: 文档名称
+          example: "contract_v2.pdf"
+        model:
+          type: string
+          description: 向量化模型
+          example: "bge-m3"
+        vector_dimension:
+          type: integer
+          description: 向量维度
+          example: 1024
+        successful_count:
+          type: integer
+          description: 成功向量化的分块数量
+          example: 150
+        status:
+          type: string
+          enum: [SUCCESS, PARTIAL_SUCCESS]
+          description: 任务状态
+        created_at:
+          type: string
+          format: date-time
+          description: 创建时间
+
+    CreateIndexFromEmbeddingRequest:
+      type: object
+      required:
+        - embedding_result_id
+        - provider
+        - index_type
+      properties:
+        embedding_result_id:
+          type: string
+          description: 向量化任务结果ID
+          example: "emb_001"
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]{3,100}$'
+          description: 索引名称（可选，默认自动生成）
+          example: "contract_index_001"
+        provider:
+          type: string
+          enum: [FAISS, MILVUS]
+          description: 向量数据库提供商
+          example: "MILVUS"
+        index_type:
+          type: string
+          enum: [FLAT, IVF_FLAT, IVF_PQ, HNSW]
+          description: 索引算法类型
+          example: "HNSW"
+        metric_type:
+          type: string
+          enum: [COSINE, EUCLIDEAN, DOT_PRODUCT]
+          default: "COSINE"
+          description: 相似度度量方法
+        index_params:
+          type: object
+          description: 索引算法参数
+          properties:
+            M:
+              type: integer
+              default: 16
+              description: HNSW 图的连接数
+            efConstruction:
+              type: integer
+              default: 200
+              description: HNSW 构建时的搜索范围
+            nlist:
+              type: integer
+              default: 1024
+              description: IVF 聚类中心数
+            m:
+              type: integer
+              default: 8
+              description: PQ 子向量数
+        namespace:
+          type: string
+          default: "default"
+          description: 命名空间
+
+    IndexHistoryResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "success"
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/IndexHistoryItem'
+            total:
+              type: integer
+              description: 总记录数
+            page:
+              type: integer
+              description: 当前页码
+            page_size:
+              type: integer
+              description: 每页数量
+            total_pages:
+              type: integer
+              description: 总页数
+        timestamp:
+          type: string
+          format: date-time
+
+    IndexHistoryItem:
+      type: object
+      description: 索引历史记录项
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 索引ID
+        name:
+          type: string
+          description: 索引名称
+        provider:
+          type: string
+          enum: [FAISS, MILVUS]
+          description: 向量数据库
+        index_type:
+          type: string
+          description: 索引算法
+        dimension:
+          type: integer
+          description: 向量维度
+        vector_count:
+          type: integer
+          description: 向量数量
+        status:
+          type: string
+          enum: [BUILDING, READY, UPDATING, ERROR]
+          description: 索引状态
+        source_document_name:
+          type: string
+          description: 源文档名称
+        source_model:
+          type: string
+          description: 源向量化模型
+        created_at:
+          type: string
+          format: date-time
+          description: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          description: 更新时间
+
+    # ============ 原有 Schema ============
     CreateIndexRequest:
       type: object
       required:

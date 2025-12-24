@@ -91,7 +91,8 @@ class FAISSProvider(BaseProvider):
                 faiss_index = self._build_faiss_index(
                     dimension=config.dimension,
                     metric_type=config.metric_type,
-                    index_type=config.index_type
+                    index_type=config.index_type,
+                    num_vectors=config.num_vectors  # 传入向量数量
                 )
                 
                 # 存储索引信息
@@ -149,7 +150,8 @@ class FAISSProvider(BaseProvider):
         self, 
         dimension: int, 
         metric_type: str,
-        index_type: Optional[str] = None
+        index_type: Optional[str] = None,
+        num_vectors: int = 0
     ) -> faiss.Index:
         """
         构建 FAISS 索引对象
@@ -158,6 +160,7 @@ class FAISSProvider(BaseProvider):
             dimension: 向量维度
             metric_type: 相似度度量类型
             index_type: 索引类型
+            num_vectors: 预期向量数量（用于动态调整参数）
             
         Returns:
             FAISS Index 对象
@@ -178,7 +181,13 @@ class FAISSProvider(BaseProvider):
         elif index_type == "IVF_FLAT":
             # IVF (Inverted File) 索引
             quantizer = faiss.IndexFlatL2(dimension)
-            nlist = 100  # 聚类中心数量
+            # 动态调整 nlist：不超过向量数量，最小为 1，推荐为 sqrt(n)
+            if num_vectors > 0:
+                nlist = min(int(np.sqrt(num_vectors)), num_vectors)
+                nlist = max(nlist, 1)  # 至少 1 个聚类
+            else:
+                nlist = 100  # 默认值
+            logger.info(f"Creating IVF_FLAT index with nlist={nlist} for {num_vectors} vectors")
             index = faiss.IndexIVFFlat(quantizer, dimension, nlist, metric)
         
         elif index_type == "HNSW":
@@ -225,8 +234,9 @@ class FAISSProvider(BaseProvider):
             
             # 验证和归一化向量
             normalized_vectors = []
+            expected_dim = index_info["dimension"]
             for vec in vectors:
-                validate_vector(vec)
+                validate_vector(vec, expected_dim)
                 # 如果是余弦相似度，归一化向量
                 if index_info["metric_type"].lower() == "cosine":
                     normalized_vectors.append(normalize_vector(vec))
@@ -281,7 +291,8 @@ class FAISSProvider(BaseProvider):
             faiss_index = index_info["index"]
             
             # 验证查询向量
-            validate_vector(query_vector)
+            expected_dim = index_info["dimension"]
+            validate_vector(query_vector, expected_dim)
             
             # 归一化（如果使用余弦相似度）
             if index_info["metric_type"].lower() == "cosine":

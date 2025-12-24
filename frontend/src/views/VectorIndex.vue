@@ -1,229 +1,1013 @@
 <template>
   <div class="vector-index-page">
-    <t-card :bordered="false" class="page-header">
-      <template #header>
-        <div class="header-content">
-          <div class="title-section">
-            <h1>向量索引管理</h1>
-            <p class="subtitle">创建和管理向量索引，执行相似度搜索</p>
-          </div>
-          <t-button theme="primary" @click="showCreateDialog = true">
-            <template #icon><add-icon /></template>
-            创建索引
-          </t-button>
+    <t-layout>
+      <!-- 左侧控制面板 -->
+      <t-aside width="380px" class="control-panel">
+        <div class="panel-header">
+          <DatabaseIcon :size="24" class="panel-icon" />
+          <h2 class="panel-title">向量索引</h2>
         </div>
-      </template>
+        
+        <div class="panel-content">
+          <!-- 向量化结果选择 -->
+          <div class="form-section">
+            <label class="section-label">
+              <FileTextIcon :size="16" />
+              文档向量化结果
+            </label>
+            <t-select
+              v-model="selectedEmbeddingId"
+              placeholder="请选择已完成的文档向量化结果"
+              :loading="loadingEmbeddings"
+              filterable
+              clearable
+              :popup-props="{ overlayClassName: 'vector-index-select-popup' }"
+              @change="handleEmbeddingSelect"
+            >
+              <t-option
+                v-for="task in embeddingTasks"
+                :key="task.result_id"
+                :value="task.result_id"
+                :label="task.document_name || task.result_id"
+              >
+                <div class="select-option-item">
+                  <div class="select-option-name">{{ task.document_name || '未命名文档' }}</div>
+                  <div class="select-option-desc">{{ task.model }} · {{ task.vector_dimension }}维 · {{ task.successful_count || 0 }}向量</div>
+                </div>
+              </t-option>
+            </t-select>
+            <t-button
+              variant="text"
+              theme="primary"
+              size="small"
+              class="refresh-btn"
+              @click="loadEmbeddingTasks"
+            >
+              <RefreshIcon :size="14" />
+              刷新列表
+            </t-button>
+          </div>
 
-      <!-- 统计卡片 -->
-      <t-row :gutter="16" class="stats-row">
-        <t-col :span="3">
-          <t-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-value">{{ indexCount }}</div>
-              <div class="stat-label">总索引数</div>
-            </div>
-          </t-card>
-        </t-col>
-        <t-col :span="3">
-          <t-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-value">{{ readyIndexCount }}</div>
-              <div class="stat-label">就绪索引</div>
-            </div>
-          </t-card>
-        </t-col>
-        <t-col :span="3">
-          <t-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-value">{{ currentVectorCount }}</div>
-              <div class="stat-label">向量总数</div>
-            </div>
-          </t-card>
-        </t-col>
-        <t-col :span="3">
-          <t-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-value">{{ currentQueryCount }}</div>
-              <div class="stat-label">查询总数</div>
-            </div>
-          </t-card>
-        </t-col>
-      </t-row>
-    </t-card>
+          <!-- 选中任务的详情 -->
+          <div v-if="selectedEmbedding" class="embedding-details">
+            <t-descriptions :column="1" size="small">
+              <t-descriptions-item label="文档">
+                {{ selectedEmbedding.document_name || '未命名' }}
+              </t-descriptions-item>
+              <t-descriptions-item label="模型">
+                {{ selectedEmbedding.model }}
+              </t-descriptions-item>
+              <t-descriptions-item label="维度">
+                {{ selectedEmbedding.vector_dimension }}
+              </t-descriptions-item>
+              <t-descriptions-item label="向量数">
+                {{ selectedEmbedding.successful_count || 0 }}
+              </t-descriptions-item>
+            </t-descriptions>
+          </div>
 
-    <!-- 主要内容区域 -->
-    <t-row :gutter="16" class="main-content">
-      <t-col :span="12">
-        <!-- 索引列表 -->
-        <index-list
-          :loading="loading.list"
-          @select="handleSelectIndex"
-          @delete="handleDeleteIndex"
-          @refresh="loadIndexes"
-        />
-      </t-col>
+          <!-- 向量数据库选择 -->
+          <div class="form-section">
+            <label class="section-label">
+              <ServerIcon :size="16" />
+              向量数据库
+            </label>
+            <t-select 
+              v-model="indexConfig.provider" 
+              placeholder="请选择向量数据库"
+              :popup-props="{ overlayClassName: 'vector-index-select-popup' }"
+            >
+              <t-option value="FAISS" label="FAISS - 本地内存索引">
+                <div class="select-option-item">
+                  <div class="select-option-name">FAISS</div>
+                  <div class="select-option-desc">本地内存索引，适合中小规模数据</div>
+                </div>
+              </t-option>
+              <t-option value="MILVUS" label="Milvus - 分布式数据库">
+                <div class="select-option-item">
+                  <div class="select-option-name">Milvus</div>
+                  <div class="select-option-desc">分布式向量数据库，适合大规模生产环境</div>
+                </div>
+              </t-option>
+            </t-select>
+          </div>
 
-      <t-col :span="12">
-        <!-- 向量搜索 -->
-        <vector-search
-          v-if="currentIndex"
-          :index="currentIndex"
-          :loading="loading.search"
-          @search="handleSearch"
-        />
-        <t-card v-else class="empty-state">
-          <t-empty description="请先选择一个索引" />
-        </t-card>
-      </t-col>
-    </t-row>
+          <!-- 索引算法选择 -->
+          <div class="form-section">
+            <label class="section-label">
+              <CpuIcon :size="16" />
+              索引算法
+            </label>
+            <t-select
+              v-model="indexConfig.algorithm"
+              placeholder="请选择索引算法"
+              :popup-props="{ overlayClassName: 'vector-index-select-popup' }"
+            >
+              <t-option value="FLAT" label="FLAT - 暴力搜索">
+                <div class="select-option-item">
+                  <div class="select-option-name">FLAT</div>
+                  <div class="select-option-desc">暴力搜索，精确匹配</div>
+                </div>
+              </t-option>
+              <t-option value="IVF_FLAT" label="IVF_FLAT - 倒排索引">
+                <div class="select-option-item">
+                  <div class="select-option-name">IVF_FLAT</div>
+                  <div class="select-option-desc">倒排索引，平衡精度与速度</div>
+                </div>
+              </t-option>
+              <t-option value="IVF_PQ" label="IVF_PQ - 乘积量化">
+                <div class="select-option-item">
+                  <div class="select-option-name">IVF_PQ</div>
+                  <div class="select-option-desc">乘积量化，节省内存</div>
+                </div>
+              </t-option>
+              <t-option value="HNSW" label="HNSW - 图索引">
+                <div class="select-option-item">
+                  <div class="select-option-name">HNSW</div>
+                  <div class="select-option-desc">图索引，高性能</div>
+                </div>
+              </t-option>
+            </t-select>
+          </div>
 
-    <!-- 创建索引对话框 -->
-    <index-create
-      :visible="showCreateDialog"
-      @update:visible="showCreateDialog = $event"
-      :loading="loading.create"
-      @create="handleCreateIndex"
-    />
+          <!-- 度量类型选择 -->
+          <div class="form-section">
+            <label class="section-label">
+              <RulerIcon :size="16" />
+              度量类型
+            </label>
+            <t-select 
+              v-model="indexConfig.metric_type" 
+              placeholder="请选择度量类型"
+              :popup-props="{ overlayClassName: 'vector-index-select-popup' }"
+            >
+              <t-option value="cosine" label="余弦相似度">
+                <div class="select-option-item">
+                  <div class="select-option-name">余弦相似度 (Cosine)</div>
+                  <div class="select-option-desc">衡量向量方向相似性，适合文本语义匹配</div>
+                </div>
+              </t-option>
+              <t-option value="euclidean" label="欧氏距离">
+                <div class="select-option-item">
+                  <div class="select-option-name">欧氏距离 (Euclidean)</div>
+                  <div class="select-option-desc">衡量向量空间距离，适合图像特征匹配</div>
+                </div>
+              </t-option>
+              <t-option value="dot_product" label="点积">
+                <div class="select-option-item">
+                  <div class="select-option-name">点积 (Dot Product)</div>
+                  <div class="select-option-desc">向量内积运算，适合归一化向量</div>
+                </div>
+              </t-option>
+            </t-select>
+          </div>
+
+          <!-- 索引名称（可选） -->
+          <div class="form-section">
+            <label class="section-label">
+              <TagIcon :size="16" />
+              索引名称
+              <span class="optional-hint">（可选）</span>
+            </label>
+            <t-input
+              v-model="indexConfig.name"
+              placeholder="留空则自动生成"
+              clearable
+            />
+          </div>
+
+          <!-- 开始按钮 -->
+          <t-button
+            theme="primary"
+            size="large"
+            block
+            :loading="isCreating"
+            :disabled="!canStartIndexing"
+            @click="handleStartIndexing"
+          >
+            <template #icon>
+              <PlayIcon :size="18" />
+            </template>
+            {{ buttonText }}
+          </t-button>
+
+          <!-- 已存在索引提示 -->
+          <div v-if="matchingIndex && !isCreating" class="matching-hint">
+            <AlertCircleIcon :size="14" />
+            <span>已存在相同配置的索引，点击按钮可覆盖</span>
+          </div>
+
+          <!-- 验证提示 -->
+          <div v-if="!canStartIndexing && !isCreating" class="validation-hint">
+            <AlertCircleIcon :size="14" />
+            <span>{{ validationMessage }}</span>
+          </div>
+
+          <!-- 错误提示 -->
+          <t-alert
+            v-if="error"
+            theme="error"
+            :message="error"
+            close
+            @close="error = null"
+          />
+        </div>
+      </t-aside>
+      
+      <!-- 右侧结果面板 -->
+      <t-content class="main-content">
+        <t-tabs v-model="activeTab" class="full-height-tabs">
+          <!-- Tab 1: 索引结果 -->
+          <t-tab-panel value="result" label="索引结果" class="tab-panel-content">
+            <div v-if="currentIndex" class="result-container">
+              <!-- 索引详情卡片 -->
+              <t-card class="index-detail-card" :bordered="false">
+                <template #header>
+                  <div class="card-header">
+                    <span class="card-title">索引详情</span>
+                    <t-tag :theme="getStatusTheme(currentIndex.status)" variant="light">
+                      {{ getStatusText(currentIndex.status) }}
+                    </t-tag>
+                  </div>
+                </template>
+                
+                <t-descriptions :column="2" bordered>
+                  <t-descriptions-item label="索引名称">
+                    {{ currentIndex.index_name }}
+                  </t-descriptions-item>
+                  <t-descriptions-item label="索引ID">
+                    {{ currentIndex.id }}
+                  </t-descriptions-item>
+                  <t-descriptions-item label="向量数据库">
+                    <t-tag variant="outline">{{ currentIndex.index_type }}</t-tag>
+                  </t-descriptions-item>
+                  <t-descriptions-item label="索引算法">
+                    <t-tag variant="outline" theme="warning">{{ currentIndex.algorithm_type || 'FLAT' }}</t-tag>
+                  </t-descriptions-item>
+                  <t-descriptions-item label="向量维度">
+                    {{ currentIndex.dimension }}
+                  </t-descriptions-item>
+                  <t-descriptions-item label="度量类型">
+                    {{ currentIndex.metric_type }}
+                  </t-descriptions-item>
+                  <t-descriptions-item label="向量数量">
+                    <span class="highlight-value">{{ formatNumber(currentIndex.vector_count || 0) }}</span>
+                  </t-descriptions-item>
+                  <t-descriptions-item label="创建时间">
+                    {{ formatDate(currentIndex.created_at) }}
+                  </t-descriptions-item>
+                  <t-descriptions-item v-if="currentIndex.source_document_name" label="源文档" :span="2">
+                    {{ currentIndex.source_document_name }}
+                  </t-descriptions-item>
+                  <t-descriptions-item v-if="currentIndex.source_model" label="向量模型" :span="2">
+                    {{ currentIndex.source_model }}
+                  </t-descriptions-item>
+                </t-descriptions>
+
+                <!-- 操作按钮 -->
+                <div class="action-buttons">
+                  <t-button
+                    theme="danger"
+                    variant="outline"
+                    @click="handleDeleteIndex(currentIndex.id)"
+                  >
+                    <template #icon><TrashIcon :size="16" /></template>
+                    删除索引
+                  </t-button>
+                </div>
+              </t-card>
+            </div>
+            
+            <!-- 空状态 -->
+            <div v-else class="empty-result">
+              <t-empty :description="emptyDescription">
+                <template #image>
+                  <DatabaseIcon :size="64" class="empty-icon" />
+                </template>
+                <p class="empty-hint">{{ emptyHint }}</p>
+              </t-empty>
+            </div>
+          </t-tab-panel>
+          
+          <!-- Tab 2: 历史记录 -->
+          <t-tab-panel value="history" label="历史记录" class="tab-panel-content">
+            <t-card :bordered="false" class="history-card">
+              <template #header>
+                <div class="card-header">
+                  <span class="card-title">索引历史</span>
+                  <t-button variant="text" @click="loadIndexes">
+                    <template #icon><RefreshIcon :size="14" /></template>
+                    刷新
+                  </t-button>
+                </div>
+              </template>
+
+              <t-table
+                :data="indexes"
+                :columns="historyColumns"
+                :loading="loadingIndexes"
+                row-key="id"
+                stripe
+                hover
+                :pagination="pagination"
+              >
+                <template #index_name="{ row }">
+                  <div class="index-name-cell">
+                    <span class="name">{{ row.index_name }}</span>
+                    <t-tag v-if="row.source_document_name" size="small" variant="light" theme="primary">
+                      {{ row.source_document_name }}
+                    </t-tag>
+                  </div>
+                </template>
+
+                <template #status="{ row }">
+                  <t-tag :theme="getStatusTheme(row.status)" variant="light">
+                    <template #icon>
+                      <LoadingIcon v-if="row.status === 'BUILDING'" class="spin-icon" />
+                    </template>
+                    {{ getStatusText(row.status) }}
+                  </t-tag>
+                </template>
+
+                <template #created_at="{ row }">
+                  {{ formatDate(row.created_at) }}
+                </template>
+
+                <template #operation="{ row }">
+                  <t-space>
+                    <t-button
+                      theme="primary"
+                      variant="text"
+                      size="small"
+                      @click="handleViewDetail(row)"
+                    >
+                      查看详情
+                    </t-button>
+                    <t-button
+                      theme="danger"
+                      variant="text"
+                      size="small"
+                      @click="handleDeleteIndex(row.id)"
+                    >
+                      删除
+                    </t-button>
+                  </t-space>
+                </template>
+              </t-table>
+            </t-card>
+          </t-tab-panel>
+        </t-tabs>
+      </t-content>
+    </t-layout>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
-import { MessagePlugin } from 'tdesign-vue-next';
-import { AddIcon } from 'tdesign-icons-vue-next';
-import { storeToRefs } from 'pinia';
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next';
+import { 
+  Database as DatabaseIcon,
+  FileText as FileTextIcon,
+  Server as ServerIcon,
+  Cpu as CpuIcon,
+  Ruler as RulerIcon,
+  Tag as TagIcon,
+  Play as PlayIcon,
+  AlertCircle as AlertCircleIcon,
+  Trash2 as TrashIcon,
+  RefreshCw as RefreshIcon,
+  Loader as LoadingIcon
+} from 'lucide-vue-next';
 import { useVectorIndexStore } from '../stores/vectorIndexStore';
-import IndexList from '../components/VectorIndex/IndexList.vue';
-import IndexCreate from '../components/VectorIndex/IndexCreate.vue';
-import VectorSearch from '../components/VectorIndex/VectorSearch.vue';
+import { findMatchingIndex } from '../services/vectorIndexApi';
+import { storeToRefs } from 'pinia';
 
 const vectorIndexStore = useVectorIndexStore();
-const { 
-  currentIndex, 
-  indexCount, 
-  readyIndexCount,
-  currentVectorCount,
-  currentQueryCount,
-  loading 
-} = storeToRefs(vectorIndexStore);
+const { indexes, currentIndex } = storeToRefs(vectorIndexStore);
 
-const showCreateDialog = ref(false);
+// 状态
+const activeTab = ref('result');
+const selectedEmbeddingId = ref('');
+const selectedEmbedding = ref(null);
+const loadingEmbeddings = ref(false);
+const loadingIndexes = ref(false);
+const isCreating = ref(false);
+const error = ref(null);
+const embeddingTasks = ref([]);
+const matchingIndex = ref(null);  // 匹配的已存在索引
+const checkingMatch = ref(false);  // 检查中状态
 
-// 加载索引列表
+let refreshInterval = null;
+
+// 索引配置
+const indexConfig = reactive({
+  provider: 'FAISS',
+  algorithm: 'FLAT',
+  metric_type: 'cosine',
+  name: ''
+});
+
+// 历史记录表格列
+const historyColumns = [
+  { colKey: 'id', title: 'ID', width: 60 },
+  { colKey: 'index_name', title: '索引名称', width: 200, cell: 'index_name' },
+  { colKey: 'index_type', title: '数据库', width: 80 },
+  { colKey: 'algorithm_type', title: '算法', width: 90 },
+  { colKey: 'dimension', title: '维度', width: 70 },
+  { colKey: 'vector_count', title: '向量数', width: 80 },
+  { colKey: 'status', title: '状态', width: 90, cell: 'status' },
+  { colKey: 'created_at', title: '创建时间', width: 150, cell: 'created_at' },
+  { colKey: 'operation', title: '操作', width: 150, cell: 'operation', fixed: 'right' }
+];
+
+const pagination = computed(() => ({
+  total: indexes.value.length,
+  pageSize: 10,
+  current: 1
+}));
+
+// 验证
+const canStartIndexing = computed(() => {
+  return selectedEmbeddingId.value && !isCreating.value;
+});
+
+const validationMessage = computed(() => {
+  if (!selectedEmbeddingId.value) {
+    return '请选择文档向量化结果';
+  }
+  return '';
+});
+
+// 按钮文字
+const buttonText = computed(() => {
+  if (isCreating.value) return '索引构建中...';
+  if (matchingIndex.value) return '覆盖索引';
+  return '开始索引';
+});
+
+// 空状态描述
+const emptyDescription = computed(() => {
+  if (!selectedEmbeddingId.value) {
+    return '暂无索引结果';
+  }
+  if (checkingMatch.value) {
+    return '正在检查...';
+  }
+  return '无匹配的向量索引';
+});
+
+// 空状态提示
+const emptyHint = computed(() => {
+  if (!selectedEmbeddingId.value) {
+    return '请在左侧选择向量化任务并开始索引';
+  }
+  if (checkingMatch.value) {
+    return '正在检查当前配置下是否存在向量索引...';
+  }
+  return '当前配置下不存在向量索引，请点击"开始索引"创建';
+});
+
+// 检查是否存在匹配的索引
+const checkMatchingIndex = async () => {
+  if (!selectedEmbeddingId.value) {
+    matchingIndex.value = null;
+    vectorIndexStore.setCurrentIndex(null);
+    return;
+  }
+  
+  checkingMatch.value = true;
+  try {
+    const result = await findMatchingIndex({
+      embedding_result_id: selectedEmbeddingId.value,
+      provider: indexConfig.provider,
+      algorithm_type: indexConfig.algorithm,
+      metric_type: indexConfig.metric_type
+    });
+    
+    if (result.found && result.index) {
+      matchingIndex.value = result.index;
+      // 自动展示已存在的索引
+      vectorIndexStore.setCurrentIndex(result.index);
+      activeTab.value = 'result';
+    } else {
+      matchingIndex.value = null;
+      // 无匹配索引时清除右侧展示，显示无数据状态
+      vectorIndexStore.setCurrentIndex(null);
+    }
+  } catch (err) {
+    console.error('检查匹配索引失败:', err);
+    matchingIndex.value = null;
+    vectorIndexStore.setCurrentIndex(null);
+  } finally {
+    checkingMatch.value = false;
+  }
+};
+
+// 监听配置变化，自动检查匹配索引
+watch(
+  () => [selectedEmbeddingId.value, indexConfig.provider, indexConfig.algorithm, indexConfig.metric_type],
+  () => {
+    checkMatchingIndex();
+  },
+  { immediate: false }
+);
+
+// 方法
+const loadEmbeddingTasks = async () => {
+  loadingEmbeddings.value = true;
+  try {
+    const result = await vectorIndexStore.fetchEmbeddingTasks();
+    // API 返回 { tasks: [], total: N, ... }，只显示已完成的任务
+    const tasks = result?.tasks || result || [];
+    embeddingTasks.value = tasks.filter(t => t.status === 'SUCCESS' || t.status === 'PARTIAL_SUCCESS');
+  } catch (err) {
+    console.error('加载向量化任务失败:', err);
+    embeddingTasks.value = [];
+  } finally {
+    loadingEmbeddings.value = false;
+  }
+};
+
 const loadIndexes = async () => {
+  loadingIndexes.value = true;
   try {
     await vectorIndexStore.fetchIndexes();
-  } catch (error) {
+  } catch (err) {
     MessagePlugin.error('加载索引列表失败');
+  } finally {
+    loadingIndexes.value = false;
   }
 };
 
-// 选择索引
-const handleSelectIndex = async (index) => {
+const handleEmbeddingSelect = async (taskId) => {
+  const task = embeddingTasks.value.find(t => t.result_id === taskId);
+  selectedEmbedding.value = task || null;
+  // checkMatchingIndex 会通过 watch 自动触发
+};
+
+const handleStartIndexing = async () => {
+  if (!canStartIndexing.value) return;
+  
+  // 如果存在匹配的索引，先确认是否覆盖
+  if (matchingIndex.value) {
+    const dialog = DialogPlugin.confirm({
+      header: '覆盖确认',
+      body: `已存在相同配置的索引「${matchingIndex.value.index_name}」，是否删除并重新创建？`,
+      confirmBtn: { theme: 'warning', content: '覆盖' },
+      cancelBtn: '取消',
+      onConfirm: async () => {
+        dialog.destroy();
+        // 先删除旧索引
+        try {
+          await vectorIndexStore.removeIndex(matchingIndex.value.id);
+          matchingIndex.value = null;
+          // 然后创建新索引
+          await doCreateIndex();
+        } catch (err) {
+          error.value = '删除旧索引失败: ' + (err.message || '未知错误');
+          MessagePlugin.error(error.value);
+        }
+      }
+    });
+    return;
+  }
+  
+  await doCreateIndex();
+};
+
+const doCreateIndex = async () => {
+  isCreating.value = true;
+  error.value = null;
+  
   try {
-    vectorIndexStore.setCurrentIndex(index);
-    await vectorIndexStore.fetchStatistics(index.id);
-  } catch (error) {
-    MessagePlugin.error('加载索引统计失败');
+    const result = await vectorIndexStore.createIndexFromEmbedding({
+      embedding_result_id: selectedEmbeddingId.value,
+      name: indexConfig.name || undefined,
+      provider: indexConfig.provider,
+      index_type: indexConfig.algorithm,
+      metric_type: indexConfig.metric_type,
+      index_params: {}
+    });
+    
+    MessagePlugin.success('索引创建任务已提交，正在构建中...');
+    activeTab.value = 'result';
+    
+    // 设置当前索引
+    if (result) {
+      vectorIndexStore.setCurrentIndex(result);
+    }
+    
+    // 刷新列表并开始轮询
+    await loadIndexes();
+    startPolling();
+  } catch (err) {
+    error.value = err.message || '创建索引失败';
+    MessagePlugin.error(error.value);
+  } finally {
+    isCreating.value = false;
   }
 };
 
-// 创建索引
-const handleCreateIndex = async (indexData) => {
-  try {
-    await vectorIndexStore.createNewIndex(indexData);
-    MessagePlugin.success('索引创建成功');
-    showCreateDialog.value = false;
-  } catch (error) {
-    MessagePlugin.error(vectorIndexStore.error || '创建索引失败');
+const handleViewDetail = (row) => {
+  vectorIndexStore.setCurrentIndex(row);
+  activeTab.value = 'result';
+};
+
+const handleDeleteIndex = (indexId) => {
+  const dialog = DialogPlugin.confirm({
+    header: '确认删除',
+    body: '确定要删除这个索引吗？此操作不可恢复。',
+    confirmBtn: { theme: 'danger', content: '删除' },
+    onConfirm: async () => {
+      try {
+        await vectorIndexStore.removeIndex(indexId);
+        MessagePlugin.success('索引删除成功');
+        dialog.destroy();
+        
+        // 如果删除的是当前索引，清空
+        if (currentIndex.value?.id === indexId) {
+          vectorIndexStore.setCurrentIndex(null);
+        }
+      } catch (err) {
+        MessagePlugin.error('删除失败: ' + (err.message || '未知错误'));
+      }
+    }
+  });
+};
+
+// 轮询检查构建状态
+const startPolling = () => {
+  if (refreshInterval) return;
+  
+  refreshInterval = setInterval(async () => {
+    await loadIndexes();
+    
+    const buildingIndexes = indexes.value.filter(idx => idx.status === 'BUILDING');
+    if (buildingIndexes.length === 0) {
+      stopPolling();
+      
+      // 更新当前索引状态
+      if (currentIndex.value) {
+        const updated = indexes.value.find(idx => idx.id === currentIndex.value.id);
+        if (updated) {
+          vectorIndexStore.setCurrentIndex(updated);
+        }
+      }
+    }
+  }, 3000);
+};
+
+const stopPolling = () => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+    refreshInterval = null;
   }
 };
 
-// 删除索引
-const handleDeleteIndex = async (indexId) => {
-  try {
-    await vectorIndexStore.removeIndex(indexId);
-    MessagePlugin.success('索引删除成功');
-  } catch (error) {
-    MessagePlugin.error('删除索引失败');
-  }
+// 工具函数
+const getStatusTheme = (status) => {
+  const map = { BUILDING: 'warning', READY: 'success', UPDATING: 'primary', ERROR: 'danger' };
+  return map[status] || 'default';
 };
 
-// 执行搜索
-const handleSearch = async (searchData) => {
-  try {
-    await vectorIndexStore.performSearch(currentIndex.value.id, searchData);
-    MessagePlugin.success(`找到 ${vectorIndexStore.searchResults.results_count} 个结果`);
-  } catch (error) {
-    MessagePlugin.error('搜索失败');
-  }
+const getStatusText = (status) => {
+  const map = { BUILDING: '构建中', READY: '就绪', UPDATING: '更新中', ERROR: '错误' };
+  return map[status] || status;
+};
+
+const formatDate = (dateString) => {
+  if (!dateString) return '-';
+  return new Date(dateString).toLocaleString('zh-CN', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  });
+};
+
+const formatNumber = (num) => {
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+  return num.toString();
 };
 
 onMounted(() => {
+  loadEmbeddingTasks();
   loadIndexes();
+});
+
+onUnmounted(() => {
+  stopPolling();
 });
 </script>
 
 <style scoped>
 .vector-index-page {
+  height: 100vh;
+  background-color: var(--td-bg-color-page);
+}
+
+.control-panel {
+  background-color: var(--td-bg-color-container);
+  border-right: 1px solid var(--td-component-border);
+  overflow-y: auto;
+  height: 100vh;
+  flex-shrink: 0;
+  min-width: 380px;
+  max-width: 380px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  background-color: #f9fafb;
+}
+
+.panel-icon {
+  color: #3b82f6;
+  margin-right: 0.75rem;
+}
+
+.panel-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.panel-content {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.optional-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9ca3af;
+}
+
+.refresh-btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.embedding-option {
+  padding: 4px 0;
+}
+
+.embedding-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.embedding-name {
+  font-weight: 500;
+}
+
+.embedding-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.embedding-details {
+  padding: 12px;
+  background: var(--td-bg-color-page);
+  border-radius: 6px;
+  border: 1px solid var(--td-component-border);
+}
+
+/* 下拉选项统一样式 */
+.select-option-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.select-option-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--td-text-color-primary);
+}
+
+.select-option-desc {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  line-height: 1.4;
+}
+
+.validation-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background-color: #fef3c7;
+  border: 1px solid #fde047;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.matching-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background-color: #dbeafe;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #1e40af;
+}
+
+.main-content {
+  padding: 0;
+  overflow-y: auto;
+  height: 100vh;
+}
+
+.full-height-tabs {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.full-height-tabs :deep(.t-tabs__nav-container) {
+  padding: 16px 24px 0;
+  background-color: var(--td-bg-color-container);
+}
+
+.full-height-tabs :deep(.t-tabs__content) {
+  flex: 1;
+  overflow: hidden;
+}
+
+.tab-panel-content {
+  height: 100%;
+  overflow-y: auto;
   padding: 24px;
 }
 
-.page-header {
-  margin-bottom: 24px;
+.result-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
-.header-content {
+.index-detail-card,
+.search-results-card,
+.history-card {
+  background: var(--td-bg-color-container);
+}
+
+.card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.title-section h1 {
-  margin: 0;
-  font-size: 24px;
+.card-title {
+  font-size: 16px;
   font-weight: 600;
 }
 
-.subtitle {
-  margin: 4px 0 0;
-  color: var(--td-text-color-secondary);
-  font-size: 14px;
-}
-
-.stats-row {
-  margin-top: 16px;
-}
-
-.stat-card {
-  text-align: center;
-}
-
-.stat-content {
-  padding: 8px 0;
-}
-
-.stat-value {
-  font-size: 32px;
+.highlight-value {
   font-weight: 600;
   color: var(--td-brand-color);
-  line-height: 1.2;
 }
 
-.stat-label {
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--td-component-border);
+}
+
+.search-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.search-result-item {
+  padding: 12px;
+  background: var(--td-bg-color-page);
+  border-radius: 6px;
+  border: 1px solid var(--td-component-border);
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.result-rank {
+  font-weight: 600;
+  color: var(--td-brand-color);
+}
+
+.result-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--td-text-color-primary);
+}
+
+.result-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.empty-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 400px;
+}
+
+.empty-icon {
+  color: var(--td-text-color-placeholder);
+}
+
+.empty-hint {
   margin-top: 8px;
   color: var(--td-text-color-secondary);
   font-size: 14px;
 }
 
-.main-content {
-  margin-top: 24px;
+.index-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.empty-state {
-  height: 400px;
+.index-name-cell .name {
+  font-weight: 500;
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+</style>
+
+<!-- 全局样式，用于弹出层 -->
+<style>
+.vector-index-select-popup .t-select-option {
+  padding: 10px 12px !important;
+  height: auto !important;
+  min-height: auto !important;
+}
+
+.vector-index-select-popup .t-select-option__content {
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.vector-index-select-popup .select-option-item {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vector-index-select-popup .select-option-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--td-text-color-primary);
+}
+
+.vector-index-select-popup .select-option-desc {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  line-height: 1.4;
 }
 </style>
