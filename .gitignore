@@ -76,6 +76,9 @@ uploads/
 results/
 backend/results/
 
+# Docker volumes (runtime data)
+docker/milvus/volumes/
+
 # Temporary files
 *.tmp
 *.temp
