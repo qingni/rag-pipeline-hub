@@ -216,9 +216,10 @@ class VectorIndexService:
             if not name:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 doc_name = self._get_document_name(embedding_result.document_id) or "unknown"
-                # 清理文档名称
+                # 清理文档名称，移除非ASCII字符（Milvus要求collection名称以字母或下划线开头）
                 doc_name = doc_name.replace(".", "_").replace(" ", "_")[:20]
-                name = f"{doc_name}_{timestamp}"
+                # 确保名称以字母开头（Milvus要求）
+                name = f"idx_{doc_name}_{timestamp}"
             
             # 3. 检查索引名称是否已存在
             existing = self.db.query(VectorIndex).filter(
@@ -273,6 +274,12 @@ class VectorIndexService:
                 provider_name = provider.value.lower()
                 vector_provider = self.registry.get_provider(provider_name)
                 
+                if vector_provider is None:
+                    raise ProviderNotFoundError(
+                        f"Provider '{provider_name}' is not available. "
+                        f"Please check if the required dependencies are installed and the service is running."
+                    )
+                
                 # 9. 创建索引配置（传入向量数量用于动态调整参数）
                 config = IndexConfig(
                     index_name=name,
@@ -304,7 +311,7 @@ class VectorIndexService:
                 self.db.commit()
                 self.db.refresh(vector_index)
                 
-                # 13. 自动持久化 FAISS 索引到磁盘
+                # 13. 自动持久化索引信息到磁盘
                 if vector_index.index_type == IndexProvider.FAISS and len(vectors) > 0:
                     try:
                         file_path = vector_provider.save_index(provider_index_id)
@@ -313,6 +320,16 @@ class VectorIndexService:
                         logger.info(f"Auto-persisted FAISS index to {file_path}")
                     except Exception as persist_error:
                         logger.warning(f"Failed to auto-persist index: {persist_error}")
+                
+                # Milvus 索引元数据文件路径
+                if vector_index.index_type == IndexProvider.MILVUS:
+                    try:
+                        file_path = vector_provider.get_metadata_file_path(provider_index_id)
+                        vector_index.file_path = file_path
+                        self.db.commit()
+                        logger.info(f"Milvus index metadata saved to {file_path}")
+                    except Exception as persist_error:
+                        logger.warning(f"Failed to get Milvus metadata path: {persist_error}")
             
             # 14. 创建初始统计记录
             self._create_initial_statistics(vector_index.id)

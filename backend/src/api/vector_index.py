@@ -24,7 +24,8 @@ from ..exceptions.vector_index_errors import (
     IndexNotFoundError,
     IndexBuildError,
     SearchError,
-    VectorDimensionError
+    VectorDimensionError,
+    ProviderNotFoundError
 )
 
 logger = get_logger("vector_index_api")
@@ -286,6 +287,11 @@ async def create_index_from_embedding(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
+    except ProviderNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except (IndexBuildError, VectorDimensionError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -421,6 +427,11 @@ async def add_vectors(
     except IndexNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ProviderNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except (IndexBuildError, VectorDimensionError) as e:
@@ -872,6 +883,11 @@ async def update_vector(
     except IndexNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ProviderNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except (IndexBuildError, VectorDimensionError) as e:
