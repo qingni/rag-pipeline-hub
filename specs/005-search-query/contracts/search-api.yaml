@@ -1,0 +1,369 @@
+openapi: 3.0.3
+info:
+  title: Search Query API
+  description: RAG系统搜索查询功能API
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Development server
+
+paths:
+  /search:
+    post:
+      summary: 执行语义搜索
+      description: 将查询文本转换为向量并在指定索引中检索相似文档
+      operationId: executeSearch
+      tags:
+        - Search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: 搜索成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 索引不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Embedding服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /search/indexes:
+    get:
+      summary: 获取可用索引列表
+      description: 返回所有可用于搜索的向量索引
+      operationId: getAvailableIndexes
+      tags:
+        - Search
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexListResponse'
+
+  /search/history:
+    get:
+      summary: 获取搜索历史
+      description: 返回用户的搜索历史记录
+      operationId: getSearchHistory
+      tags:
+        - History
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+          description: 返回记录数量
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: 分页偏移量
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryListResponse'
+
+    delete:
+      summary: 清空搜索历史
+      description: 删除所有搜索历史记录
+      operationId: clearSearchHistory
+      tags:
+        - History
+      responses:
+        '200':
+          description: 清空成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /search/history/{history_id}:
+    delete:
+      summary: 删除单条历史记录
+      description: 根据ID删除指定的搜索历史记录
+      operationId: deleteSearchHistory
+      tags:
+        - History
+      parameters:
+        - name: history_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 历史记录ID
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    SearchRequest:
+      type: object
+      required:
+        - query_text
+      properties:
+        query_text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 查询文本
+          example: "什么是向量数据库？"
+        index_ids:
+          type: array
+          items:
+            type: string
+          description: 目标索引ID列表，为空则搜索默认索引
+          example: ["idx_001", "idx_002"]
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+          description: 返回结果数量
+        threshold:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          default: 0.5
+          description: 相似度阈值
+        metric_type:
+          type: string
+          enum: [cosine, euclidean, dot_product]
+          default: cosine
+          description: 相似度计算方法
+
+    SearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            query_id:
+              type: string
+              format: uuid
+              description: 查询ID
+            query_text:
+              type: string
+              description: 原始查询文本
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/SearchResultItem'
+            total_count:
+              type: integer
+              description: 结果总数
+            execution_time_ms:
+              type: integer
+              description: 执行耗时（毫秒）
+
+    SearchResultItem:
+      type: object
+      properties:
+        id:
+          type: string
+          description: 结果ID
+        chunk_id:
+          type: string
+          description: 文档片段ID
+        text_content:
+          type: string
+          description: 文档片段内容
+        text_summary:
+          type: string
+          maxLength: 200
+          description: 文本摘要（最多200字符）
+        similarity_score:
+          type: number
+          format: float
+          description: 相似度分数 (0-1)
+        similarity_percent:
+          type: string
+          description: 相似度百分比显示
+          example: "95.2%"
+        source_index:
+          type: string
+          description: 来源索引名称
+        source_document:
+          type: string
+          description: 来源文档名称
+        chunk_position:
+          type: integer
+          description: 片段在文档中的位置
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 额外元数据
+        rank:
+          type: integer
+          description: 结果排名
+
+    IndexListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndexInfo'
+
+    IndexInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          description: 索引ID
+        name:
+          type: string
+          description: 索引名称
+        provider:
+          type: string
+          enum: [MILVUS, FAISS]
+          description: 向量数据库类型
+        vector_count:
+          type: integer
+          description: 向量数量
+        dimension:
+          type: integer
+          description: 向量维度
+        created_at:
+          type: string
+          format: date-time
+          description: 创建时间
+
+    HistoryListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/HistoryItem'
+            total:
+              type: integer
+              description: 总记录数
+            limit:
+              type: integer
+            offset:
+              type: integer
+
+    HistoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 历史记录ID
+        query_text:
+          type: string
+          description: 查询文本
+        index_ids:
+          type: array
+          items:
+            type: string
+          description: 搜索的索引列表
+        config:
+          type: object
+          properties:
+            top_k:
+              type: integer
+            threshold:
+              type: number
+            metric_type:
+              type: string
+        result_count:
+          type: integer
+          description: 结果数量
+        execution_time_ms:
+          type: integer
+          description: 执行耗时
+        created_at:
+          type: string
+          format: date-time
+          description: 搜索时间
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "操作成功"
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: 错误代码
+              example: "EMPTY_QUERY"
+            message:
+              type: string
+              description: 错误信息
+              example: "查询文本不能为空"
+            details:
+              type: object
+              additionalProperties: true
+              description: 错误详情
+
+tags:
+  - name: Search
+    description: 搜索查询相关接口
+  - name: History
+    description: 搜索历史相关接口
