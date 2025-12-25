@@ -45,7 +45,7 @@
 - [X] T004 扩展 VectorIndex SQLAlchemy 模型，添加 embedding_result_id 等新字段 `backend/src/models/vector_index.py`
 - [X] T005 [P] 创建 Milvus Provider 实现 `backend/src/services/providers/milvus_provider.py`
 - [X] T006 [P] 完善 FAISS Provider 实现，确保符合 BaseProvider 接口 `backend/src/services/providers/faiss_provider.py`
-- [ ] T007 扩展 IndexRegistry 支持多 Provider 注册和获取 `backend/src/services/index_registry.py`
+- [X] T007 扩展 IndexRegistry 支持多 Provider 注册和获取 `backend/src/services/index_registry.py`
 - [X] T008 添加向量化任务查询 API 端点 `backend/src/api/vector_index.py` (GET /embedding-tasks)
 - [X] T009 [P] 扩展前端 API 服务，添加新端点支持 `frontend/src/services/vectorIndexApi.js`
 - [X] T010 [P] 扩展 Pinia Store，添加向量化任务和配置状态 `frontend/src/stores/vectorIndexStore.js`

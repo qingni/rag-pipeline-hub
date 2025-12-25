@@ -47,8 +47,8 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
     selectedTask: null,
     
     // 配置选项
-    selectedDatabase: 'FAISS',  // FAISS | MILVUS
-    selectedAlgorithm: 'FLAT',  // FLAT | IVF_FLAT | IVF_PQ | HNSW
+    selectedDatabase: 'MILVUS',  // MILVUS | FAISS (默认使用 Milvus)
+    selectedAlgorithm: 'FLAT',  // FLAT | HNSW | IVF_FLAT | IVF_PQ
     algorithmParams: {},
     metricType: 'cosine',
     namespace: 'default',
@@ -307,8 +307,8 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
     resetConfig() {
       this.selectedTaskId = null;
       this.selectedTask = null;
-      this.selectedDatabase = 'FAISS';
-      this.selectedAlgorithm = 'FLAT';
+      this.selectedDatabase = 'MILVUS';  // 默认使用 Milvus
+      this.selectedAlgorithm = 'FLAT';   // 默认使用 FLAT
       this.algorithmParams = {};
       this.metricType = 'cosine';
       this.namespace = 'default';

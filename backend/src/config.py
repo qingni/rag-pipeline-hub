@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     
     # Vector Index
     VECTOR_INDEX_RESULTS_DIR: str = "results/vector_index"
+    VECTOR_INDEX_DEFAULT_PROVIDER: str = "milvus"  # milvus 或 faiss
     
     # Pinecone
     PINECONE_API_KEY: Optional[str] = None

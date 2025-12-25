@@ -5,6 +5,7 @@ This module provides a registry for managing multiple vector indexes.
 """
 
 import logging
+import os
 from typing import Dict, Optional, List, Any
 from threading import RLock
 
@@ -12,6 +13,9 @@ from ..models.vector_index import VectorIndex, IndexProvider
 from .providers.base_provider import BaseProvider
 
 logger = logging.getLogger(__name__)
+
+# 默认向量数据库提供者（可通过环境变量配置）
+DEFAULT_VECTOR_PROVIDER = os.getenv("VECTOR_INDEX_DEFAULT_PROVIDER", "milvus").lower()
 
 
 class IndexRegistry:
@@ -30,6 +34,22 @@ class IndexRegistry:
         self._indexes: Dict[str, VectorIndex] = {}
         self._providers: Dict[str, BaseProvider] = {}
         self._instance_lock = RLock()
+        self._default_provider: str = DEFAULT_VECTOR_PROVIDER
+    
+    @property
+    def default_provider(self) -> str:
+        """获取默认 Provider 名称"""
+        return self._default_provider
+    
+    @default_provider.setter
+    def default_provider(self, provider_name: str):
+        """设置默认 Provider"""
+        provider_name = provider_name.lower()
+        if provider_name in self._providers:
+            self._default_provider = provider_name
+            logger.info(f"Default provider set to: {provider_name}")
+        else:
+            logger.warning(f"Provider '{provider_name}' not registered, default unchanged")
     
     def register_provider(self, provider_name: str, provider: BaseProvider):
         """
@@ -40,7 +60,7 @@ class IndexRegistry:
             provider: Provider instance
         """
         with self._instance_lock:
-            self._providers[provider_name] = provider
+            self._providers[provider_name.lower()] = provider
             logger.info(f"Registered provider: {provider_name}")
     
     @classmethod
@@ -116,16 +136,36 @@ class IndexRegistry:
         Returns:
             BaseProvider or None if not found
         """
+        name_lower = name.lower() if name else ""
+        
         # First try to get by provider name directly
-        if name in self._providers:
-            return self._providers[name]
+        if name_lower in self._providers:
+            return self._providers[name_lower]
         
         # Then try by index name (for backward compatibility)
         for idx_name, provider in self._providers.items():
-            if idx_name == name:
+            if idx_name == name_lower:
                 return provider
         
         return None
+    
+    def get_default_provider(self) -> Optional[BaseProvider]:
+        """
+        获取默认 Provider 实例
+        
+        Returns:
+            默认的 BaseProvider 实例，如果不存在返回 None
+        """
+        return self._providers.get(self._default_provider)
+    
+    def get_available_providers(self) -> List[str]:
+        """
+        获取所有已注册的 Provider 名称列表
+        
+        Returns:
+            Provider 名称列表
+        """
+        return list(self._providers.keys())
     
     def list_indexes(
         self,

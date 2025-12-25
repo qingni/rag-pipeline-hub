@@ -8,6 +8,10 @@ from typing import Optional
 import os
 
 
+# 默认向量数据库提供者（milvus 或 faiss）
+DEFAULT_VECTOR_PROVIDER = os.getenv("VECTOR_INDEX_DEFAULT_PROVIDER", "milvus").lower()
+
+
 @dataclass
 class MilvusConfig:
     """Milvus 配置类"""

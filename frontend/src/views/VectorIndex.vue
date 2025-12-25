@@ -77,16 +77,16 @@
               placeholder="请选择向量数据库"
               :popup-props="{ overlayClassName: 'vector-index-select-popup' }"
             >
+              <t-option value="MILVUS" label="Milvus - 分布式数据库（推荐）">
+                <div class="select-option-item">
+                  <div class="select-option-name">Milvus（推荐）</div>
+                  <div class="select-option-desc">分布式向量数据库，适合生产环境和大规模数据</div>
+                </div>
+              </t-option>
               <t-option value="FAISS" label="FAISS - 本地内存索引">
                 <div class="select-option-item">
                   <div class="select-option-name">FAISS</div>
-                  <div class="select-option-desc">本地内存索引，适合中小规模数据</div>
-                </div>
-              </t-option>
-              <t-option value="MILVUS" label="Milvus - 分布式数据库">
-                <div class="select-option-item">
-                  <div class="select-option-name">Milvus</div>
-                  <div class="select-option-desc">分布式向量数据库，适合大规模生产环境</div>
+                  <div class="select-option-desc">本地内存索引，适合开发测试和中小规模数据</div>
                 </div>
               </t-option>
             </t-select>
@@ -103,10 +103,16 @@
               placeholder="请选择索引算法"
               :popup-props="{ overlayClassName: 'vector-index-select-popup' }"
             >
-              <t-option value="FLAT" label="FLAT - 暴力搜索">
+              <t-option value="FLAT" label="FLAT - 暴力搜索（默认）">
                 <div class="select-option-item">
-                  <div class="select-option-name">FLAT</div>
-                  <div class="select-option-desc">暴力搜索，精确匹配</div>
+                  <div class="select-option-name">FLAT（默认）</div>
+                  <div class="select-option-desc">暴力搜索，精确匹配，100%召回率</div>
+                </div>
+              </t-option>
+              <t-option value="HNSW" label="HNSW - 图索引">
+                <div class="select-option-item">
+                  <div class="select-option-name">HNSW</div>
+                  <div class="select-option-desc">图索引，高性能低延迟，适合大规模数据</div>
                 </div>
               </t-option>
               <t-option value="IVF_FLAT" label="IVF_FLAT - 倒排索引">
@@ -118,13 +124,7 @@
               <t-option value="IVF_PQ" label="IVF_PQ - 乘积量化">
                 <div class="select-option-item">
                   <div class="select-option-name">IVF_PQ</div>
-                  <div class="select-option-desc">乘积量化，节省内存</div>
-                </div>
-              </t-option>
-              <t-option value="HNSW" label="HNSW - 图索引">
-                <div class="select-option-item">
-                  <div class="select-option-name">HNSW</div>
-                  <div class="select-option-desc">图索引，高性能</div>
+                  <div class="select-option-desc">乘积量化，节省内存，适合超大规模数据</div>
                 </div>
               </t-option>
             </t-select>
@@ -401,8 +401,8 @@ let refreshInterval = null;
 
 // 索引配置
 const indexConfig = reactive({
-  provider: 'FAISS',
-  algorithm: 'FLAT',
+  provider: 'MILVUS',  // 默认使用 Milvus
+  algorithm: 'FLAT',   // 默认使用 FLAT
   metric_type: 'cosine',
   name: ''
 });

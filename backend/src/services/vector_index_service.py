@@ -177,8 +177,8 @@ class VectorIndexService:
         self,
         embedding_result_id: str,
         name: Optional[str] = None,
-        provider: IndexProvider = IndexProvider.FAISS,
-        index_type: str = "FLAT",
+        provider: IndexProvider = IndexProvider.MILVUS,  # 默认使用 Milvus
+        index_type: str = "FLAT",  # 默认使用 FLAT
         metric_type: str = "cosine",
         index_params: Optional[Dict[str, Any]] = None,
         namespace: str = "default"
