@@ -303,6 +303,9 @@ class FAISSProvider(BaseProvider):
             # 执行搜索
             distances, indices = faiss_index.search(query_array, top_k)
             
+            # 获取度量类型
+            metric_type = index_info["metric_type"].lower()
+            
             # 转换结果
             results = []
             for i, (dist, idx) in enumerate(zip(distances[0], indices[0])):
@@ -314,9 +317,27 @@ class FAISSProvider(BaseProvider):
                     vector_id = index_info["vector_ids"][idx]
                     metadata = index_info["metadata"].get(vector_id, {})
                     
+                    # 将 FAISS 返回的距离转换为相似度分数 (0-1，越大越相似)
+                    raw_dist = float(dist)
+                    if metric_type == "cosine":
+                        # 对于余弦相似度，FAISS 使用 Inner Product
+                        # 归一化向量的 IP 值在 [-1, 1] 之间
+                        # 转换为 [0, 1] 范围的相似度
+                        similarity_score = (raw_dist + 1) / 2
+                    elif metric_type == "euclidean":
+                        # L2 距离: 值越小越相似，转换为相似度
+                        # 使用公式: similarity = 1 / (1 + distance)
+                        similarity_score = 1 / (1 + raw_dist)
+                    elif metric_type == "dot_product":
+                        # 点积: 对于归一化向量，值在 [-1, 1] 之间
+                        similarity_score = (raw_dist + 1) / 2
+                    else:
+                        # 默认假设是相似度
+                        similarity_score = raw_dist
+                    
                     results.append(SearchResult(
                         vector_id=vector_id,
-                        score=float(dist),
+                        score=similarity_score,
                         metadata=metadata
                     ))
             
@@ -325,7 +346,7 @@ class FAISSProvider(BaseProvider):
             
         except Exception as e:
             logger.error(f"FAISS search failed: {str(e)}")
-            raise SearchError(f"Search failed: {str(e)}")
+            raise SearchError(index_id, str(e))
 
     def delete_index(self, index_id: str) -> None:
         """

@@ -294,8 +294,9 @@ class MilvusProvider(BaseProvider):
             query_vec = normalize_vector(query_vector).tolist()
             
             # 准备搜索参数
+            metric_type = collection.index().params.get("metric_type", "L2")
             search_params = {
-                "metric_type": collection.index().params.get("metric_type", "L2"),
+                "metric_type": metric_type,
                 "params": {"nprobe": 10}
             }
             
@@ -312,10 +313,32 @@ class MilvusProvider(BaseProvider):
             search_results = []
             for hits in results:
                 for hit in hits:
+                    # pymilvus Hit.entity.get() 只接受字段名，不接受默认值
+                    try:
+                        metadata = hit.entity.get("metadata")
+                        if metadata is None:
+                            metadata = {}
+                    except Exception:
+                        metadata = {}
+                    
+                    # 将 Milvus 返回的分数转换为相似度分数 (0-1，越大越相似)
+                    raw_score = float(hit.score)
+                    if metric_type == "IP":
+                        # Inner Product: 对于归一化向量，值在 [-1, 1] 之间
+                        # 转换为 [0, 1] 范围的相似度
+                        similarity_score = (raw_score + 1) / 2
+                    elif metric_type == "L2":
+                        # L2 距离: 值越小越相似，转换为相似度
+                        # 使用公式: similarity = 1 / (1 + distance)
+                        similarity_score = 1 / (1 + raw_score)
+                    else:
+                        # 其他度量类型，假设已经是相似度
+                        similarity_score = raw_score
+                    
                     search_results.append(SearchResult(
                         vector_id=hit.id,
-                        score=float(hit.score),
-                        metadata=hit.entity.get("metadata", {})
+                        score=similarity_score,
+                        metadata=metadata
                     ))
             
             logger.info(f"Search completed: found {len(search_results)} results")
@@ -323,7 +346,7 @@ class MilvusProvider(BaseProvider):
             
         except Exception as e:
             logger.error(f"Milvus search failed: {str(e)}")
-            raise SearchError(f"Search failed: {str(e)}")
+            raise SearchError(index_id, str(e))
 
     def delete_index(self, index_id: str) -> None:
         """
@@ -396,7 +419,7 @@ class MilvusProvider(BaseProvider):
         获取 Collection 对象
         
         Args:
-            index_id: 索引 ID
+            index_id: 索引 ID (UUID 格式)
             
         Returns:
             Collection 对象
@@ -405,7 +428,34 @@ class MilvusProvider(BaseProvider):
             return self._collections[index_id]
         
         # 尝试从 Milvus 重新加载
-        # 注意：实际应用中需要持久化 index_id 到 collection_name 的映射
+        self._ensure_connected()
+        
+        # 尝试直接使用 index_id 作为 collection 名称加载
+        try:
+            if utility.has_collection(index_id):
+                collection = Collection(index_id)
+                self._collections[index_id] = collection
+                logger.info(f"Loaded existing collection: {index_id}")
+                return collection
+        except Exception as e:
+            logger.warning(f"Failed to load collection by index_id: {str(e)}")
+        
+        # 提取 UUID 前缀用于匹配（UUID 前 8 位）
+        uuid_prefix = index_id.split('-')[0] if '-' in index_id else index_id[:8]
+        
+        # 尝试查找匹配的 collection（遍历所有 collection）
+        try:
+            collections = utility.list_collections()
+            for coll_name in collections:
+                # 检查 collection 名称是否以 UUID 前缀结尾
+                if coll_name.endswith(f"_{uuid_prefix}"):
+                    collection = Collection(coll_name)
+                    self._collections[index_id] = collection
+                    logger.info(f"Found and loaded collection: {coll_name} for index_id: {index_id}")
+                    return collection
+        except Exception as e:
+            logger.warning(f"Failed to search collections: {str(e)}")
+        
         raise IndexNotFoundError(f"Index {index_id} not found in Milvus provider")
 
     def _get_collection_dimension(self, collection: Collection) -> int:

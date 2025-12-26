@@ -1,3 +1,11 @@
+---
+description: 
+alwaysApply: false
+enabled: true
+updatedAt: 2025-12-25T08:24:39.867Z
+provider: 
+---
+
 # 端口释放命令规则
 
 ## 常用端口释放命令

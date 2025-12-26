@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
     from .models import document, processing_result, chunk, chunking_result
     from .models import chunking_strategy, chunking_task, embedding_models
     from .models import vector_index, index_statistics, query_history
+    from .models import search
     
     # Initialize database tables
     init_db()
@@ -105,6 +106,7 @@ from .api import documents, loading, parsing, processing, chunking
 from .api import chunking_preview, chunking_history
 from .api import embedding_routes, embedding_query_routes
 from .api import vector_index
+from .api import search
 
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
 app.include_router(loading.router, prefix="/api/v1/processing", tags=["Processing - Load"])
@@ -116,8 +118,9 @@ app.include_router(chunking_history.router, prefix="/api/v1/chunking", tags=["Ch
 app.include_router(embedding_routes.router, prefix="/api/v1", tags=["Embedding"])
 app.include_router(embedding_query_routes.router, prefix="/api/v1", tags=["Embedding - Queries"])
 app.include_router(vector_index.router, prefix="/api", tags=["Vector Index"])
+app.include_router(search.router, prefix="/api/v1", tags=["Search"])
 
-# More routers will be added for search, generation
+# More routers will be added for generation
 
 
 if __name__ == "__main__":

@@ -687,7 +687,7 @@ class VectorIndexService:
                         "results": [],
                         "timestamp": datetime.now().isoformat()
                     }
-                raise SearchError(f"Index {index_id} is not ready for search")
+                raise SearchError(str(index_id), "Index is not ready for search")
             
             # 验证查询向量维度
             if len(query_vector) != vector_index.dimension:
@@ -764,7 +764,7 @@ class VectorIndexService:
             
         except Exception as e:
             logger.error(f"Search failed: {str(e)}")
-            raise SearchError(f"Search failed: {str(e)}")
+            raise SearchError(str(index_id), str(e))
 
     def batch_search(
         self,
@@ -789,7 +789,7 @@ class VectorIndexService:
             vector_index = self._get_index_by_id(index_id)
             
             if vector_index.status != IndexStatus.READY:
-                raise SearchError(f"Index {index_id} is not ready for search")
+                raise SearchError(str(index_id), "Index is not ready for search")
             
             # 验证维度
             if query_vectors.shape[1] != vector_index.dimension:
@@ -843,7 +843,7 @@ class VectorIndexService:
             
         except Exception as e:
             logger.error(f"Batch search failed: {str(e)}")
-            raise SearchError(f"Batch search failed: {str(e)}")
+            raise SearchError(str(index_id), str(e))
 
     def get_index(self, index_id: int) -> VectorIndex:
         """

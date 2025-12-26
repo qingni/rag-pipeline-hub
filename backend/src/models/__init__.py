@@ -22,6 +22,10 @@ from .query_history import (
     QueryHistorySchema,
     QueryHistoryListResponse
 )
+from .search import (
+    SearchHistory,
+    SearchConfig
+)
 
 __all__ = [
     # Vector Index models
@@ -43,4 +47,8 @@ __all__ = [
     "QueryHistory",
     "QueryHistorySchema",
     "QueryHistoryListResponse",
+    
+    # Search models
+    "SearchHistory",
+    "SearchConfig",
 ]
