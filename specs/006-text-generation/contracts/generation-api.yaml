@@ -1,0 +1,461 @@
+openapi: 3.0.3
+info:
+  title: Text Generation API
+  description: RAG 文本生成服务 API
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api
+    description: 开发服务器
+
+tags:
+  - name: generation
+    description: 文本生成相关接口
+  - name: models
+    description: 模型管理相关接口
+  - name: history
+    description: 生成历史相关接口
+
+paths:
+  /generation/generate:
+    post:
+      tags:
+        - generation
+      summary: 生成文本（非流式）
+      description: 基于检索上下文和用户问题生成回答
+      operationId: generateText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerationRequest'
+      responses:
+        '200':
+          description: 生成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationResponse'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 服务器错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /generation/stream:
+    post:
+      tags:
+        - generation
+      summary: 流式生成文本
+      description: 基于检索上下文和用户问题流式生成回答
+      operationId: generateTextStream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerationRequest'
+      responses:
+        '200':
+          description: 流式响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE 事件流
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /generation/cancel/{request_id}:
+    post:
+      tags:
+        - generation
+      summary: 取消生成请求
+      description: 取消正在进行的生成请求
+      operationId: cancelGeneration
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          description: 请求不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /generation/models:
+    get:
+      tags:
+        - models
+      summary: 获取可用模型列表
+      description: 返回所有支持的生成模型及其配置
+      operationId: listModels
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ModelInfo'
+
+  /generation/history:
+    get:
+      tags:
+        - history
+      summary: 获取生成历史列表
+      description: 分页获取生成历史记录
+      operationId: listHistory
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, generating, completed, failed, cancelled]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryListResponse'
+
+  /generation/history/{id}:
+    get:
+      tags:
+        - history
+      summary: 获取生成历史详情
+      description: 获取单条生成历史的完整信息
+      operationId: getHistoryDetail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationHistoryDetail'
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - history
+      summary: 删除生成历史
+      description: 软删除单条生成历史记录
+      operationId: deleteHistory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          description: 记录不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /generation/history/clear:
+    delete:
+      tags:
+        - history
+      summary: 清空生成历史
+      description: 清空所有生成历史记录
+      operationId: clearHistory
+      responses:
+        '200':
+          description: 清空成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+components:
+  schemas:
+    GenerationRequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: 用户问题
+        model:
+          type: string
+          default: deepseek-v3
+          enum: [deepseek-v3, deepseek-r1, kimi-k2-instruct]
+          description: 生成模型
+        temperature:
+          type: number
+          default: 0.7
+          minimum: 0.0
+          maximum: 2.0
+          description: 温度参数
+        max_tokens:
+          type: integer
+          default: 4096
+          minimum: 1
+          maximum: 8192
+          description: 最大输出长度
+        context:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextItem'
+          description: 检索上下文
+        stream:
+          type: boolean
+          default: true
+          description: 是否流式输出
+
+    ContextItem:
+      type: object
+      required:
+        - content
+        - source_file
+        - similarity
+      properties:
+        content:
+          type: string
+          description: 文档内容
+        source_file:
+          type: string
+          description: 来源文件
+        similarity:
+          type: number
+          description: 相似度分数
+        chunk_id:
+          type: string
+          description: Chunk ID
+
+    GenerationResponse:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: 请求ID
+        answer:
+          type: string
+          description: 生成的回答
+        model:
+          type: string
+          description: 使用的模型
+        token_usage:
+          $ref: '#/components/schemas/TokenUsage'
+        processing_time_ms:
+          type: number
+          description: 处理耗时（毫秒）
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceReference'
+
+    TokenUsage:
+      type: object
+      properties:
+        prompt_tokens:
+          type: integer
+          description: Prompt tokens
+        completion_tokens:
+          type: integer
+          description: Completion tokens
+        total_tokens:
+          type: integer
+          description: 总 tokens
+
+    SourceReference:
+      type: object
+      properties:
+        index:
+          type: integer
+          description: 引用编号
+        source_file:
+          type: string
+          description: 来源文件
+        similarity:
+          type: number
+          description: 相似度
+
+    ModelInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 模型名称
+        context_length:
+          type: integer
+          description: 上下文长度
+        description:
+          type: string
+          description: 模型描述
+        default_temperature:
+          type: number
+          description: 默认温度
+        default_max_tokens:
+          type: integer
+          description: 默认最大输出长度
+
+    GenerationHistoryItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: 记录ID
+        request_id:
+          type: string
+          format: uuid
+          description: 请求ID
+        question:
+          type: string
+          description: 问题
+        answer_preview:
+          type: string
+          description: 回答预览
+        model:
+          type: string
+          description: 模型
+        status:
+          type: string
+          enum: [pending, generating, completed, failed, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    GenerationHistoryDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        request_id:
+          type: string
+          format: uuid
+        question:
+          type: string
+        answer:
+          type: string
+        model:
+          type: string
+        temperature:
+          type: number
+        max_tokens:
+          type: integer
+        context_sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContextItem'
+        token_usage:
+          $ref: '#/components/schemas/TokenUsage'
+        processing_time_ms:
+          type: number
+        status:
+          type: string
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    HistoryListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GenerationHistoryItem'
+        total:
+          type: integer
+          description: 总记录数
+        page:
+          type: integer
+          description: 当前页码
+        page_size:
+          type: integer
+          description: 每页大小
+        total_pages:
+          type: integer
+          description: 总页数
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: true
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: false
+        error:
+          type: string
+          description: 错误类型
+        message:
+          type: string
+          description: 错误信息
+        detail:
+          type: string
+          description: 详细信息
