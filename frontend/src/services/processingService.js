@@ -15,17 +15,6 @@ const processingService = {
   },
   
   /**
-   * Parse document with specified options
-   */
-  async parseDocument(documentId, parseOption = 'full_text', includeTables = true) {
-    return apiClient.post('/processing/parse', {
-      document_id: documentId,
-      parse_option: parseOption,
-      include_tables: includeTables
-    })
-  },
-  
-  /**
    * Get processing results for a document
    */
   async getProcessingResults(documentId, processingType = null) {

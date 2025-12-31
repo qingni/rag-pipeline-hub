@@ -42,7 +42,7 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { 
-  Home, FileText, FileCode, Scissors, Hash, 
+  Home, FileText, Scissors, Hash, 
   Database, Search, Sparkles, Info 
 } from 'lucide-vue-next'
 
@@ -54,7 +54,6 @@ const currentPath = computed(() => route.path)
 const navItems = [
   { path: '/', label: '首页', iconComponent: Home },
   { path: '/documents/load', label: '文档加载', iconComponent: FileText },
-  { path: '/documents/parse', label: '文档解析', iconComponent: FileCode },
   { path: '/documents/chunk', label: '文档分块', iconComponent: Scissors },
   { path: '/documents/embed', label: '文档向量化', iconComponent: Hash },
   { path: '/index', label: '向量索引', iconComponent: Database },

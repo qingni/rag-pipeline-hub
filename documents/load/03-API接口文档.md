@@ -267,7 +267,7 @@ curl -X POST \
 
 **参数**:
 - `document_id` (string, required): 文档ID
-- `processing_type` (string, optional): 处理类型(load/parse/chunk等)
+- `processing_type` (string, optional): 处理类型(load/chunk等)
 
 **响应**:
 ```json

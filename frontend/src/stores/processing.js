@@ -36,28 +36,6 @@ export const useProcessingStore = defineStore('processing', () => {
     }
   }
   
-  async function parseDocument(documentId, parseOption = 'full_text', includeTables = true) {
-    loading.value = true
-    status.value = 'processing'
-    error.value = null
-    
-    try {
-      const response = await processingService.parseDocument(documentId, parseOption, includeTables)
-      
-      if (response.success) {
-        currentResult.value = response.data
-        status.value = 'completed'
-        return response.data
-      }
-    } catch (err) {
-      error.value = err.message
-      status.value = 'failed'
-      throw err
-    } finally {
-      loading.value = false
-    }
-  }
-  
   async function fetchResults(documentId, processingType = null) {
     loading.value = true
     error.value = null
@@ -117,7 +95,6 @@ export const useProcessingStore = defineStore('processing', () => {
     
     // Actions
     loadDocument,
-    parseDocument,
     fetchResults,
     fetchResultById,
     clearError,

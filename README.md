@@ -105,11 +105,11 @@ rag-framework-spec/
 
 ### 1. 文档处理 (Document Processing)
 
-支持多种文档格式的上传、加载和解析：
+支持多种文档格式的上传和加载：
 
 - **加载器**: PyMuPDF、PyPDF、Unstructured、python-docx
-- **解析模式**: 全文解析、分页解析、按标题解析、混合解析
-- **输出格式**: 统一的 JSON 结构
+- **支持格式**: PDF、DOCX、DOC、TXT、Markdown
+- **输出格式**: 统一的 JSON 结构（含全文、分页、元数据）
 
 ### 2. 文档分块 (Document Chunking)
 

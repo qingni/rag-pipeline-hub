@@ -29,7 +29,7 @@ class ChunkingService:
     def load_source_document(self, document_id: str, db: Session) -> str:
         """
         Load source document text for chunking.
-        Supports both parsed and loaded documents (load -> chunk workflow).
+        Supports loaded documents (load -> chunk workflow).
         
         Args:
             document_id: Document ID
@@ -46,34 +46,26 @@ class ChunkingService:
         if not document:
             raise ValueError(f"Document {document_id} not found")
         
-        # Try to get parsing result first (preferred)
-        parsing_result = db.query(ProcessingResult).filter(
+        # Get loading result
+        loading_result = db.query(ProcessingResult).filter(
             ProcessingResult.document_id == document_id,
-            ProcessingResult.processing_type == "parse",
+            ProcessingResult.processing_type == "load",
             ProcessingResult.status == "completed"
         ).order_by(ProcessingResult.created_at.desc()).first()
         
-        # Fall back to loading result
-        if not parsing_result:
-            parsing_result = db.query(ProcessingResult).filter(
-                ProcessingResult.document_id == document_id,
-                ProcessingResult.processing_type == "load",
-                ProcessingResult.status == "completed"
-            ).order_by(ProcessingResult.created_at.desc()).first()
-        
-        if not parsing_result:
+        if not loading_result:
             raise ValueError(f"No processing result found for document {document_id}. Document must be loaded first.")
         
         # Load JSON result
-        if not os.path.exists(parsing_result.result_path):
-            raise ValueError(f"Processing result file not found: {parsing_result.result_path}")
+        if not os.path.exists(loading_result.result_path):
+            raise ValueError(f"Processing result file not found: {loading_result.result_path}")
         
-        with open(parsing_result.result_path, 'r', encoding='utf-8') as f:
-            parse_data = json.load(f)
+        with open(loading_result.result_path, 'r', encoding='utf-8') as f:
+            load_data = json.load(f)
         
         # Extract text from pages
         text_parts = []
-        for page in parse_data.get("pages", []):
+        for page in load_data.get("pages", []):
             text_parts.append(page.get("text", ""))
         
         return "\n\n".join(text_parts)

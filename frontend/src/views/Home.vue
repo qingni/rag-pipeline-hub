@@ -19,7 +19,7 @@
         <h3 class="text-lg font-semibold mb-2">快速开始</h3>
         <ol class="list-decimal list-inside space-y-2 text-sm text-gray-700">
           <li>上传您的文档 (PDF, DOC, DOCX, TXT)</li>
-          <li>选择加载方式和解析选项</li>
+          <li>选择加载方式加载文档内容</li>
           <li>进行文档分块和向量嵌入</li>
           <li>创建向量索引并执行智能搜索</li>
           <li>使用AI生成摘要和内容</li>
@@ -38,12 +38,6 @@ const features = [
     icon: '📄',
     title: '文档加载',
     description: '支持多种文档格式加载，包括PDF、DOC等'
-  },
-  {
-    path: '/documents/parse',
-    icon: '📝',
-    title: '文档解析',
-    description: '智能解析文档内容，支持多种解析策略'
   },
   {
     path: '/documents/chunk',

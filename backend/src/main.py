@@ -102,7 +102,7 @@ async def health_check():
 
 
 # Import and register API routers
-from .api import documents, loading, parsing, processing, chunking
+from .api import documents, loading, processing, chunking
 from .api import chunking_preview, chunking_history
 from .api import embedding_routes, embedding_query_routes
 from .api import vector_index
@@ -111,7 +111,6 @@ from .api import generation
 
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
 app.include_router(loading.router, prefix="/api/v1/processing", tags=["Processing - Load"])
-app.include_router(parsing.router, prefix="/api/v1/processing", tags=["Processing - Parse"])
 app.include_router(processing.router, prefix="/api/v1/processing", tags=["Processing - Results"])
 app.include_router(chunking.router, prefix="/api/v1/chunking", tags=["Chunking"])
 app.include_router(chunking_preview.router, prefix="/api/v1/chunking", tags=["Chunking - Preview"])

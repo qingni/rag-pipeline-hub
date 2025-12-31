@@ -15,11 +15,6 @@ const routes = [
     component: () => import('../views/DocumentLoad.vue')
   },
   {
-    path: '/documents/parse',
-    name: 'DocumentParse',
-    component: () => import('../views/DocumentParse.vue')
-  },
-  {
     path: '/documents/chunk',
     name: 'DocumentChunk',
     component: () => import('../views/DocumentChunk.vue')

@@ -101,39 +101,28 @@ async def get_parsed_documents(
     offset = (page - 1) * page_size
     documents = query.offset(offset).limit(page_size).all()
     
-    # For each document, get its latest processing result (prefer parse over load)
+    # For each document, get its latest loading result
     items = []
     for doc in documents:
-        # Check for parsing result first (preferred if available)
-        parsing_result = db.query(ProcessingResult).filter(
-            ProcessingResult.document_id == doc.id,
-            ProcessingResult.processing_type == "parse",
-            ProcessingResult.status == "completed"
-        ).order_by(ProcessingResult.created_at.desc()).first()
-        
-        # Fall back to loading result
+        # Get loading result
         loading_result = db.query(ProcessingResult).filter(
             ProcessingResult.document_id == doc.id,
             ProcessingResult.processing_type == "load",
             ProcessingResult.status == "completed"
         ).order_by(ProcessingResult.created_at.desc()).first()
         
-        # Use whichever is available (prefer parsing if both exist)
-        processing_result = parsing_result or loading_result
-        processing_type = "parsed" if parsing_result else "loaded"
-        
-        if processing_result:
+        if loading_result:
             items.append({
                 "id": doc.id,
                 "filename": doc.filename,
                 "format": doc.format,
                 "size_bytes": doc.size_bytes,
                 "upload_time": doc.upload_time.isoformat() if doc.upload_time else None,
-                "processing_type": processing_type,
+                "processing_type": "loaded",
                 "processing_result": {
-                    "id": processing_result.id,
-                    "result_path": processing_result.result_path,
-                    "created_at": processing_result.created_at.isoformat() if processing_result.created_at else None
+                    "id": loading_result.id,
+                    "result_path": loading_result.result_path,
+                    "created_at": loading_result.created_at.isoformat() if loading_result.created_at else None
                 }
             })
     
