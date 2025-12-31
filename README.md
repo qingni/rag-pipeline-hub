@@ -1,235 +1,219 @@
-# 文档处理和检索系统
+# RAG Framework
 
-一个完整的文档智能处理平台，支持文档上传、加载、分块、向量化、索引和AI文本生成。
+一个完整的检索增强生成（Retrieval-Augmented Generation）框架，实现从文档处理到智能问答的全流程 RAG 系统。
 
-## 🚀 快速开始
+## 功能特性
 
-### 前置要求
+| 模块 | 功能 | 状态 |
+|------|------|------|
+| 文档处理 | PDF、DOCX、DOC、TXT、Markdown 文档上传与加载 | ✅ |
+| 文档分块 | 固定大小、语义分块、递归分块、按标题分块 | ✅ |
+| 向量嵌入 | OpenAI、HuggingFace、本地模型向量化 | ✅ |
+| 向量索引 | Milvus、FAISS 向量存储与索引 | ✅ |
+| 语义搜索 | 向量相似度搜索、混合搜索 | ✅ |
+| 文本生成 | 基于检索上下文的 LLM 智能问答 | ✅ |
+
+## 技术栈
+
+**后端**
+- Python 3.11 + FastAPI
+- SQLAlchemy + SQLite/PostgreSQL
+- LangChain + OpenAI
+- Milvus / FAISS
+
+**前端**
+- Vue 3 + Vite
+- TDesign + TailwindCSS
+- Pinia + Vue Router
+
+## 快速开始
+
+### 环境要求
 
 - Python 3.11+
 - Node.js 18+
-- SQLite (开发) 或 PostgreSQL (生产)
+- Docker（用于 Milvus）
 
-### 一键启动（推荐）
+### 1. 克隆项目
 
-**后端**（终端1）:
+```bash
+git clone https://github.com/qingni/rag-framework-spec.git
+cd rag-framework-spec
+```
+
+### 2. 配置环境变量
+
+```bash
+# 后端
+cp backend/.env.example backend/.env
+# 编辑 backend/.env，配置 OPENAI_API_KEY 等
+
+# 前端
+cp frontend/.env.example frontend/.env
+```
+
+### 3. 启动 Milvus（向量数据库）
+
+```bash
+./start_milvus.sh
+```
+
+### 4. 启动后端
+
 ```bash
 ./start_backend.sh
 ```
-➡️ 访问: http://localhost:8000/docs
 
-**前端**（终端2）:
+后端 API: http://localhost:8000  
+API 文档: http://localhost:8000/docs
+
+### 5. 启动前端
+
 ```bash
 ./start_frontend.sh
 ```
-➡️ 访问: http://localhost:5173
 
-### 手动启动
+前端界面: http://localhost:5173
 
-#### 后端
-
-```bash
-cd backend
-pip install -r requirements.txt   # 首次运行
-python -m src.main
-```
-
-#### 前端
-
-```bash
-cd frontend
-npm install                        # 首次运行
-npm run dev
-```
-
-### 详细说明
-
-📖 查看完整启动指南: [`STARTUP_GUIDE.md`](STARTUP_GUIDE.md)
-
-包括：
-- 虚拟环境配置
-- 环境变量说明
-- 常见问题解决
-- 多种启动方式
-
-## 📚 功能特性
-
-### ✅ 已实现 (User Story 1 - MVP) - **100% 完成**
-
-- **文档上传**: 支持 PDF, DOC, DOCX, TXT, Markdown 格式，最大50MB
-- **文档加载**: 
-  - PyMuPDF (推荐) - 高性能PDF处理
-  - PyPDF - 轻量级PDF处理
-  - Unstructured - 高级文档结构理解
-  - **🆕 DOCX Loader** - Word 2007+ 文档处理
-  - **🆕 DOC Loader** - 旧版 Word 文档处理
-  - **🆕 Text Loader** - TXT 和 Markdown 文件处理
-  - **🆕 智能加载器自动选择** - 根据文件格式自动选择最佳加载器
-- **文档解析**:
-  - 全文解析
-  - 分页解析
-  - 按标题解析
-  - 混合解析
-- **文档管理**: 列表、预览、删除
-- **处理结果管理**: JSON格式存储和查询
-
-**🎯 快速测试 User Story 1**:
-```bash
-# 一键运行集成测试
-./run_integration_test.sh
-
-# 或查看快速启动指南
-cat QUICKSTART_US1.md
-```
-
-### 🚧 开发中
-
-- **User Story 2**: 文档分块和向量嵌入
-- **User Story 3**: 向量索引和搜索
-- **User Story 4**: 智能文本生成
-
-## 🏗️ 架构
+## 项目结构
 
 ```
-┌─────────────────┐
-│   Vue3 前端     │  Port 5173
-│  (Vite + Tailwind)│
-└────────┬────────┘
-         │ HTTP/REST
-         ▼
-┌─────────────────┐
-│  FastAPI 后端   │  Port 8000
-│    (Python)      │
-└────────┬────────┘
-         │
-    ┌────┴─────┬──────────┐
-    ▼          ▼          ▼
-┌────────┐ ┌────────┐ ┌────────┐
-│ SQLite │ │文件存储│ │向量数据│
-│        │ │(JSON)  │ │  (计划) │
-└────────┘ └────────┘ └────────┘
-```
-
-## 📖 API文档
-
-启动后端后，访问 `http://localhost:8000/docs` 查看完整的交互式API文档。
-
-## 📁 项目结构
-
-```
-.
-├── backend/              # FastAPI后端
+rag-framework-spec/
+├── backend/                 # FastAPI 后端
 │   ├── src/
-│   │   ├── main.py      # 应用入口
-│   │   ├── models/      # 数据模型
-│   │   ├── services/    # 业务逻辑
-│   │   ├── api/         # API路由
-│   │   └── providers/   # 提供商适配器
-│   ├── results/         # 处理结果JSON
-│   │   ├── load/        # 文档加载结果
-│   │   ├── parse/       # 文档解析结果
-│   │   └── chunking/    # 文档分块结果
+│   │   ├── api/            # API 路由
+│   │   ├── models/         # 数据模型
+│   │   ├── services/       # 业务逻辑
+│   │   ├── schemas/        # Pydantic 模式
+│   │   └── providers/      # 外部服务适配器
+│   ├── results/            # 处理结果 JSON
 │   └── requirements.txt
-├── frontend/            # Vue3前端
+├── frontend/               # Vue 3 前端
 │   ├── src/
-│   │   ├── views/       # 页面视图
-│   │   ├── components/  # UI组件
-│   │   ├── stores/      # 状态管理
-│   │   └── services/    # API服务
+│   │   ├── views/          # 页面视图
+│   │   ├── components/     # UI 组件
+│   │   ├── stores/         # Pinia 状态管理
+│   │   └── services/       # API 服务
 │   └── package.json
-├── uploads/             # 上传文件存储
-└── specs/              # 功能规范和任务
+├── documents/              # 功能说明文档
+├── specs/                  # 功能规范
+├── migrations/             # 数据库迁移
+└── uploads/                # 上传文件存储
 ```
 
-## 🧪 测试
+## 核心模块
 
-### User Story 1 集成测试 ✅
+### 1. 文档处理 (Document Processing)
 
-**自动化测试**（推荐）:
-```bash
-./run_integration_test.sh
-```
+支持多种文档格式的上传、加载和解析：
 
-**手动测试**:
-```bash
-# 终端1 - 启动后端
-cd backend
-python -m src.main
+- **加载器**: PyMuPDF、PyPDF、Unstructured、python-docx
+- **解析模式**: 全文解析、分页解析、按标题解析、混合解析
+- **输出格式**: 统一的 JSON 结构
 
-# 终端2 - 运行测试
-cd backend
-python tests/test_integration_us1.py
-```
+### 2. 文档分块 (Document Chunking)
 
-测试覆盖:
-- ✅ 文档上传 → PyMuPDF加载 → 全文解析 → JSON验证
-- ✅ 性能验证 (< 3分钟)
-- ✅ 数据完整性验证
+将文档切分为适合向量化的文本块：
 
-**详细文档**: 
-- `TEST_US1.md` - 完整测试指南
-- `QUICKSTART_US1.md` - 快速开始
-- `US1_COMPLETION_SUMMARY.md` - 完成总结
+- **分块策略**: 固定大小、语义分块、递归分块、按标题分块
+- **参数配置**: chunk_size、chunk_overlap
+- **元数据保留**: 来源文件、位置信息
 
-### 单元测试
+### 3. 向量嵌入 (Vector Embedding)
+
+将文本块转换为向量表示：
+
+- **模型支持**: OpenAI text-embedding-3-small/large、HuggingFace 模型
+- **批量处理**: 支持大规模文档的批量向量化
+- **维度**: 可配置的向量维度
+
+### 4. 向量索引 (Vector Index)
+
+高效的向量存储与检索：
+
+- **Milvus**: 分布式向量数据库，支持大规模数据
+- **FAISS**: 本地向量索引，适合开发测试
+- **索引类型**: IVF_FLAT、HNSW 等
+
+### 5. 语义搜索 (Semantic Search)
+
+基于向量相似度的智能搜索：
+
+- **搜索类型**: 向量搜索、混合搜索
+- **相似度算法**: 余弦相似度、欧氏距离、内积
+- **结果排序**: Top-K 检索、相似度阈值过滤
+
+### 6. 文本生成 (Text Generation)
+
+基于检索上下文的 LLM 问答：
+
+- **模型支持**: GPT-4、GPT-3.5-turbo 等 OpenAI 模型
+- **流式输出**: 支持 SSE 流式响应
+- **引用标注**: 自动标注回答的来源引用
+- **历史记录**: 保存生成历史，支持查询和管理
+
+## API 概览
+
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/api/documents` | POST | 上传文档 |
+| `/api/documents/{id}/load` | POST | 加载文档 |
+| `/api/documents/{id}/chunk` | POST | 分块文档 |
+| `/api/embeddings/embed` | POST | 向量化文本块 |
+| `/api/vector-index/index` | POST | 创建向量索引 |
+| `/api/search` | POST | 语义搜索 |
+| `/api/generation/generate` | POST | 文本生成 |
+| `/api/generation/generate/stream` | POST | 流式文本生成 |
+
+完整 API 文档请访问: http://localhost:8000/docs
+
+## 文档
+
+详细的功能说明文档位于 `documents/` 目录：
+
+- [文档加载](documents/load/README.md)
+- [文档分块](documents/chunk/README.md)
+- [向量嵌入](documents/embedding/README.md)
+- [向量索引](documents/vector-index/README.md)
+- [语义搜索](documents/search/README.md)
+- [文本生成](documents/generation/README.md)
+
+## 版本历史
+
+| 版本 | 功能 | 日期 |
+|------|------|------|
+| v0.6.0 | 文本生成 (Text Generation) | 2024-12 |
+| v0.5.0 | 语义搜索 (Search Query) | 2024-12 |
+| v0.4.0 | 向量索引 (Vector Index) | 2024-12 |
+| v0.3.0 | 向量嵌入 (Vector Embedding) | 2024-12 |
+| v0.2.0 | 文档分块 (Document Chunking) | 2024-12 |
+| v0.1.0 | 文档处理 (Document Processing) | 2024-12 |
+
+## 开发
+
+### 运行测试
 
 ```bash
 # 后端测试
 cd backend
 pytest
 
-# 前端测试
+# 前端构建
 cd frontend
-npm run test
+npm run build
 ```
 
-## 📊 当前进度
+### 停止服务
 
-- ✅ Phase 1: Setup (8/8 任务) - **100%**
-- ✅ Phase 2: Foundational (17/17 任务) - **100%**
-- ✅ Phase 3: User Story 1 (33/33 任务) - **100% ✨ MVP完成**
-- ⏳ Phase 4: User Story 2 (0/22 任务)
-- ⏳ Phase 5: User Story 3 (0/23 任务)
-- ⏳ Phase 6: User Story 4 (0/18 任务)
-- ⏳ Phase 7: Integration & Deployment (0/14 任务)
+```bash
+# 停止 Milvus
+./stop_milvus.sh
 
-**总进度**: 58/135 任务 (43.0%)
+# 释放端口
+lsof -ti:8000 | xargs kill -9  # 后端
+lsof -ti:5173 | xargs kill -9  # 前端
+```
 
-**User Story 1 已完成**: 
-- 🎉 所有33个任务完成
-- ✅ 集成测试通过
-- 📝 详见 `US1_COMPLETION_SUMMARY.md`
+## 许可证
 
-## 🔧 开发工具
-
-- **后端**: FastAPI, SQLAlchemy, Pydantic
-- **前端**: Vue 3, Vite, TailwindCSS, Pinia
-- **文档处理**: PyMuPDF, PyPDF2, Unstructured, python-docx, textract
-- **AI/ML**: OpenAI, HuggingFace, Ollama (计划)
-- **向量数据库**: Milvus, Pinecone (计划)
-
-## 🆕 最近更新
-
-### 2025-12-03 (下午): UI/UX 优化
-- ✨ 智能加载器自动切换 - 根据文档格式自动选择最佳加载器
-- 📊 文档列表表格视图 - 紧凑布局，空间利用率提升50%
-- 🗑️ 文档删除功能 - 支持直接删除文档，包含确认对话框
-- 📖 详见: [UI优化说明](UI_OPTIMIZATION_UPDATE.md)
-
-### 2025-12-03 (上午): 文档加载功能增强
-- ✨ 新增 DOCX、DOC、Markdown 格式支持
-- ✨ 智能加载器自动选择功能
-- ✨ 统一的加载结果格式
-- 📖 详见: [快速开始指南](QUICK_START_NEW_LOADERS.md) | [变更总结](CHANGES_SUMMARY.md)
-
-## 📝 许可证
-
-待定
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📧 联系方式
-
-待定
+[Apache License 2.0](LICENSE)
