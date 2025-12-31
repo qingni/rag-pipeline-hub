@@ -8,7 +8,7 @@
 |------|------|------|
 | 文档处理 | PDF、DOCX、DOC、TXT、Markdown 文档上传与加载 | ✅ |
 | 文档分块 | 固定大小、语义分块、递归分块、按标题分块 | ✅ |
-| 向量嵌入 | OpenAI、HuggingFace、本地模型向量化 | ✅ |
+| 向量嵌入 | bge-m3、qwen3-embedding-8b、hunyuan-embedding 等向量化 | ✅ |
 | 向量索引 | Milvus、FAISS 向量存储与索引 | ✅ |
 | 语义搜索 | 向量相似度搜索、混合搜索 | ✅ |
 | 文本生成 | 基于检索上下文的 LLM 智能问答 | ✅ |
@@ -18,7 +18,7 @@
 **后端**
 - Python 3.11 + FastAPI
 - SQLAlchemy + SQLite/PostgreSQL
-- LangChain + OpenAI
+- LangChain + OpenAI-compatible API
 - Milvus / FAISS
 
 **前端**
@@ -123,9 +123,9 @@ rag-framework-spec/
 
 将文本块转换为向量表示：
 
-- **模型支持**: OpenAI text-embedding-3-small/large、HuggingFace 模型
+- **模型支持**: bge-m3、qwen3-embedding-8b、hunyuan-embedding、jina-embeddings-v4
 - **批量处理**: 支持大规模文档的批量向量化
-- **维度**: 可配置的向量维度
+- **维度**: 1024-4096 维（根据模型不同）
 
 ### 4. 向量索引 (Vector Index)
 
@@ -147,7 +147,7 @@ rag-framework-spec/
 
 基于检索上下文的 LLM 问答：
 
-- **模型支持**: GPT-4、GPT-3.5-turbo 等 OpenAI 模型
+- **模型支持**: DeepSeek-V3、DeepSeek-R1、Kimi-K2-Instruct
 - **流式输出**: 支持 SSE 流式响应
 - **引用标注**: 自动标注回答的来源引用
 - **历史记录**: 保存生成历史，支持查询和管理
