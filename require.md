@@ -2,26 +2,22 @@
 
 1. **文档加载（LoadFile）**
    - 支持多种加载方式（PyMuPDF、PyPDF、Unstructured）
-   - 包含文件上传处理、文档预览与管理
-
-2. **文档解析（ParseFile）**
-   - 支持多种解析选项（全文、分页、按标题等）
-   - 包含解析结果预览，支持表格与文本混合解析
+   - 包含文件上传处理、文档加载结果预览与管理
  
-3. **文档分块（ChunkFile）**
+2. **文档分块（ChunkFile）**
    - 支持多种分块策略
    - 包含块内容预览、分块文档管理
 
-4. **向量嵌入（EmbeddingFile）**
+3. **向量嵌入（EmbeddingFile）**
    - 支持多个嵌入提供商（OpenAI、Bedrock、HuggingFace）
    - 包含嵌入结果管理、嵌入可视化
 
-5. **向量索引（Indexing）**
+4. **向量索引（Indexing）**
    - 支持多种向量数据库（Milvus、Pinecone等）
    - 包含索引管理、集合操作接口、相似度搜索（Search）、语义搜索
    - 支持结果过滤排序、搜索结果保存
 
-6. **文本生成（Generation）**
+5. **文本生成（Generation）**
    - 支持多个生成模型
    - 包含上下文感知生成、结果保存功能
 
