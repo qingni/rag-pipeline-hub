@@ -63,10 +63,22 @@ class ChunkingService:
         with open(loading_result.result_path, 'r', encoding='utf-8') as f:
             load_data = json.load(f)
         
-        # Extract text from pages
+        # Extract text from pages - support both old and new formats
         text_parts = []
-        for page in load_data.get("pages", []):
-            text_parts.append(page.get("text", ""))
+        
+        # New StandardDocumentResult format: content.pages
+        if "content" in load_data and "pages" in load_data["content"]:
+            for page in load_data["content"]["pages"]:
+                text_parts.append(page.get("text", ""))
+        # Old format: pages directly at root level
+        elif "pages" in load_data:
+            for page in load_data.get("pages", []):
+                text_parts.append(page.get("text", ""))
+        # Fallback: try full_text directly
+        elif "full_text" in load_data:
+            return load_data["full_text"]
+        elif "content" in load_data and "full_text" in load_data["content"]:
+            return load_data["content"]["full_text"]
         
         return "\n\n".join(text_parts)
     

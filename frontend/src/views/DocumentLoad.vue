@@ -25,6 +25,23 @@
           <t-divider style="margin: 16px 0" />
           
           <h3 class="section-title">加载方式</h3>
+          
+          <!-- Docling 状态提示 -->
+          <t-alert 
+            v-if="doclingStatus && doclingStatus !== 'ready'"
+            :theme="doclingStatus === 'initializing' ? 'warning' : 'info'"
+            style="margin-bottom: 12px"
+          >
+            <template #message>
+              <div class="flex items-center">
+                <div v-if="doclingStatus === 'initializing'" class="spinner-small mr-2"></div>
+                <span>
+                  {{ doclingStatusText }}
+                </span>
+              </div>
+            </template>
+          </t-alert>
+          
           <t-select 
             v-model="loaderType" 
             placeholder="请选择加载方式"
@@ -36,16 +53,31 @@
                 <t-tag size="small" theme="success" variant="light">推荐</t-tag>
               </div>
             </t-option>
+            <t-option-group label="高质量解析">
+              <t-option 
+                value="docling" 
+                :label="doclingOptionLabel"
+                :disabled="doclingStatus === 'unavailable'"
+              />
+            </t-option-group>
             <t-option-group label="PDF 加载器">
-              <t-option value="pymupdf" label="PyMuPDF" />
-              <t-option value="pypdf" label="PyPDF" />
-              <t-option value="unstructured" label="Unstructured" />
+              <t-option value="pymupdf" label="PyMuPDF (快速)" />
+              <t-option value="pypdf" label="PyPDF (轻量)" />
             </t-option-group>
             <t-option-group label="Office 文档">
               <t-option value="docx" label="DOCX" />
-              <t-option value="doc" label="DOC" />
+              <t-option value="xlsx" label="XLSX/XLS" />
+              <t-option value="pptx" label="PPTX" />
             </t-option-group>
-            <t-option-group label="文本文档">
+            <t-option-group label="数据格式">
+              <t-option value="html" label="HTML" />
+              <t-option value="csv" label="CSV" />
+              <t-option value="json" label="JSON" />
+              <t-option value="xml" label="XML" />
+            </t-option-group>
+            <t-option-group label="其他格式">
+              <t-option value="epub" label="EPUB" />
+              <t-option value="email" label="EML" />
               <t-option value="text" label="Text/Markdown" />
             </t-option-group>
           </t-select>
@@ -57,6 +89,23 @@
             :message="loaderHint"
             style="margin-top: 12px"
           />
+          
+          <!-- 大文件警告 -->
+          <t-alert 
+            v-if="isLargeFile"
+            theme="warning" 
+            style="margin-top: 12px"
+          >
+            <template #message>
+              <div>
+                <strong>大文件提示：</strong>文件大小为 {{ formatFileSize(selectedDocument.size) }}
+                <br />
+                <span style="font-size: 12px; color: #666;">
+                  复杂文档使用 Docling 解析可能需要 1-5 分钟，如需快速处理可选择 PyMuPDF
+                </span>
+              </div>
+            </template>
+          </t-alert>
         </div>
         
         <!-- 开始加载按钮 -->
@@ -118,6 +167,12 @@
                 </div>
               </template>
               <div v-if="loadResult" class="tab-content">
+                <!-- 降级通知 -->
+                <FallbackNotice 
+                  :load-result="loadResult"
+                  :visible="showFallbackNotice"
+                  @close="showFallbackNotice = false"
+                />
                 <ResultPreview :result="loadResult">
                   <template #actions>
                     <t-button 
@@ -142,9 +197,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useProcessingStore } from '../stores/processing'
 import { useDocumentStore } from '../stores/document'
+import healthService from '../services/healthService'
 import { 
   FileText as FileTextIcon,
   Play as PlayIcon,
@@ -155,6 +211,7 @@ import {
 import DocumentUploader from '../components/document/DocumentUploader.vue'
 import DocumentList from '../components/document/DocumentList.vue'
 import DocumentPreview from '../components/document/DocumentPreview.vue'
+import FallbackNotice from '../components/document/FallbackNotice.vue'
 import ProcessingProgress from '../components/processing/ProcessingProgress.vue'
 import ResultPreview from '../components/processing/ResultPreview.vue'
 
@@ -168,11 +225,82 @@ const status = ref('idle')
 const error = ref(null)
 const loadResult = ref(null)
 const activeTab = ref('preview') // Tab 切换状态
+const showFallbackNotice = ref(true) // 降级通知显示状态
+
+// Docling 状态
+const doclingStatus = ref(null)
+let healthCheckInterval = null
+
+// 检查系统健康状态
+async function checkHealth() {
+  try {
+    const health = await healthService.getHealth()
+    if (health.success && health.components?.docling) {
+      doclingStatus.value = health.components.docling.status
+    }
+  } catch (err) {
+    console.warn('Health check failed:', err)
+  }
+}
+
+onMounted(() => {
+  // 立即检查一次
+  checkHealth()
+  
+  // 每 5 秒检查一次健康状态
+  healthCheckInterval = setInterval(checkHealth, 5000)
+})
+
+onUnmounted(() => {
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval)
+  }
+})
+
+const doclingStatusText = computed(() => {
+  switch (doclingStatus.value) {
+    case 'initializing':
+      return 'Docling 正在初始化中，请稍候...'
+    case 'available':
+      return 'Docling 可用，但尚未初始化'
+    case 'unavailable':
+      return 'Docling 不可用'
+    case 'ready':
+      return 'Docling 已就绪'
+    default:
+      return ''
+  }
+})
+
+const doclingOptionLabel = computed(() => {
+  switch (doclingStatus.value) {
+    case 'initializing':
+      return 'Docling (初始化中...)'
+    case 'unavailable':
+      return 'Docling (不可用)'
+    case 'ready':
+      return 'Docling (高精度，较慢)'
+    default:
+      return 'Docling (高精度，较慢)'
+  }
+})
 
 const formatLoaderMap = {
-  'pdf': 'pymupdf',
-  'docx': 'docx',
-  'doc': 'doc',
+  'pdf': 'docling',
+  'docx': 'docling',
+  'doc': 'docx',
+  'xlsx': 'xlsx',
+  'xls': 'xlsx',
+  'pptx': 'pptx',
+  'html': 'html',
+  'htm': 'html',
+  'csv': 'csv',
+  'json': 'json',
+  'xml': 'xml',
+  'epub': 'epub',
+  'eml': 'email',
+  'msg': 'msg',
+  'vtt': 'vtt',
   'txt': 'text',
   'md': 'text',
   'markdown': 'text'
@@ -180,32 +308,53 @@ const formatLoaderMap = {
 
 const loaderHint = computed(() => {
   if (!loaderType.value) {
-    return '系统会根据文件格式自动选择最佳加载器'
+    return '复杂文档 (PDF/DOCX/XLSX/PPTX) 优先使用 Docling 解析，其他格式使用专用加载器'
   }
   
   const hints = {
-    'pymupdf': '适用于 PDF，提供最佳性能和文本提取质量',
+    'docling': 'Docling 提供高精度表格和结构化内容提取，适合复杂文档，但处理较慢',
+    'pymupdf': '适用于 PDF，提供最佳性能和文本提取质量，推荐用于大文件',
     'pypdf': '适用于 PDF，轻量级纯 Python 实现',
-    'unstructured': '适用于复杂文档结构，支持表格和布局识别',
     'docx': '适用于 Microsoft Word DOCX 文档',
-    'doc': '适用于旧版 Microsoft Word DOC 文档',
+    'xlsx': '适用于 Microsoft Excel XLSX/XLS 文档',
+    'pptx': '适用于 Microsoft PowerPoint PPTX 文档',
+    'html': '适用于 HTML 网页文档',
+    'csv': '适用于 CSV 表格数据',
+    'json': '适用于 JSON 数据文件',
+    'xml': '适用于 XML 数据文件',
+    'epub': '适用于 EPUB 电子书',
+    'email': '适用于 EML 邮件文件',
     'text': '适用于纯文本和 Markdown 文件'
   }
   
   return hints[loaderType.value] || ''
 })
 
+// 大文件阈值 (2MB)
+const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024
+
+const isLargeFile = computed(() => {
+  if (!selectedDocument.value) return false
+  return selectedDocument.value.size > LARGE_FILE_THRESHOLD
+})
+
+function formatFileSize(bytes) {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  while (bytes >= 1024 && i < units.length - 1) {
+    bytes /= 1024
+    i++
+  }
+  return `${bytes.toFixed(2)} ${units[i]}`
+}
+
 watch(selectedDocument, (newDoc) => {
   if (newDoc && newDoc.format) {
-    const format = newDoc.format.toLowerCase()
-    const defaultLoader = formatLoaderMap[format]
-    
-    if (defaultLoader) {
-      loaderType.value = defaultLoader
-      console.log(`自动选择加载器: ${defaultLoader} (文件格式: ${format})`)
-    } else {
-      loaderType.value = ''
-    }
+    // 保持自动选择模式，不自动设置具体加载器
+    // 用户可以手动选择特定加载器
+    loaderType.value = ''
+    console.log(`文档已选择: ${newDoc.filename} (格式: ${newDoc.format})，使用自动选择模式`)
   }
 })
 
@@ -489,5 +638,20 @@ function downloadResult() {
 .left-panel-content::-webkit-scrollbar-thumb:hover,
 .right-panel-content::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
+}
+
+/* 小型加载动画 */
+.spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>

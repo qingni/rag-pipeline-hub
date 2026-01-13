@@ -1,0 +1,534 @@
+openapi: 3.0.3
+info:
+  title: Document Loading API
+  description: |
+    增强的文档加载 API，集成 Docling 解析器和多层级降级策略。
+    支持 20+ 种文档格式，提供统一的标准化输出结构。
+  version: 2.0.0
+  contact:
+    name: RAG Framework Team
+
+servers:
+  - url: /api/v1
+    description: API v1
+
+tags:
+  - name: loading
+    description: 文档加载操作
+  - name: loaders
+    description: 加载器管理
+
+paths:
+  /load/{document_id}:
+    post:
+      tags:
+        - loading
+      summary: 加载并解析文档
+      description: |
+        使用指定或自动选择的解析器加载文档。
+        支持多层级降级策略，解析失败时自动切换到备用解析器。
+      operationId: loadDocument
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          description: 文档 ID
+          schema:
+            type: string
+            format: uuid
+        - name: loader_type
+          in: query
+          required: false
+          description: |
+            指定使用的加载器类型。如不指定，系统将根据文件格式和大小自动选择最佳解析器。
+          schema:
+            type: string
+            enum:
+              - docling
+              - pymupdf
+              - pypdf
+              - unstructured
+              - text
+              - docx
+              - xlsx
+              - pptx
+              - html
+              - csv
+              - json
+              - xml
+              - epub
+              - email
+              - msg
+              - vtt
+              - properties
+        - name: enable_fallback
+          in: query
+          required: false
+          description: 是否启用降级策略（默认 true）
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: 文档加载成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadingResponse'
+              examples:
+                success_no_fallback:
+                  summary: 成功（无降级）
+                  value:
+                    success: true
+                    document_id: "123e4567-e89b-12d3-a456-426614174000"
+                    result:
+                      success: true
+                      loader: "docling"
+                      metadata:
+                        title: "技术文档"
+                        page_count: 10
+                        extraction_quality: 0.95
+                      statistics:
+                        total_pages: 10
+                        total_chars: 5000
+                        processing_time: 3.5
+                        fallback_used: false
+                success_with_fallback:
+                  summary: 成功（有降级）
+                  value:
+                    success: true
+                    document_id: "123e4567-e89b-12d3-a456-426614174000"
+                    result:
+                      success: true
+                      loader: "pymupdf"
+                      statistics:
+                        fallback_used: true
+                        fallback_reason: "Docling 解析失败: OCR 模块不可用"
+                        original_parser: "docling"
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 文档不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: 不支持的文件格式
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 所有解析器均失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /load/{document_id}/result:
+    get:
+      tags:
+        - loading
+      summary: 获取文档加载结果
+      description: 获取已完成的文档加载结果
+      operationId: getLoadingResult
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: loader_type
+          in: query
+          required: false
+          description: 获取特定加载器的结果
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功获取加载结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardDocumentResult'
+        '404':
+          description: 结果不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loaders:
+    get:
+      tags:
+        - loaders
+      summary: 获取可用加载器列表
+      description: 返回所有已注册的加载器及其配置信息
+      operationId: getAvailableLoaders
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loaders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LoaderInfo'
+                  total:
+                    type: integer
+
+  /loaders/formats:
+    get:
+      tags:
+        - loaders
+      summary: 获取支持的文件格式
+      description: 返回所有支持的文件格式及其对应的解析策略
+      operationId: getSupportedFormats
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  formats:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FormatStrategy'
+                  total:
+                    type: integer
+
+components:
+  schemas:
+    LoadingResponse:
+      type: object
+      required:
+        - success
+        - document_id
+      properties:
+        success:
+          type: boolean
+        document_id:
+          type: string
+          format: uuid
+        result:
+          $ref: '#/components/schemas/StandardDocumentResult'
+        error:
+          type: string
+          nullable: true
+
+    StandardDocumentResult:
+      type: object
+      required:
+        - success
+        - loader
+      properties:
+        success:
+          type: boolean
+          description: 解析是否成功
+        loader:
+          type: string
+          description: 实际使用的解析器名称
+        metadata:
+          $ref: '#/components/schemas/DocumentMetadata'
+        content:
+          $ref: '#/components/schemas/DocumentContent'
+        statistics:
+          $ref: '#/components/schemas/ProcessingStatistics'
+        error:
+          type: string
+          nullable: true
+          description: 错误信息（仅在 success=false 时）
+        error_details:
+          type: object
+          nullable: true
+          description: 详细错误信息
+
+    DocumentMetadata:
+      type: object
+      properties:
+        title:
+          type: string
+          nullable: true
+        author:
+          type: string
+          nullable: true
+        page_count:
+          type: integer
+          minimum: 0
+        file_size:
+          type: integer
+          minimum: 0
+          description: 文件大小（字节）
+        format:
+          type: string
+          description: 文件格式
+        created_time:
+          type: string
+          format: date-time
+          nullable: true
+        modified_time:
+          type: string
+          format: date-time
+          nullable: true
+        extraction_quality:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: 解析质量评分 (0.0-1.0)
+        quality_level:
+          type: string
+          enum: [high, medium, low, minimal]
+          description: 解析质量等级
+
+    DocumentContent:
+      type: object
+      properties:
+        full_text:
+          type: string
+          description: 完整文本内容
+        pages:
+          type: array
+          items:
+            $ref: '#/components/schemas/PageContent'
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/TableContent'
+          description: 表格内容（Docling 特有）
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImageContent'
+          description: 图像内容（Docling 特有）
+        formulas:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormulaContent'
+          description: 公式内容（Docling 特有）
+
+    PageContent:
+      type: object
+      required:
+        - page_number
+        - text
+        - char_count
+      properties:
+        page_number:
+          type: integer
+          minimum: 1
+        text:
+          type: string
+        char_count:
+          type: integer
+          minimum: 0
+        paragraphs:
+          type: array
+          items:
+            type: string
+        headings:
+          type: array
+          items:
+            type: object
+            properties:
+              level:
+                type: integer
+              text:
+                type: string
+
+    TableContent:
+      type: object
+      required:
+        - page_number
+        - table_index
+        - headers
+        - rows
+      properties:
+        page_number:
+          type: integer
+          minimum: 1
+        table_index:
+          type: integer
+          minimum: 0
+        headers:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        caption:
+          type: string
+          nullable: true
+        row_count:
+          type: integer
+          minimum: 0
+        col_count:
+          type: integer
+          minimum: 0
+
+    ImageContent:
+      type: object
+      required:
+        - page_number
+        - image_index
+      properties:
+        page_number:
+          type: integer
+          minimum: 1
+        image_index:
+          type: integer
+          minimum: 0
+        caption:
+          type: string
+          nullable: true
+        alt_text:
+          type: string
+          nullable: true
+        bbox:
+          type: object
+          nullable: true
+          properties:
+            x:
+              type: number
+            y:
+              type: number
+            width:
+              type: number
+            height:
+              type: number
+
+    FormulaContent:
+      type: object
+      required:
+        - page_number
+        - formula_index
+        - latex
+      properties:
+        page_number:
+          type: integer
+          minimum: 1
+        formula_index:
+          type: integer
+          minimum: 0
+        latex:
+          type: string
+          description: LaTeX 格式的公式
+        text_representation:
+          type: string
+          nullable: true
+          description: 文本表示
+
+    ProcessingStatistics:
+      type: object
+      properties:
+        total_pages:
+          type: integer
+          minimum: 0
+        total_chars:
+          type: integer
+          minimum: 0
+        processing_time:
+          type: number
+          minimum: 0
+          description: 处理时间（秒）
+        fallback_used:
+          type: boolean
+          description: 是否使用了降级解析器
+        fallback_reason:
+          type: string
+          nullable: true
+          description: 降级原因
+        original_parser:
+          type: string
+          nullable: true
+          description: 原始尝试的解析器
+        table_count:
+          type: integer
+          minimum: 0
+        image_count:
+          type: integer
+          minimum: 0
+        formula_count:
+          type: integer
+          minimum: 0
+
+    LoaderInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        supported_formats:
+          type: array
+          items:
+            type: string
+        priority:
+          type: integer
+        avg_speed:
+          type: string
+          enum: [fast, medium, slow]
+        quality_level:
+          type: string
+          enum: [high, medium, low, minimal]
+        supports_tables:
+          type: boolean
+        supports_images:
+          type: boolean
+        supports_formulas:
+          type: boolean
+        supports_ocr:
+          type: boolean
+        requires_installation:
+          type: boolean
+        installation_command:
+          type: string
+          nullable: true
+
+    FormatStrategy:
+      type: object
+      properties:
+        format:
+          type: string
+        primary_loader:
+          type: string
+        fallback_loaders:
+          type: array
+          items:
+            type: string
+        size_threshold_mb:
+          type: number
+          nullable: true
+        fast_loader:
+          type: string
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: string
+        error_code:
+          type: string
+        details:
+          type: object

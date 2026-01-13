@@ -6,7 +6,7 @@
 
 | 模块 | 功能 | 状态 |
 |------|------|------|
-| 文档处理 | PDF、DOCX、DOC、TXT、Markdown 文档上传与加载 | ✅ |
+| 文档处理 | PDF、DOCX、XLSX、PPTX、HTML、CSV 等 20+ 格式文档上传与加载（Docling 集成） | ✅ |
 | 文档分块 | 固定大小、语义分块、递归分块、按标题分块 | ✅ |
 | 向量嵌入 | bge-m3、qwen3-embedding-8b、hunyuan-embedding 等向量化 | ✅ |
 | 向量索引 | Milvus、FAISS 向量存储与索引 | ✅ |
@@ -105,11 +105,12 @@ rag-framework-spec/
 
 ### 1. 文档处理 (Document Processing)
 
-支持多种文档格式的上传和加载：
+支持多种文档格式的上传和加载，采用 Docling 作为主解析器并支持自动降级策略：
 
-- **加载器**: PyMuPDF、PyPDF、Unstructured、python-docx
-- **支持格式**: PDF、DOCX、DOC、TXT、Markdown
-- **输出格式**: 统一的 JSON 结构（含全文、分页、元数据）
+- **主解析器**: Docling（支持 PDF、DOCX、XLSX、PPTX 等复杂文档）
+- **降级策略**: 自动降级到专用加载器（PyMuPDF、python-docx、openpyxl 等）
+- **支持格式**: PDF、DOCX、DOC、XLSX、XLS、PPTX、HTML、CSV、JSON、XML、EPUB、EML、MSG、VTT、TXT、MD 等 20+ 种格式
+- **输出格式**: 统一的 StandardDocumentResult 结构（含全文、分页、元数据、表格）
 
 ### 2. 文档分块 (Document Chunking)
 
@@ -182,6 +183,7 @@ rag-framework-spec/
 
 | 版本 | 功能 | 日期 |
 |------|------|------|
+| v0.7.0 | 文档处理优化 - Docling 集成与多格式支持 | 2026-01 |
 | v0.6.0 | 文本生成 (Text Generation) | 2024-12 |
 | v0.5.0 | 语义搜索 (Search Query) | 2024-12 |
 | v0.4.0 | 向量索引 (Vector Index) | 2024-12 |

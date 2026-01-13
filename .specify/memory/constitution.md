@@ -44,12 +44,11 @@ Follow-up TODOs: None
 - 统一的错误处理机制
 
 ### 核心功能模块
-1. 文档加载（LoadFile）- 多种加载方式支持
+1. 文档加载（LoadFile）- 多格式加载与解析（基于 Docling），自动降级策略
 2. 文档分块（ChunkFile）- 多种分块策略
-3. 文档解析（ParseFile）- 多种解析选项
-4. 向量嵌入（EmbeddingFile）- 多提供商支持
-5. 向量索引（Indexing）- 多数据库支持，包含搜索功能
-6. 文本生成（Generation）- 多模型支持
+3. 向量嵌入（EmbeddingFile）- 多提供商支持
+4. 向量索引（Indexing）- 多数据库支持，包含搜索功能
+5. 文本生成（Generation）- 多模型支持
 
 ## 开发工作流
 
@@ -69,4 +68,6 @@ Follow-up TODOs: None
 
 本宪章规定了文档处理和检索系统的核心设计原则和技术约束。所有功能开发必须遵循模块化架构、多提供商支持、结果持久化等核心原则。代码审查过程必须验证是否符合宪章要求。任何违反核心原则的设计必须提供充分的技术理由和替代方案。
 
-**Version**: 1.0.1 | **Ratified**: 2025-12-01 | **Last Amended**: 2025-12-05
+**Version**: 1.1.0 | **Ratified**: 2025-12-01 | **Last Amended**: 2026-01-13
+
+> **Amendment 1.1.0**: 移除独立的"文档解析（ParseFile）"模块，将解析功能整合到"文档加载（LoadFile）"模块中，采用 Docling 作为主解析器并支持自动降级策略。参见 spec `001-document-processing-opt`。

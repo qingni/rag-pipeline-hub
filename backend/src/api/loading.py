@@ -1,8 +1,11 @@
-"""Document loading API endpoints."""
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+"""Document loading API endpoints.
+
+Enhanced loading API with Docling integration and fallback strategy support.
+"""
+from fastapi import APIRouter, Depends, Query, Path
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 from ..storage.database import get_db
 from ..services.loading_service import loading_service
 from ..utils.formatters import success_response, processing_result_to_dict
@@ -13,8 +16,15 @@ router = APIRouter()
 
 class LoadRequest(BaseModel):
     """Load document request."""
-    document_id: str
-    loader_type: Optional[str] = None  # Auto-select if None
+    document_id: str = Field(..., description="Document ID to load")
+    loader_type: Optional[str] = Field(
+        None,
+        description="Loader type to use. If not specified, auto-selects based on format and size."
+    )
+    enable_fallback: bool = Field(
+        True,
+        description="Whether to enable fallback to other loaders if primary fails"
+    )
 
 
 @router.post("/load")
@@ -23,27 +33,36 @@ async def load_document(
     db: Session = Depends(get_db)
 ):
     """
-    Load document with specified or auto-selected loader.
+    Load and parse document with specified or auto-selected loader.
     
-    Supports multiple document formats:
-    - PDF: pymupdf (default), pypdf, unstructured
-    - DOCX: docx
-    - DOC: doc
-    - TXT/Markdown: text
+    Supports multiple document formats with Docling as the primary parser:
+    - PDF: docling (primary), pymupdf, pypdf, unstructured
+    - DOCX: docling (primary), python-docx, unstructured
+    - XLSX: docling (primary), openpyxl, unstructured
+    - PPTX: docling (primary), python-pptx, unstructured
+    - HTML/CSV/TXT/MD: Specialized loaders
+    - And 15+ more formats
+    
+    Features:
+    - Automatic fallback to backup parsers on failure
+    - Intelligent loader selection based on file size
+    - Structured content extraction (tables, images, formulas)
+    - Unified output format
     
     Args:
         request: Load request data
         db: Database session
         
     Returns:
-        Processing result
+        Processing result with loading details
     """
     validate_document_id(request.document_id)
     
     result = loading_service.load_document(
         db=db,
         document_id=request.document_id,
-        loader_type=request.loader_type
+        loader_type=request.loader_type,
+        enable_fallback=request.enable_fallback
     )
     
     return success_response(
@@ -52,18 +71,133 @@ async def load_document(
     )
 
 
+@router.post("/load/{document_id}")
+async def load_document_by_path(
+    document_id: str = Path(..., description="Document ID to load"),
+    loader_type: Optional[str] = Query(
+        None,
+        description="Loader type to use"
+    ),
+    enable_fallback: bool = Query(
+        True,
+        description="Whether to enable fallback"
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Load document by path parameter.
+    
+    Alternative endpoint that accepts document_id as path parameter.
+    """
+    validate_document_id(document_id)
+    
+    result = loading_service.load_document(
+        db=db,
+        document_id=document_id,
+        loader_type=loader_type,
+        enable_fallback=enable_fallback
+    )
+    
+    return success_response(
+        data=processing_result_to_dict(result),
+        message="Document loaded successfully"
+    )
+
+
+@router.get("/load/{document_id}/result")
+async def get_loading_result(
+    document_id: str = Path(..., description="Document ID"),
+    loader_type: Optional[str] = Query(
+        None,
+        description="Get result from specific loader"
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Get loading result for a document.
+    
+    Returns the parsed content and metadata from the most recent loading operation.
+    """
+    validate_document_id(document_id)
+    
+    result = loading_service.get_loading_result(
+        db=db,
+        document_id=document_id,
+        loader_type=loader_type
+    )
+    
+    if result is None:
+        return success_response(
+            data=None,
+            message="No loading result found"
+        )
+    
+    return success_response(
+        data=result,
+        message="Loading result retrieved"
+    )
+
+
 @router.get("/loaders")
 async def get_available_loaders():
     """
-    Get list of available loaders and supported formats.
+    Get list of available loaders with their configurations.
     
-    Returns:
-        Available loaders and supported file formats
+    Returns detailed information about each loader including:
+    - Supported formats
+    - Quality level
+    - Speed characteristics
+    - Availability status
+    - Required dependencies
     """
+    loaders = loading_service.get_available_loaders()
+    
     return success_response(
         data={
-            "loaders": loading_service.get_available_loaders(),
-            "supported_formats": loading_service.get_supported_formats(),
-            "format_loader_map": loading_service.format_loader_map
+            "loaders": loaders,
+            "total": len(loaders)
+        }
+    )
+
+
+@router.get("/loaders/formats")
+async def get_supported_formats():
+    """
+    Get list of supported file formats and their parsing strategies.
+    
+    Returns format-to-loader mapping with fallback chains.
+    """
+    formats = loading_service.get_supported_formats()
+    strategies = loading_service.get_format_strategies()
+    
+    return success_response(
+        data={
+            "formats": formats,
+            "strategies": strategies,
+            "total": len(formats)
+        }
+    )
+
+
+@router.get("/loaders/recommend")
+async def get_recommended_loader(
+    format: str = Query(..., description="File format (e.g., pdf, docx)"),
+    size_bytes: int = Query(0, description="File size in bytes")
+):
+    """
+    Get recommended loader for a specific file format and size.
+    
+    Uses intelligent selection based on:
+    - File format
+    - File size (larger files may use faster loaders)
+    - Loader availability
+    """
+    recommended = loading_service.get_recommended_loader(format, size_bytes)
+    
+    return success_response(
+        data={
+            "format": format,
+            "size_bytes": size_bytes,
+            "recommended_loader": recommended
         }
     )

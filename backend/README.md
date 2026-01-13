@@ -76,7 +76,9 @@ backend/
 ## 主要功能
 
 - ✅ 文档上传和管理
-- ✅ 多种文档加载器（PyMuPDF, PyPDF, Unstructured）
+- ✅ 多种文档加载器（Docling、PyMuPDF、python-docx、openpyxl 等）
+- ✅ 智能解析器选择与自动降级策略
+- ✅ 支持 20+ 种文档格式
 - ✅ 文档分块
 - ✅ 向量嵌入
 - ✅ 向量索引

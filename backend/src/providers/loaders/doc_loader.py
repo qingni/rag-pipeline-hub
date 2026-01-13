@@ -2,12 +2,10 @@
 from typing import Dict, Any
 from pathlib import Path
 import subprocess
-import tempfile
-import os
 
 
 class DocLoader:
-    """Load DOC documents using antiword or textract."""
+    """Load DOC documents using antiword or python-docx."""
     
     def __init__(self):
         """Initialize DOC loader."""
@@ -36,25 +34,6 @@ class DocLoader:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None
     
-    def _extract_with_textract(self, file_path: str) -> str:
-        """
-        Extract text using textract library.
-        
-        Args:
-            file_path: Path to DOC file
-            
-        Returns:
-            Extracted text
-        """
-        try:
-            import textract
-            text = textract.process(file_path)
-            return text.decode('utf-8')
-        except ImportError:
-            return None
-        except Exception:
-            return None
-    
     def _extract_with_python_docx(self, file_path: str) -> str:
         """
         Try to extract using python-docx (works for some .doc files).
@@ -80,7 +59,6 @@ class DocLoader:
         Tries multiple extraction methods in order:
         1. antiword (command-line tool)
         2. python-docx (may work for some .doc files)
-        3. textract (fallback)
         
         Args:
             file_path: Path to DOC file
@@ -97,7 +75,6 @@ class DocLoader:
             extraction_methods = [
                 ("antiword", self._extract_with_antiword),
                 ("python-docx", self._extract_with_python_docx),
-                ("textract", self._extract_with_textract),
             ]
             
             for method_name, method_func in extraction_methods:
@@ -112,9 +89,8 @@ class DocLoader:
                     "loader": self.name,
                     "error": (
                         "Unable to extract text from DOC file. "
-                        "Please install one of: antiword, textract, or convert to DOCX format. "
-                        "Install antiword: apt-get install antiword (Linux) or brew install antiword (Mac). "
-                        "Install textract: pip install textract"
+                        "Please install antiword or convert to DOCX format. "
+                        "Install antiword: apt-get install antiword (Linux) or brew install antiword (Mac)."
                     )
                 }
             

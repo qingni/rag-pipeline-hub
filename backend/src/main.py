@@ -94,11 +94,37 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    from .providers.loaders.docling_loader import docling_loader
+    
+    # Check Docling status
+    docling_status = "unavailable"
+    if docling_loader.is_available():
+        if docling_loader.is_ready():
+            docling_status = "ready"
+        elif docling_loader.is_initializing():
+            docling_status = "initializing"
+        else:
+            docling_status = "available"
+    
     return {
         "success": True,
         "status": "healthy",
-        "service": "document-processing-api"
+        "service": "document-processing-api",
+        "components": {
+            "docling": {
+                "status": docling_status,
+                "available": docling_loader.is_available(),
+                "ready": docling_loader.is_ready() if docling_loader.is_available() else False,
+                "initializing": docling_loader.is_initializing() if docling_loader.is_available() else False
+            }
+        }
     }
+
+
+@app.get("/api/v1/health")
+async def api_health_check():
+    """API health check endpoint."""
+    return await health_check()
 
 
 # Import and register API routers

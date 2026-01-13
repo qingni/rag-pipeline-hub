@@ -21,7 +21,7 @@
     
     <!-- 文件格式提示 -->
     <div class="upload-tips">
-      <p class="tips-text">支持格式: PDF, DOC, DOCX, TXT, Markdown (最大50MB)</p>
+      <p class="tips-text">支持格式: PDF, DOCX, XLSX, PPTX, HTML, CSV, JSON, XML, EPUB, TXT, MD 等 20+ 种格式 (最大50MB)</p>
     </div>
     
     <!-- 上传进度 -->
