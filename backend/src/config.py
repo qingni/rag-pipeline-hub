@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     EMBEDDING_CLIENT_API_KEY: Optional[str] = None
     FRONTEND_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:4173"
     
+    # Docling Serve Configuration
+    DOCLING_SERVE_URL: str = "http://localhost:5001"
+    DOCLING_SERVE_API_KEY: Optional[str] = None
+    DOCLING_SERVE_TIMEOUT: int = 600  # 10 分钟，适应大文件处理
+    DOCLING_SERVE_ENABLED: bool = True
+    
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000

@@ -1,6 +1,7 @@
 """Document loading API endpoints.
 
 Enhanced loading API with Docling integration and fallback strategy support.
+Includes async loading endpoints for large files.
 """
 from fastapi import APIRouter, Depends, Query, Path
 from pydantic import BaseModel, Field
@@ -26,6 +27,139 @@ class LoadRequest(BaseModel):
         description="Whether to enable fallback to other loaders if primary fails"
     )
 
+
+class AsyncLoadRequest(BaseModel):
+    """Async load document request."""
+    document_id: str = Field(..., description="Document ID to load")
+    loader_type: Optional[str] = Field(
+        None,
+        description="Loader type to use. For async, typically 'docling_serve'"
+    )
+
+
+# ==================== 异步加载 API (放在前面避免路由冲突) ====================
+
+@router.post("/load/async")
+async def load_document_async(
+    request: AsyncLoadRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Submit async document loading task.
+    
+    For large files or complex documents, this endpoint submits the task
+    to Docling Serve's async API and returns immediately with a task_id.
+    
+    Use GET /load/task/{task_id}/status to poll for progress.
+    Use GET /load/task/{task_id}/result to get the final result.
+    
+    Returns:
+        task_id: Unique task identifier
+        status: Initial task status (pending)
+    """
+    validate_document_id(request.document_id)
+    
+    result = loading_service.submit_async_load(
+        db=db,
+        document_id=request.document_id,
+        loader_type=request.loader_type
+    )
+    
+    return success_response(
+        data=result,
+        message="Async loading task submitted"
+    )
+
+
+@router.get("/load/tasks")
+async def list_load_tasks(
+    document_id: Optional[str] = Query(None, description="Filter by document ID"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    db: Session = Depends(get_db)
+):
+    """
+    List async loading tasks.
+    
+    Returns recent loading tasks with optional filters.
+    """
+    tasks = loading_service.list_async_tasks(
+        db=db,
+        document_id=document_id,
+        status=status,
+        limit=limit
+    )
+    
+    return success_response(
+        data={
+            "tasks": tasks,
+            "total": len(tasks)
+        }
+    )
+
+
+@router.get("/load/task/{task_id}/status")
+async def get_load_task_status(
+    task_id: str = Path(..., description="Loading task ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get async loading task status.
+    
+    Poll this endpoint to check task progress.
+    
+    Returns:
+        status: pending/started/success/failure
+        progress: 0-100 (if available)
+    """
+    result = loading_service.get_async_task_status(db, task_id)
+    
+    return success_response(
+        data=result,
+        message="Task status retrieved"
+    )
+
+
+@router.get("/load/task/{task_id}/result")
+async def get_load_task_result(
+    task_id: str = Path(..., description="Loading task ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get async loading task result.
+    
+    Call this after task status is 'success' to get the parsed content.
+    
+    Returns:
+        Full loading result with parsed content
+    """
+    result = loading_service.get_async_task_result(db, task_id)
+    
+    return success_response(
+        data=result,
+        message="Task result retrieved"
+    )
+
+
+@router.post("/load/task/{task_id}/cancel")
+async def cancel_load_task(
+    task_id: str = Path(..., description="Loading task ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Cancel an async loading task.
+    
+    Note: Cancellation may not be immediate if the task is already processing.
+    """
+    result = loading_service.cancel_async_task(db, task_id)
+    
+    return success_response(
+        data=result,
+        message="Task cancellation requested"
+    )
+
+
+# ==================== 同步加载 API ====================
 
 @router.post("/load")
 async def load_document(

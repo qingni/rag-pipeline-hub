@@ -65,13 +65,6 @@
           </div>
         </template>
         
-        <!-- 格式列 -->
-        <template #format="{ row }">
-          <t-tag theme="primary" variant="light" size="small">
-            {{ row.format.toUpperCase() }}
-          </t-tag>
-        </template>
-        
         <!-- 大小列 -->
         <template #size="{ row }">
           <span class="text-sm text-gray-600">
@@ -88,6 +81,22 @@
           >
             {{ getStatusText(row.status) }}
           </t-tag>
+        </template>
+        
+        <!-- 解析器列 -->
+        <template #provider="{ row }">
+          <t-tag v-if="row.provider" theme="warning" variant="light" size="small">
+            {{ formatProvider(row.provider) }}
+          </t-tag>
+          <span v-else class="text-sm text-gray-400">-</span>
+        </template>
+        
+        <!-- 加载耗时列 -->
+        <template #loading_time="{ row }">
+          <span v-if="row.loading_time" class="text-sm text-orange-600 font-medium">
+            {{ formatLoadingTime(row.loading_time) }}
+          </span>
+          <span v-else class="text-sm text-gray-400">-</span>
         </template>
         
         <!-- 时间列 -->
@@ -174,32 +183,38 @@ const columns = [
     ellipsis: true
   },
   {
-    colKey: 'format',
-    title: '格式',
-    width: 100,
-    align: 'center'
-  },
-  {
     colKey: 'size',
     title: '大小',
-    width: 120,
+    width: 100,
     align: 'right'
   },
   {
     colKey: 'status',
     title: '状态',
-    width: 100,
+    width: 80,
     align: 'center'
+  },
+  {
+    colKey: 'provider',
+    title: '解析器',
+    width: 120,
+    align: 'center'
+  },
+  {
+    colKey: 'loading_time',
+    title: '加载耗时',
+    width: 100,
+    align: 'right'
   },
   {
     colKey: 'upload_time',
     title: '上传时间',
-    width: 180
+    width: 160
   },
   {
     colKey: 'operation',
     title: '操作',
-    width: 100,
+    width: 80,
     align: 'center',
     fixed: 'right'
   }
@@ -323,23 +338,29 @@ function formatDate(dateString) {
   const date = new Date(dateString)
   if (isNaN(date.getTime())) return dateString
   
-  const now = new Date()
-  const diffMs = now - date
-  const diffMins = Math.floor(diffMs / 60000)
-  
-  if (diffMins < 1) return '刚刚'
-  if (diffMins < 60) return `${diffMins}分钟前`
-  if (diffMins < 1440) return `${Math.floor(diffMins / 60)}小时前`
-  if (diffMins < 43200) return `${Math.floor(diffMins / 1440)}天前`
-  
+  // 直接显示时间戳格式
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: false
   })
+}
+
+function formatLoadingTime(seconds) {
+  if (seconds === null || seconds === undefined) return '-'
+  if (seconds < 1) {
+    return `${(seconds * 1000).toFixed(0)} ms`
+  } else if (seconds < 60) {
+    return `${seconds.toFixed(2)} s`
+  } else {
+    const minutes = Math.floor(seconds / 60)
+    const secs = (seconds % 60).toFixed(1)
+    return `${minutes}m ${secs}s`
+  }
 }
 
 function getStatusTheme(status) {
@@ -360,6 +381,26 @@ function getStatusText(status) {
     error: '错误'
   }
   return textMap[status] || status
+}
+
+function formatProvider(provider) {
+  const providerMap = {
+    'docling_serve': 'Docling',
+    'docling': 'Docling',
+    'pymupdf': 'PyMuPDF',
+    'pypdf': 'PyPDF',
+    'unstructured': 'Unstructured',
+    'docx': 'python-docx',
+    'xlsx': 'openpyxl',
+    'pptx': 'python-pptx',
+    'html': 'BeautifulSoup',
+    'csv': 'pandas',
+    'json': 'JSON',
+    'xml': 'lxml',
+    'text': 'Text',
+    'msg': 'extract-msg'
+  }
+  return providerMap[provider] || provider
 }
 </script>
 

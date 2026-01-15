@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     from .models import document, processing_result, chunk, chunking_result
     from .models import chunking_strategy, chunking_task, embedding_models
     from .models import vector_index, index_statistics, query_history
-    from .models import search, generation
+    from .models import search, generation, loading_task
     
     # Initialize database tables
     init_db()
@@ -94,28 +94,22 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    from .providers.loaders.docling_loader import docling_loader
+    from .providers.loaders.docling_serve_client import docling_serve_loader
     
-    # Check Docling status
+    # Check Docling Serve status
     docling_status = "unavailable"
-    if docling_loader.is_available():
-        if docling_loader.is_ready():
-            docling_status = "ready"
-        elif docling_loader.is_initializing():
-            docling_status = "initializing"
-        else:
-            docling_status = "available"
+    if docling_serve_loader and docling_serve_loader.is_available():
+        docling_status = "ready"
     
     return {
         "success": True,
         "status": "healthy",
         "service": "document-processing-api",
         "components": {
-            "docling": {
+            "docling_serve": {
                 "status": docling_status,
-                "available": docling_loader.is_available(),
-                "ready": docling_loader.is_ready() if docling_loader.is_available() else False,
-                "initializing": docling_loader.is_initializing() if docling_loader.is_available() else False
+                "available": docling_serve_loader.is_available() if docling_serve_loader else False,
+                "ready": docling_status == "ready"
             }
         }
     }

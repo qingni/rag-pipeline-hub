@@ -65,9 +65,14 @@ class JSONStorageManager:
             # If absolute path, use directly
             if path.is_absolute():
                 pass
-            # If path already starts with results dir name, use as-is from current dir
+            # If path starts with results/, try both from project root and RESULTS_DIR
             elif result_path.startswith("results/") or result_path.startswith("results\\"):
+                # First try from project root (backend directory)
                 path = Path(result_path)
+                if not path.exists():
+                    # If not found, try removing 'results/' prefix and prepend RESULTS_DIR
+                    rel_path = result_path.replace("results/", "").replace("results\\", "")
+                    path = Path(settings.RESULTS_DIR) / rel_path
             else:
                 # Prepend RESULTS_DIR for relative paths
                 path = Path(settings.RESULTS_DIR) / path
@@ -120,9 +125,14 @@ class JSONStorageManager:
             # If absolute path, use directly
             if path.is_absolute():
                 pass
-            # If path already starts with results dir name, use as-is
+            # If path starts with results/, try both from project root and RESULTS_DIR
             elif result_path.startswith("results/") or result_path.startswith("results\\"):
+                # First try from project root (backend directory)
                 path = Path(result_path)
+                if not path.exists():
+                    # If not found, try removing 'results/' prefix and prepend RESULTS_DIR
+                    rel_path = result_path.replace("results/", "").replace("results\\", "")
+                    path = Path(settings.RESULTS_DIR) / rel_path
             else:
                 path = Path(settings.RESULTS_DIR) / path
             

@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  docling-serve:
+    image: quay.io/docling-project/docling-serve-cpu:latest
+    container_name: docling-serve
+    ports:
+      - "5001:5001"
+    environment:
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=5001
+      - DOCLING_SERVE_ENABLE_UI=1
+      - DOCLING_SERVE_LOAD_MODELS_AT_BOOT=true
+      - EASYOCR_MODULE_PATH=/opt/app-root/src/.cache/docling/models/EasyOcr
+      # 超时配置 - 适应大文件处理
+      - DOCLING_SERVE_MAX_SYNC_WAIT=600          # 同步等待超时: 10分钟
+      - DOCLING_SERVE_MAX_DOCUMENT_TIMEOUT=1800  # 文档处理超时: 30分钟
+      - UVICORN_TIMEOUT_KEEP_ALIVE=300           # HTTP 连接保持: 5分钟
+    volumes:
+      # 容器内实际路径是 /opt/app-root/src/.cache
+      - docling_cache:/opt/app-root/src/.cache
+      - docling_models:/opt/app-root/src/.docling
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+
+volumes:
+  docling_cache:
+    driver: local
+  docling_models:
+    driver: local

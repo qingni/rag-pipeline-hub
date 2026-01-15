@@ -32,6 +32,10 @@
             <span class="text-gray-600">创建时间:</span>
             <span class="ml-2 font-medium">{{ formatDate(result.created_at) }}</span>
           </div>
+          <div v-if="processingTime">
+            <span class="text-gray-600">加载耗时:</span>
+            <span class="ml-2 font-medium text-orange-600">{{ formatProcessingTime(processingTime) }}</span>
+          </div>
         </div>
       </div>
       
@@ -120,12 +124,41 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   result: {
     type: Object,
     default: null
   }
 })
+
+// 从多个位置获取处理耗时
+const processingTime = computed(() => {
+  if (!props.result) return null
+  // 优先从 extra_metadata 获取
+  if (props.result.extra_metadata?.processing_time) {
+    return props.result.extra_metadata.processing_time
+  }
+  // 其次从 result_data 获取
+  if (props.result.result_data?.processing_time) {
+    return props.result.result_data.processing_time
+  }
+  return null
+})
+
+function formatProcessingTime(seconds) {
+  if (seconds === null || seconds === undefined) return '-'
+  if (seconds < 1) {
+    return `${(seconds * 1000).toFixed(0)} ms`
+  } else if (seconds < 60) {
+    return `${seconds.toFixed(2)} 秒`
+  } else {
+    const minutes = Math.floor(seconds / 60)
+    const secs = (seconds % 60).toFixed(1)
+    return `${minutes} 分 ${secs} 秒`
+  }
+}
 
 function formatDate(dateString) {
   if (!dateString) return '-'

@@ -10,18 +10,16 @@ from .unstructured_loader import unstructured_loader
 from .text_loader import text_loader
 from .docx_loader import docx_loader
 from .doc_loader import doc_loader
-from .docling_loader import docling_loader
 from .html_loader import html_loader
 from .csv_loader import csv_loader
 from .json_loader import json_loader
 from .xml_loader import xml_loader
 from .xlsx_loader import xlsx_loader
 from .pptx_loader import pptx_loader
-from .epub_loader import epub_loader
-from .email_loader import email_loader
 from .msg_loader import msg_loader
 from .vtt_loader import vtt_loader
 from .properties_loader import properties_loader
+from .docling_serve_client import docling_serve_loader
 
 # Loader registry - maps loader names to instances
 LOADER_INSTANCES = {
@@ -47,18 +45,14 @@ LOADER_INSTANCES = {
     'text': text_loader,
     
     # Email loaders
-    'email': email_loader,
     'msg': msg_loader,
-    
-    # Ebook loaders
-    'epub': epub_loader,
     
     # Specialized loaders
     'vtt': vtt_loader,
     'properties': properties_loader,
     
     # Advanced loaders
-    'docling': docling_loader,
+    'docling_serve': docling_serve_loader,
     'unstructured': unstructured_loader,
 }
 
@@ -142,15 +136,13 @@ __all__ = [
     'text_loader',
     'docx_loader',
     'doc_loader',
-    'docling_loader',
+    'docling_serve_loader',
     'html_loader',
     'csv_loader',
     'json_loader',
     'xml_loader',
     'xlsx_loader',
     'pptx_loader',
-    'epub_loader',
-    'email_loader',
     'msg_loader',
     'vtt_loader',
     'properties_loader',

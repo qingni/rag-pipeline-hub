@@ -9,6 +9,26 @@ class UnstructuredLoader:
     def __init__(self):
         """Initialize Unstructured loader."""
         self.name = "unstructured"
+        self._unavailable_reason = None
+    
+    def is_available(self) -> bool:
+        """
+        Check if Unstructured library is available.
+        
+        Returns:
+            True if unstructured is installed and usable
+        """
+        try:
+            from unstructured.partition.auto import partition
+            self._unavailable_reason = None
+            return True
+        except ImportError as e:
+            self._unavailable_reason = f"Unstructured library not installed: {str(e)}"
+            return False
+    
+    def get_unavailable_reason(self) -> str:
+        """Get reason why loader is unavailable."""
+        return self._unavailable_reason or "Unknown reason"
     
     def extract_text(self, file_path: str) -> Dict[str, Any]:
         """
@@ -64,11 +84,11 @@ class UnstructuredLoader:
                 "total_chars": sum(p["char_count"] for p in pages)
             }
             
-        except ImportError:
+        except ImportError as e:
             return {
                 "success": False,
                 "loader": self.name,
-                "error": "Unstructured library not installed"
+                "error": f"Unstructured dependency missing: {str(e)}"
             }
         except Exception as e:
             return {

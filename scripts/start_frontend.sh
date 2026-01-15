@@ -1,7 +1,10 @@
 #!/bin/bash
-# 前端快速启动脚本
+# 前端启动脚本
 
-cd frontend
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_ROOT/frontend"
 
 # 检查依赖
 if [ ! -d "node_modules" ]; then

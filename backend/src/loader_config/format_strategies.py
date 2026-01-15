@@ -10,15 +10,15 @@ from ..models.loading_result import ExtractionQuality
 
 # Loader Registry - All available loaders and their configurations
 LOADER_REGISTRY: Dict[str, LoaderConfig] = {
-    "docling": LoaderConfig(
-        name="docling",
-        display_name="Docling (IBM)",
-        supported_formats=["pdf", "docx", "xlsx", "pptx", "html"],
-        priority=1,
-        avg_speed="slow",
+    "docling_serve": LoaderConfig(
+        name="docling_serve",
+        display_name="Docling Serve (HTTP)",
+        supported_formats=["pdf", "docx", "xlsx", "pptx", "html", "md", "txt", "csv"],
+        priority=0,  # Highest priority when available
+        avg_speed="medium",
         quality_level=ExtractionQuality.HIGH,
-        requires_installation=True,
-        installation_command="pip install docling",
+        requires_installation=False,  # No local installation needed
+        installation_command="./start_docling.sh",
         supports_tables=True,
         supports_images=True,
         supports_formulas=True,
@@ -99,22 +99,6 @@ LOADER_REGISTRY: Dict[str, LoaderConfig] = {
         avg_speed="fast",
         quality_level=ExtractionQuality.MEDIUM,
     ),
-    "epub": LoaderConfig(
-        name="epub",
-        display_name="ebooklib",
-        supported_formats=["epub"],
-        priority=1,
-        avg_speed="medium",
-        quality_level=ExtractionQuality.MEDIUM,
-    ),
-    "email": LoaderConfig(
-        name="email",
-        display_name="email parser",
-        supported_formats=["eml"],
-        priority=1,
-        avg_speed="fast",
-        quality_level=ExtractionQuality.MEDIUM,
-    ),
     "msg": LoaderConfig(
         name="msg",
         display_name="extract-msg",
@@ -160,7 +144,7 @@ LOADER_REGISTRY: Dict[str, LoaderConfig] = {
     "unstructured": LoaderConfig(
         name="unstructured",
         display_name="Unstructured",
-        supported_formats=["pdf", "docx", "xlsx", "pptx", "html", "epub", "eml", "msg"],
+        supported_formats=["pdf", "docx", "xlsx", "pptx", "html", "msg"],
         priority=10,  # Universal fallback
         avg_speed="slow",
         quality_level=ExtractionQuality.MEDIUM,
@@ -177,19 +161,19 @@ FORMAT_STRATEGIES: Dict[str, FormatStrategy] = {
     # First batch: PDF/DOCX/XLSX/PPTX
     "pdf": FormatStrategy(
         format="pdf",
-        primary_loader="docling",
+        primary_loader="docling_serve",
         fallback_loaders=["pymupdf", "pypdf", "unstructured"],
         size_threshold_mb=20.0,
         fast_loader="pymupdf",
     ),
     "docx": FormatStrategy(
         format="docx",
-        primary_loader="docling",
+        primary_loader="docling_serve",
         fallback_loaders=["docx", "unstructured"],
     ),
     "xlsx": FormatStrategy(
         format="xlsx",
-        primary_loader="docling",
+        primary_loader="docling_serve",
         fallback_loaders=["xlsx", "unstructured"],
     ),
     "xls": FormatStrategy(
@@ -199,8 +183,13 @@ FORMAT_STRATEGIES: Dict[str, FormatStrategy] = {
     ),
     "pptx": FormatStrategy(
         format="pptx",
-        primary_loader="docling",
-        fallback_loaders=["pptx", "unstructured"],
+        primary_loader="pptx",  # python-pptx 对 PPTX 的支持更好
+        fallback_loaders=["docling_serve", "unstructured"],
+    ),
+    "ppt": FormatStrategy(
+        format="ppt",
+        primary_loader="docling_serve",  # 旧版 PPT 需要 Docling 转换
+        fallback_loaders=["unstructured"],
     ),
     
     # Second batch: HTML/CSV/TXT/MD
@@ -249,16 +238,6 @@ FORMAT_STRATEGIES: Dict[str, FormatStrategy] = {
     "xml": FormatStrategy(
         format="xml",
         primary_loader="xml",
-        fallback_loaders=["unstructured"],
-    ),
-    "epub": FormatStrategy(
-        format="epub",
-        primary_loader="epub",
-        fallback_loaders=["unstructured"],
-    ),
-    "eml": FormatStrategy(
-        format="eml",
-        primary_loader="email",
         fallback_loaders=["unstructured"],
     ),
     "msg": FormatStrategy(

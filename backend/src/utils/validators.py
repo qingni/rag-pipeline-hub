@@ -5,8 +5,25 @@ from .error_handlers import ValidationError
 from ..config import settings
 
 
-# Allowed file extensions
-ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md", ".markdown"}
+# Allowed file extensions - 支持的所有文件格式
+ALLOWED_EXTENSIONS = {
+    # 文档格式
+    ".pdf", ".doc", ".docx",
+    # 文本格式
+    ".txt", ".md", ".markdown",
+    # Excel 格式
+    ".xlsx", ".xls",
+    # PowerPoint 格式
+    ".pptx", ".ppt",
+    # 网页格式
+    ".html", ".htm",
+    # 数据格式
+    ".csv", ".json", ".xml",
+    # 富文本
+    ".rtf",
+    # OpenDocument 格式
+    ".odt", ".ods", ".odp"
+}
 
 # Max file size (50MB)
 MAX_FILE_SIZE = settings.MAX_UPLOAD_SIZE

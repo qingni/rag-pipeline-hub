@@ -21,7 +21,7 @@
     
     <!-- 文件格式提示 -->
     <div class="upload-tips">
-      <p class="tips-text">支持格式: PDF, DOCX, XLSX, PPTX, HTML, CSV, JSON, XML, EPUB, TXT, MD 等 20+ 种格式 (最大50MB)</p>
+      <p class="tips-text">支持格式: PDF, DOCX, XLSX, PPTX, HTML, CSV, JSON, XML, TXT, MD 等 20+ 种格式 (最大50MB)</p>
     </div>
     
     <!-- 上传进度 -->
@@ -71,7 +71,8 @@ const uploadSuccess = ref(false)
 const emit = defineEmits(['upload-complete'])
 
 const MAX_FILE_SIZE = 52428800 // 50MB
-const acceptedFormats = '.pdf,.doc,.docx,.txt,.md,.markdown'
+// 支持的所有文件格式
+const acceptedFormats = '.pdf,.doc,.docx,.txt,.md,.markdown,.xlsx,.xls,.pptx,.ppt,.html,.htm,.csv,.json,.xml,.rtf,.odt,.ods,.odp'
 
 const uploadStatus = computed(() => {
   if (error.value) return 'error'
@@ -88,7 +89,17 @@ const uploadLabel = computed(() => {
 })
 
 function validateFile(file) {
-  const allowedExtensions = ['.pdf', '.doc', '.docx', '.txt', '.md', '.markdown']
+  // 支持的所有文件扩展名
+  const allowedExtensions = [
+    '.pdf', '.doc', '.docx',           // 文档
+    '.txt', '.md', '.markdown',        // 文本
+    '.xlsx', '.xls',                   // Excel
+    '.pptx', '.ppt',                   // PowerPoint
+    '.html', '.htm',                   // 网页
+    '.csv', '.json', '.xml',           // 数据格式
+    '.rtf',                            // 富文本
+    '.odt', '.ods', '.odp'             // OpenDocument
+  ]
   const fileExt = '.' + file.name.split('.').pop().toLowerCase()
   
   if (!allowedExtensions.includes(fileExt)) {
