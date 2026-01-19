@@ -44,8 +44,16 @@ class UnstructuredLoader:
             # Import here to avoid dependency issues
             from unstructured.partition.auto import partition
             
-            # Partition document
-            elements = partition(filename=file_path)
+            # Partition document with OCR support for images
+            # strategy="hi_res" enables image extraction and OCR
+            elements = partition(
+                filename=file_path,
+                strategy="hi_res",  # 高精度模式，启用 OCR
+                extract_images_in_pdf=True,  # 提取 PDF 中的图片
+                infer_table_structure=True,  # 推断表格结构
+                ocr_languages="chi_sim+eng",  # Tesseract OCR 语言：中文简体+英文
+                extract_image_block_to_payload=True,  # 将图片内容提取到 payload
+            )
             
             # Extract text and metadata
             pages_text = {}

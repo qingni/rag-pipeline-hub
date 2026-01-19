@@ -88,3 +88,4 @@ docker/milvus/volumes/
 *.tmp
 *.temp
 .cache/
+backend/figures/

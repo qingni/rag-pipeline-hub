@@ -17,9 +17,14 @@ docling>=2.67.0,<3.0.0
 docling-core>=2.50.1,<3.0.0
 
 # Document processing - Fallback loaders
+# 系统依赖: brew install poppler tesseract tesseract-lang (unstructured PDF/OCR 需要)
 PyMuPDF==1.23.8
 PyPDF2==3.0.1
-unstructured==0.11.2
+pdfminer.six>=20231228  # unstructured 依赖，需要较新版本
+unstructured>=0.18.0  # 需要 0.18+ 才兼容新版 pdfminer.six
+unstructured-inference  # unstructured PDF 解析依赖
+pi-heif  # unstructured 图片格式支持
+matplotlib>=3.8.0  # unstructured 可视化依赖
 python-docx>=1.1.2,<2.0.0
 # textract removed - conflicts with beautifulsoup4>=4.12.3 (requires ~=4.8.0)
 # DOC files use antiword or python-docx as fallback
