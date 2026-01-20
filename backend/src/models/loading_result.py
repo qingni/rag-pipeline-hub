@@ -61,7 +61,11 @@ class TableContent:
 
 @dataclass
 class ImageContent:
-    """Image content (Docling specific)."""
+    """Image content for multimodal processing.
+    
+    支持多模态嵌入模型 (如 qwen3-vl-embedding-8b) 的图片数据结构。
+    可以存储图片的多种表示形式：文件路径、Base64 数据、描述文本等。
+    """
     page_number: int
     image_index: int
     caption: Optional[str] = None
@@ -70,9 +74,52 @@ class ImageContent:
     # Image position (optional)
     bbox: Optional[Dict[str, float]] = None
     
+    # ========== 多模态支持字段 ==========
+    
+    # 图片文件路径 (相对于项目根目录)
+    file_path: Optional[str] = None
+    
+    # 图片 Base64 编码 (用于直接传递给多模态模型)
+    base64_data: Optional[str] = None
+    
+    # 图片 MIME 类型 (image/png, image/jpeg 等)
+    mime_type: Optional[str] = None
+    
+    # 图片尺寸
+    width: Optional[int] = None
+    height: Optional[int] = None
+    
+    # 图片在文档中的上下文位置 (前后文本片段)
+    context_before: Optional[str] = None  # 图片前的文本 (用于关联)
+    context_after: Optional[str] = None   # 图片后的文本 (用于关联)
+    
+    # 图片类型标签
+    image_type: Optional[str] = None  # figure, chart, diagram, photo, screenshot 等
+    
+    # OCR 识别的图片内文字
+    ocr_text: Optional[str] = None
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
+    
+    def has_visual_data(self) -> bool:
+        """检查是否有可用于多模态处理的视觉数据"""
+        return bool(self.file_path or self.base64_data)
+    
+    def get_text_representation(self) -> str:
+        """获取图片的纯文本表示 (用于传统文本嵌入)"""
+        parts = []
+        if self.caption:
+            parts.append(f"[图片标题: {self.caption}]")
+        if self.alt_text:
+            parts.append(f"[图片描述: {self.alt_text}]")
+        if self.ocr_text:
+            parts.append(f"[图片文字: {self.ocr_text}]")
+        if self.image_type:
+            parts.append(f"[图片类型: {self.image_type}]")
+        
+        return " ".join(parts) if parts else "[图片]"
 
 
 @dataclass
@@ -234,7 +281,17 @@ class StandardDocumentResult:
                 image_index=i.get('image_index', 0),
                 caption=i.get('caption'),
                 alt_text=i.get('alt_text'),
-                bbox=i.get('bbox')
+                bbox=i.get('bbox'),
+                # 多模态支持字段
+                file_path=i.get('file_path'),
+                base64_data=i.get('base64_data'),
+                mime_type=i.get('mime_type'),
+                width=i.get('width'),
+                height=i.get('height'),
+                context_before=i.get('context_before'),
+                context_after=i.get('context_after'),
+                image_type=i.get('image_type'),
+                ocr_text=i.get('ocr_text')
             )
             for i in content_data.get('images', [])
         ]

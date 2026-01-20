@@ -87,11 +87,11 @@ def sample_results(session):
             result_id=str(uuid.uuid4()),
             document_id="doc-1",
             chunking_result_id=f"chunk-{i+8}",
-            model="jina-embeddings-v4",
+            model="hunyuan-embedding",
             status="PARTIAL_SUCCESS",
             successful_count=40,
             failed_count=10,
-            vector_dimension=2048,
+            vector_dimension=1024,
             json_file_path=f"embedding/2025-12-16/embedding_{i+8}.json",
             processing_time_ms=120.0,
             created_at=now - timedelta(hours=i+8),
@@ -145,10 +145,10 @@ class TestGetLatestByDocument:
     
     def test_get_latest_different_model(self, embedding_db, sample_results):
         """Should return correct result when filtering by different model."""
-        result = embedding_db.get_latest_by_document("doc-1", model="jina-embeddings-v4")
+        result = embedding_db.get_latest_by_document("doc-1", model="hunyuan-embedding")
         
         assert result is not None
-        assert result.model == "jina-embeddings-v4"
+        assert result.model == "hunyuan-embedding"
         assert result.status == "PARTIAL_SUCCESS"
     
     def test_get_latest_nonexistent_document(self, embedding_db, sample_results):
@@ -158,7 +158,7 @@ class TestGetLatestByDocument:
     
     def test_get_latest_nonexistent_model(self, embedding_db, sample_results):
         """Should return None when no results with that model."""
-        result = embedding_db.get_latest_by_document("doc-1", model="hunyuan-embedding")
+        result = embedding_db.get_latest_by_document("doc-1", model="qwen3-vl-embedding-8b")
         assert result is None
 
 

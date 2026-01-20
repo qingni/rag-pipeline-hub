@@ -173,8 +173,8 @@ FORMAT_STRATEGIES: Dict[str, FormatStrategy] = {
     ),
     "xlsx": FormatStrategy(
         format="xlsx",
-        primary_loader="docling_serve",
-        fallback_loaders=["xlsx", "unstructured"],
+        primary_loader="xlsx",  # 优先使用 openpyxl，保留完整的 Sheet 名称和元数据
+        fallback_loaders=["docling_serve", "unstructured"],
     ),
     "xls": FormatStrategy(
         format="xls",

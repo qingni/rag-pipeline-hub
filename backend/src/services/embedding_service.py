@@ -27,39 +27,75 @@ from ..utils.retry_utils import ExponentialBackoffRetry, detect_rate_limit_error
 MAX_BATCH_SIZE = 1000
 
 
-EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
+# ============================================================================
+# 通用文本 Embedding 模型
+# ============================================================================
+TEXT_EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
     "bge-m3": {
         "name": "bge-m3",
         "dimension": 1024,
-        "description": "BGE-M3 多语言模型，支持中英文，性能优秀",
+        "max_sequence_length": 8192,
+        "description": "BGE-M3 多语言模型，支持密集检索、多向量检索和稀疏检索",
         "provider": "bge",
         "supports_multilingual": True,
+        "supports_instruction": False,
         "max_batch_size": 1000,
+        "model_type": "text",
     },
     "qwen3-embedding-8b": {
         "name": "qwen3-embedding-8b",
         "dimension": 4096,
-        "description": "通义千问 Embedding 模型，8B 参数",
+        "max_sequence_length": 32768,
+        "description": "通义千问 Embedding 8B，高精度、长文本支持、动态维度输出",
         "provider": "qwen",
         "supports_multilingual": True,
+        "supports_instruction": True,
         "max_batch_size": 1000,
+        "model_type": "text",
     },
     "hunyuan-embedding": {
         "name": "hunyuan-embedding",
         "dimension": 1024,
-        "description": "腾讯混元 Embedding 模型",
+        "max_sequence_length": 1024,
+        "description": "腾讯混元提供的 Embedding 模型",
         "provider": "hunyuan",
         "supports_multilingual": True,
+        "supports_instruction": False,
         "max_batch_size": 1000,
+        "model_type": "text",
     },
-    "jina-embeddings-v4": {
-        "name": "jina-embeddings-v4",
-        "dimension": 2048,
-        "description": "Jina AI Embeddings v4，多语言支持",
-        "provider": "jina",
+}
+
+# ============================================================================
+# 多模态 Embedding 模型
+# ============================================================================
+MULTIMODAL_EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
+    "qwen3-vl-embedding-8b": {
+        "name": "qwen3-vl-embedding-8b",
+        "dimension": 4096,  # 支持自定义输出维度 (64 至 4096)
+        "min_dimension": 64,
+        "max_dimension": 4096,
+        "max_sequence_length": 32768,
+        "description": "通义千问多模态 Embedding 8B，支持文本、图像、截图、视频及任意多模态组合输入",
+        "provider": "qwen",
         "supports_multilingual": True,
+        "supports_instruction": True,
         "max_batch_size": 1000,
+        "model_type": "multimodal",
+        "supported_inputs": ["text", "image", "video", "text+image"],
+        "core_features": [
+            "统一语义空间中生成文本和视觉内容的向量表示",
+            "实现高效的图文、文视频等多模态相似度计算与检索",
+        ],
     },
+}
+
+# ============================================================================
+# 合并所有 Embedding 模型 (保持向后兼容)
+# ============================================================================
+EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
+    **TEXT_EMBEDDING_MODELS,
+    **MULTIMODAL_EMBEDDING_MODELS,
 }
 
 
@@ -123,7 +159,7 @@ class EmbeddingService:
             "bge-m3",
             "qwen3-embedding-8b",
             "hunyuan-embedding",
-            "jina-embeddings-v4",
+            "qwen3-vl-embedding-8b",
         ] = "qwen3-embedding-8b",
         base_url: str = "",  # 必须通过参数传入，不提供默认值
         max_retries: int = 3,

@@ -24,7 +24,7 @@
     </div>
     
     <!-- 正常预览 -->
-    <div v-else-if="previewText" class="card">
+    <div v-else-if="currentContent || previewText" class="card">
       <div class="preview-header">
         <h4 class="font-semibold">文档预览 (共{{ pageCount }}页)</h4>
         <t-button 
@@ -36,6 +36,19 @@
           <t-icon :name="isExpanded ? 'chevron-up' : 'chevron-down'" size="16px" />
         </t-button>
       </div>
+      
+      <!-- Excel Sheet 标签页 -->
+      <div v-if="sheetNames.length > 0" class="sheet-tabs">
+        <t-tabs v-model="activeSheet" theme="card" size="small">
+          <t-tab-panel 
+            v-for="(sheet, index) in sheetNames" 
+            :key="index" 
+            :value="index" 
+            :label="sheet"
+          />
+        </t-tabs>
+      </div>
+      
       <!-- 如果是 Markdown 格式（包含图片或标题），渲染为 HTML -->
       <div 
         v-if="isMarkdown" 
@@ -49,7 +62,7 @@
         class="preview-content whitespace-pre-wrap text-sm text-gray-700"
         :class="{ expanded: isExpanded }"
       >
-        {{ previewText }}
+        {{ currentContent }}
       </div>
     </div>
     
@@ -84,22 +97,38 @@ const pageCount = ref(0)
 const previewStatus = ref('')
 const statusMessage = ref('')
 const isExpanded = ref(false)
+const sheetNames = ref([])
+const activeSheet = ref(0)
+const allPages = ref([])  // 存储所有 pages 数据
+
+// 当前显示的内容（根据选中的 sheet 切换）
+const currentContent = computed(() => {
+  // 如果有 sheet 且有对应的 pages
+  if (sheetNames.value.length > 0 && allPages.value.length > 0) {
+    const page = allPages.value[activeSheet.value]
+    return page?.text || ''
+  }
+  // 否则返回完整预览文本
+  return previewText.value
+})
 
 // 检测是否为 Markdown 格式（包含图片、标题等 Markdown 语法）
 const isMarkdown = computed(() => {
-  if (!previewText.value) return false
+  const content = currentContent.value
+  if (!content) return false
   // 检测常见的 Markdown 语法
-  return /!\[.*?\]\(.*?\)|^#{1,6}\s|^\*\*|^\-\s|\|.*\|/m.test(previewText.value)
+  return /!\[.*?\]\(.*?\)|^#{1,6}\s|^\*\*|^\-\s|\|.*\|/m.test(content)
 })
 
 // 渲染 Markdown 为 HTML
 const renderedMarkdown = computed(() => {
-  if (!previewText.value) return ''
+  const content = currentContent.value
+  if (!content) return ''
   try {
-    return marked(previewText.value)
+    return marked(content)
   } catch (e) {
     console.error('Markdown render error:', e)
-    return previewText.value
+    return content
   }
 })
 
@@ -112,6 +141,9 @@ watch(() => props.documentId, async (newId) => {
     pageCount.value = 0
     previewStatus.value = ''
     statusMessage.value = ''
+    sheetNames.value = []
+    activeSheet.value = 0
+    allPages.value = []
   }
 }, { immediate: true })
 
@@ -128,6 +160,12 @@ async function loadPreview() {
     pageCount.value = result.page_count || 0
     previewStatus.value = result.status || ''
     statusMessage.value = result.message || ''
+    
+    // 提取 sheet 信息和 pages 数据
+    const metadata = result.metadata || {}
+    sheetNames.value = metadata.sheet_names || []
+    allPages.value = result.pages || []
+    activeSheet.value = 0
   } catch (err) {
     console.error('Preview load failed:', err)
     previewStatus.value = 'error'
@@ -144,6 +182,14 @@ async function loadPreview() {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.sheet-tabs {
+  margin-bottom: 16px;
+}
+
+.sheet-tabs :deep(.t-tabs__nav-item) {
+  font-size: 13px;
 }
 
 .preview-content {

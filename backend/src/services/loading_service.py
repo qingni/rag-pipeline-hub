@@ -553,18 +553,22 @@ class LoadingService:
             return
         
         try:
-            # 获取结果
-            result_data = docling_serve_loader.get_task_result(task.external_task_id)
+            # 先获取文档信息（用于传递文件名和格式）
+            document = db.query(Document).filter(Document.id == task.document_id).first()
+            if not document:
+                return
+            
+            # 获取结果（传入文件名和格式，以便正确提取格式特定的元数据）
+            result_data = docling_serve_loader.get_task_result(
+                task.external_task_id,
+                filename=document.filename,
+                file_format=document.format
+            )
             
             if not result_data.get("success"):
                 task.status = LoadingTaskStatus.FAILURE
                 task.error_message = result_data.get("error", "Failed to get result")
                 db.commit()
-                return
-            
-            # 获取文档信息
-            document = db.query(Document).filter(Document.id == task.document_id).first()
-            if not document:
                 return
             
             # 添加处理时间

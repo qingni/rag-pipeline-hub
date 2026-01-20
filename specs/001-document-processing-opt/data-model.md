@@ -51,7 +51,7 @@ class TableContent:
 
 @dataclass
 class ImageContent:
-    """图像内容 (Docling 特有)"""
+    """图像内容 (支持多模态嵌入)"""
     page_number: int
     image_index: int
     caption: Optional[str] = None
@@ -59,6 +59,31 @@ class ImageContent:
     
     # 图像位置 (可选)
     bbox: Optional[Dict[str, float]] = None
+    
+    # ========== 多模态支持字段 ==========
+    
+    # 图片文件路径 (相对于项目根目录)
+    file_path: Optional[str] = None
+    
+    # 图片 Base64 编码 (用于直接传递给多模态模型)
+    base64_data: Optional[str] = None
+    
+    # 图片 MIME 类型 (image/png, image/jpeg 等)
+    mime_type: Optional[str] = None
+    
+    # 图片尺寸
+    width: Optional[int] = None
+    height: Optional[int] = None
+    
+    # 图片在文档中的上下文位置 (前后文本片段)
+    context_before: Optional[str] = None  # 图片前的文本
+    context_after: Optional[str] = None   # 图片后的文本
+    
+    # 图片类型标签
+    image_type: Optional[str] = None  # figure, chart, diagram, photo, screenshot 等
+    
+    # OCR 识别的图片内文字
+    ocr_text: Optional[str] = None
 
 
 @dataclass
@@ -317,20 +342,24 @@ FORMAT_STRATEGIES: Dict[str, FormatStrategy] = {
 │  │ page_count      │  │ tables[]        │  │ processing_time  │ │
 │  │ file_size       │  │ images[]        │  │ fallback_used    │ │
 │  │ format          │  │ formulas[]      │  │ fallback_reason  │ │
-│  │ extraction_quality│ │                 │  │                  │ │
+│  │ extraction_quality│ │                 │  │ multimodal_ready │ │
 │  └─────────────────┘  └─────────────────┘  └──────────────────┘ │
 │                              │                                   │
 │              ┌───────────────┼───────────────┐                  │
 │              ▼               ▼               ▼                  │
-│     ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
-│     │ PageContent │  │TableContent │  │ImageContent │          │
-│     ├─────────────┤  ├─────────────┤  ├─────────────┤          │
-│     │ page_number │  │ headers[]   │  │ page_number │          │
-│     │ text        │  │ rows[][]    │  │ caption     │          │
-│     │ char_count  │  │ caption     │  │ alt_text    │          │
-│     │ paragraphs[]│  │ row_count   │  │ bbox        │          │
-│     │ headings[]  │  │ col_count   │  │             │          │
-│     └─────────────┘  └─────────────┘  └─────────────┘          │
+│     ┌─────────────┐  ┌─────────────┐  ┌──────────────────┐     │
+│     │ PageContent │  │TableContent │  │ ImageContent     │     │
+│     ├─────────────┤  ├─────────────┤  │ (多模态支持)     │     │
+│     │ page_number │  │ headers[]   │  ├──────────────────┤     │
+│     │ text        │  │ rows[][]    │  │ page_number      │     │
+│     │ char_count  │  │ caption     │  │ caption          │     │
+│     │ paragraphs[]│  │ row_count   │  │ file_path        │     │
+│     │ headings[]  │  │ col_count   │  │ base64_data      │     │
+│     └─────────────┘  └─────────────┘  │ mime_type        │     │
+│                                       │ context_before   │     │
+│                                       │ context_after    │     │
+│                                       │ ocr_text         │     │
+│                                       └──────────────────┘     │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```

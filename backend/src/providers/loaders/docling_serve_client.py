@@ -168,9 +168,12 @@ class DoclingServeLoader(BaseLoader):
         
         # 构建请求体
         # Docling Serve API 格式参考: http://localhost:5001/docs
+        # 对 Excel 文件额外请求 JSON 格式以获取 Sheet 名称等元数据
+        to_formats = ["md", "json"] if file_format in ('xlsx', 'xls') else ["md"]
+        
         request_body = {
             "options": {
-                "to_formats": ["md"],
+                "to_formats": to_formats,
                 "do_ocr": True,
                 "force_ocr": True,  # 强制 OCR，对扫描件 PDF 必须
                 "ocr_engine": "rapidocr",  # 使用 RapidOCR（支持中文）
@@ -224,6 +227,192 @@ class DoclingServeLoader(BaseLoader):
             "error": f"文档解析失败: {last_error}"
         }
     
+    def _extract_sheet_info(self, doc: Dict[str, Any], md_content: str) -> Tuple[List[str], int]:
+        """
+        从 Docling 响应中提取 Excel Sheet 信息
+        
+        Docling 将 Excel 的每个 Sheet 作为一个 Group，
+        Group.name 格式为 "sheet: {sheet_name}"
+        
+        当请求 to_formats 包含 "json" 时，响应中的 json_content 字段包含结构化数据
+        
+        Args:
+            doc: Docling 响应中的文档对象
+            md_content: Markdown 内容
+        
+        Returns:
+            Tuple[List[str], int]: (sheet_names 列表, sheet_count)
+        """
+        import re
+        sheet_names = []
+        
+        # 方法1：从 json_content 字段的结构化数据中提取（优先）
+        # Docling Serve 返回的字段是 json_content 而不是 json
+        json_data = doc.get('json_content', {}) or doc.get('json', {})
+        if isinstance(json_data, str):
+            # 如果是字符串，尝试解析
+            import json
+            try:
+                json_data = json.loads(json_data)
+            except:
+                json_data = {}
+        
+        if json_data:
+            # Docling JSON 结构中的 groups 包含 Sheet 信息
+            # 格式: {"groups": [{"name": "sheet: 2023年10大首富", ...}, ...]}
+            groups = json_data.get('groups', [])
+            for group in groups:
+                group_name = group.get('name', '') or group.get('label', '')
+                # Docling 格式: "sheet: Sheet1" 或 "sheet: 2023年10大首富"
+                if group_name.lower().startswith('sheet:'):
+                    sheet_name = group_name[6:].strip()
+                    if sheet_name and sheet_name not in sheet_names:
+                        sheet_names.append(sheet_name)
+            
+            # 检查 furniture 中是否有 sheet 信息
+            furniture = json_data.get('furniture', {})
+            if furniture and not sheet_names:
+                items = furniture.get('children', []) or furniture.get('items', [])
+                for item in items:
+                    if isinstance(item, dict):
+                        item_label = item.get('label', '')
+                        item_text = item.get('text', '') or item.get('name', '')
+                        if 'sheet' in item_label.lower():
+                            if item_text and item_text not in sheet_names:
+                                sheet_names.append(item_text)
+        
+        # 方法2：从顶层 groups 结构中提取（某些 Docling 版本）
+        if not sheet_names:
+            groups = doc.get('groups', []) or doc.get('body', {}).get('groups', [])
+            for group in groups:
+                group_name = group.get('name', '') or group.get('label', '')
+                if group_name.lower().startswith('sheet:'):
+                    sheet_name = group_name[6:].strip()
+                    if sheet_name and sheet_name not in sheet_names:
+                        sheet_names.append(sheet_name)
+        
+        # 方法3：从 Markdown 内容中解析 Sheet 标题
+        # Docling 在 Markdown 中可能生成 "## Sheet: {name}" 格式的标题
+        if not sheet_names and md_content:
+            sheet_pattern = re.compile(r'^##\s+[Ss]heet:\s*(.+)$', re.MULTILINE)
+            matches = sheet_pattern.findall(md_content)
+            for match in matches:
+                sheet_name = match.strip()
+                if sheet_name and sheet_name not in sheet_names:
+                    sheet_names.append(sheet_name)
+        
+        # 方法4：从 sections/items 中提取
+        if not sheet_names:
+            sections = doc.get('sections', []) or doc.get('items', [])
+            for section in sections:
+                section_type = section.get('type', '') or section.get('label', '')
+                section_name = section.get('name', '') or section.get('title', '')
+                if 'sheet' in section_type.lower() or section_name.lower().startswith('sheet:'):
+                    name = section_name[6:].strip() if section_name.lower().startswith('sheet:') else section_name
+                    if name and name not in sheet_names:
+                        sheet_names.append(name)
+        
+        sheet_count = len(sheet_names) if sheet_names else 0
+        
+        # 调试日志
+        if sheet_names:
+            logger.info(f"[Excel] 提取到 {sheet_count} 个 Sheet: {sheet_names}")
+        else:
+            logger.warning(f"[Excel] 未能提取 Sheet 信息，doc keys: {list(doc.keys())}")
+        
+        return sheet_names, sheet_count
+
+    def _split_excel_by_sheets(self, full_text: str, sheet_names: List[str]) -> List[Dict[str, Any]]:
+        """
+        将 Excel 的 markdown 内容按 sheet 分割成多个 pages
+        
+        Docling 生成的 markdown 中，每个表格对应一个 sheet，
+        表格之间以空行分隔。我们按表格数量与 sheet 数量对应来分割。
+        
+        Args:
+            full_text: 完整的 markdown 文本
+            sheet_names: sheet 名称列表
+        
+        Returns:
+            List[Dict]: 按 sheet 分割的 pages 列表
+        """
+        import re
+        pages = []
+        
+        # 策略1: 尝试按 markdown 表格分割
+        # Docling 生成的表格格式: |...|...|... 每行以 | 开头
+        # 表格之间有空行分隔
+        
+        # 用正则匹配完整的 markdown 表格块
+        # 匹配连续的以 | 开头的行（包括表头、分隔行、数据行）
+        table_pattern = re.compile(r'(\|[^\n]+\n(?:\|[^\n]+\n)*)', re.MULTILINE)
+        tables = table_pattern.findall(full_text)
+        
+        if len(tables) == len(sheet_names):
+            # 表格数量与 sheet 数量匹配，一一对应
+            for i, (table_content, sheet_name) in enumerate(zip(tables, sheet_names)):
+                pages.append({
+                    "page_number": i + 1,
+                    "text": table_content.strip(),
+                    "char_count": len(table_content),
+                    "sheet_name": sheet_name
+                })
+            logger.info(f"[Excel] 按表格分割成功，共 {len(pages)} 个 sheet")
+        else:
+            # 数量不匹配，尝试按空行分割
+            # 多个连续空行作为分隔符
+            sections = re.split(r'\n\s*\n\s*\n', full_text)
+            sections = [s.strip() for s in sections if s.strip()]
+            
+            if len(sections) == len(sheet_names):
+                for i, (section, sheet_name) in enumerate(zip(sections, sheet_names)):
+                    pages.append({
+                        "page_number": i + 1,
+                        "text": section,
+                        "char_count": len(section),
+                        "sheet_name": sheet_name
+                    })
+                logger.info(f"[Excel] 按空行分割成功，共 {len(pages)} 个 sheet")
+            else:
+                # 无法精确分割，尝试均匀分割文本
+                logger.warning(f"[Excel] 表格数({len(tables)})与sheet数({len(sheet_names)})不匹配，使用均匀分割")
+                
+                # 按双空行分割，然后合并
+                parts = re.split(r'\n\n+', full_text)
+                parts = [p.strip() for p in parts if p.strip()]
+                
+                if len(parts) >= len(sheet_names):
+                    # 将 parts 均匀分配到各 sheet
+                    parts_per_sheet = len(parts) // len(sheet_names)
+                    remainder = len(parts) % len(sheet_names)
+                    
+                    idx = 0
+                    for i, sheet_name in enumerate(sheet_names):
+                        # 前 remainder 个 sheet 多分配一个 part
+                        count = parts_per_sheet + (1 if i < remainder else 0)
+                        sheet_parts = parts[idx:idx + count]
+                        idx += count
+                        
+                        text = '\n\n'.join(sheet_parts)
+                        pages.append({
+                            "page_number": i + 1,
+                            "text": text,
+                            "char_count": len(text),
+                            "sheet_name": sheet_name
+                        })
+                else:
+                    # parts 数量不足，每个 sheet 分配一个（可能有空的）
+                    for i, sheet_name in enumerate(sheet_names):
+                        text = parts[i] if i < len(parts) else ""
+                        pages.append({
+                            "page_number": i + 1,
+                            "text": text,
+                            "char_count": len(text),
+                            "sheet_name": sheet_name
+                        })
+        
+        return pages
+
     def _parse_response(
         self,
         response: Dict[str, Any],
@@ -242,6 +431,10 @@ class DoclingServeLoader(BaseLoader):
             Dict: 标准化的解析结果
         """
         try:
+            # 调试日志：打印响应结构的顶层 keys（仅对 Excel 文件）
+            if file_format in ('xlsx', 'xls'):
+                logger.info(f"[Excel Debug] Response top-level keys: {list(response.keys())}")
+            
             # 获取文档结果
             documents = response.get("document", [])
             if not documents:
@@ -257,18 +450,33 @@ class DoclingServeLoader(BaseLoader):
                     "error": "响应中没有文档内容"
                 }
             
+            # 调试日志：打印文档对象的 keys（仅对 Excel 文件）
+            if file_format in ('xlsx', 'xls') and documents:
+                logger.info(f"[Excel Debug] Document keys: {list(documents[0].keys())}")
+                # 如果有 json_content 字段，打印其结构
+                json_data = documents[0].get('json_content') or documents[0].get('json')
+                if json_data and isinstance(json_data, dict):
+                    logger.info(f"[Excel Debug] JSON content keys: {list(json_data.keys())}")
+                    # 打印 groups 信息
+                    groups = json_data.get('groups', [])
+                    if groups:
+                        logger.info(f"[Excel Debug] Groups count: {len(groups)}")
+                        for i, g in enumerate(groups[:3]):
+                            logger.info(f"[Excel Debug] Group[{i}] name: {g.get('name', 'N/A')}")
+            
             # 提取内容
             all_text_parts = []
             all_pages = []
             all_tables = []
             all_images = []
             total_pages = 0
+            all_sheet_names = []  # Excel sheet 名称汇总
             
             for doc in documents:
-                # 提取 markdown 内容 (Docling Serve 使用 'md' 字段)
+                # 提取 markdown 内容 (Docling Serve 使用 'md_content' 字段)
                 md_content = (
+                    doc.get('md_content', '') or
                     doc.get('md', '') or
-                    doc.get('md_content', '') or 
                     doc.get('markdown', '') or 
                     doc.get('content', '') or
                     doc.get('text', '')
@@ -310,29 +518,65 @@ class DoclingServeLoader(BaseLoader):
                         "markdown": table.get('markdown', '')
                     })
                 
-                # 提取图片/图表
+                # 提取图片/图表 (增强多模态支持)
                 doc_figures = doc.get('figures', []) or doc.get('images', [])
                 for i, figure in enumerate(doc_figures):
-                    all_images.append({
+                    image_info = {
                         "page_number": figure.get('page_number', 1),
                         "image_index": i,
                         "caption": figure.get('caption'),
                         "alt_text": figure.get('alt_text'),
-                        "bbox": figure.get('bbox')
-                    })
+                        "bbox": figure.get('bbox'),
+                        # 多模态支持字段
+                        "file_path": figure.get('file_path'),
+                        "base64_data": figure.get('base64') or figure.get('image_base64'),
+                        "mime_type": figure.get('mime_type', 'image/png'),
+                        "width": figure.get('width'),
+                        "height": figure.get('height'),
+                        "context_before": figure.get('context_before'),
+                        "context_after": figure.get('context_after'),
+                        "image_type": figure.get('type', 'figure'),
+                        "ocr_text": figure.get('ocr_text')
+                    }
+                    all_images.append(image_info)
+                
+                # 仅对 Excel 格式提取 sheet 信息
+                if file_format in ('xlsx', 'xls'):
+                    sheet_names, _ = self._extract_sheet_info(doc, md_content)
+                    for name in sheet_names:
+                        if name not in all_sheet_names:
+                            all_sheet_names.append(name)
             
             # 组合完整文本
             full_text = '\n\n'.join(all_text_parts)
             total_chars = len(full_text)
             
+            # 对 Excel 文件，按 sheet 分割内容到不同的 pages
+            if file_format in ('xlsx', 'xls') and all_sheet_names and full_text:
+                all_pages = self._split_excel_by_sheets(full_text, all_sheet_names)
+                total_pages = len(all_pages)
             # 如果没有页面但有文本，创建默认页面
-            if not all_pages and full_text:
+            elif not all_pages and full_text:
                 all_pages = [{
                     "page_number": 1,
                     "text": full_text,
                     "char_count": total_chars
                 }]
                 total_pages = 1
+            
+            # 构建基础元数据
+            metadata = {
+                "source": "docling_serve",
+                "filename": filename,
+                "format": file_format,
+                "table_count": len(all_tables),
+                "image_count": len(all_images)
+            }
+            
+            # 仅对 Excel 格式添加 sheet 元数据
+            if file_format in ('xlsx', 'xls') and all_sheet_names:
+                metadata["sheet_count"] = len(all_sheet_names)
+                metadata["sheet_names"] = all_sheet_names
             
             return {
                 "success": True,
@@ -343,13 +587,7 @@ class DoclingServeLoader(BaseLoader):
                 "total_chars": total_chars,
                 "tables": all_tables,
                 "images": all_images,
-                "metadata": {
-                    "source": "docling_serve",
-                    "filename": filename,
-                    "format": file_format,
-                    "table_count": len(all_tables),
-                    "image_count": len(all_images)
-                }
+                "metadata": metadata
             }
             
         except Exception as e:
@@ -403,18 +641,24 @@ class DoclingServeLoader(BaseLoader):
         
         try:
             # 使用 multipart/form-data 上传文件
+            # 对 Excel 文件额外请求 JSON 格式以获取 Sheet 名称等元数据
+            is_excel = file_format in ('xlsx', 'xls')
+            
             with open(file_path, 'rb') as f:
                 files = {"files": (path.name, f, self._get_mime_type(file_format))}
+                
+                # 构建 data 字典
+                # 对于需要传递多个值的字段（如 to_formats），使用列表
                 data = {
-                    "to_formats": "md",
                     "do_ocr": "true",
-                    "force_ocr": "true",  # 强制 OCR，对扫描件 PDF 必须
-                    "ocr_engine": "rapidocr",  # 使用 RapidOCR（支持中文）
-                    "ocr_lang": "ch_sim,en",  # 简体中文+英文 OCR
+                    "force_ocr": "true",
+                    "ocr_engine": "rapidocr",
+                    "ocr_lang": "ch_sim,en",
                     "table_mode": "accurate",
-                    "include_images": "true",  # 提取图片
-                    "images_scale": "2.0",  # 图片缩放比例
-                    "image_export_mode": "embedded"  # 嵌入图片为 Base64
+                    "include_images": "true",
+                    "images_scale": "2.0",
+                    "image_export_mode": "embedded",
+                    "to_formats": ["md", "json"] if is_excel else ["md"],
                 }
                 
                 with httpx.Client(timeout=30) as client:
@@ -519,7 +763,12 @@ class DoclingServeLoader(BaseLoader):
                 "error": str(e)
             }
     
-    def get_task_result(self, task_id: str) -> Dict[str, Any]:
+    def get_task_result(
+        self,
+        task_id: str,
+        filename: Optional[str] = None,
+        file_format: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         获取异步任务结果
         
@@ -527,6 +776,8 @@ class DoclingServeLoader(BaseLoader):
         
         Args:
             task_id: Docling Serve 返回的任务 ID
+            filename: 原始文件名（用于元数据）
+            file_format: 文件格式（如 xlsx、pdf 等，用于格式特定的元数据提取）
         
         Returns:
             Dict: 符合项目规范的解析结果（与 extract_text 返回格式一致）
@@ -541,7 +792,9 @@ class DoclingServeLoader(BaseLoader):
                 if response.status_code == 200:
                     result = response.json()
                     # 复用现有的响应解析逻辑
-                    return self._parse_response(result, f"task_{task_id}", "unknown")
+                    actual_filename = filename or f"task_{task_id}"
+                    actual_format = file_format or "unknown"
+                    return self._parse_response(result, actual_filename, actual_format)
                 elif response.status_code == 404:
                     return {
                         "success": False,

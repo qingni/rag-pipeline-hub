@@ -288,7 +288,9 @@ async def preview_document(
                             "total_pages": result_data.get("total_pages", 0),
                             "total_chars": result_data.get("total_chars", 0),
                             "loader_used": result_data.get("loader", "unknown"),
-                            "status": "ready"
+                            "status": "ready",
+                            "metadata": result_data.get("metadata", {}),
+                            "pages": result_data.get("pages", [])
                         }
                     )
             except Exception as e:

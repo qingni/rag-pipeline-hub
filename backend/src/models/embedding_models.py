@@ -17,6 +17,23 @@ import uuid
 from ..storage.database import Base
 
 
+# ============================================================================
+# 支持的模型列表 (统一定义，保持一致性)
+# ============================================================================
+SUPPORTED_TEXT_MODELS = ["bge-m3", "qwen3-embedding-8b", "hunyuan-embedding"]
+SUPPORTED_MULTIMODAL_MODELS = ["qwen3-vl-embedding-8b"]
+SUPPORTED_MODELS = SUPPORTED_TEXT_MODELS + SUPPORTED_MULTIMODAL_MODELS
+
+
+def validate_embedding_model(model: str) -> str:
+    """统一的模型名称验证函数"""
+    if model not in SUPPORTED_MODELS:
+        raise ValueError(
+            f"Model '{model}' not found. Supported models: {', '.join(SUPPORTED_MODELS)}"
+        )
+    return model
+
+
 # Enums for error classification
 class ErrorType(str, Enum):
     """Error classification for embedding failures."""
@@ -155,7 +172,7 @@ class EmbeddingResult(Base):
             name='check_status_enum'
         ),
         CheckConstraint(
-            "model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4')",
+            "model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'qwen3-vl-embedding-8b')",
             name='check_model_enum'
         ),
         CheckConstraint(
@@ -226,12 +243,7 @@ class SingleEmbeddingRequest(BaseModel):
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         """Validate model name format."""
-        valid_models = ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]
-        if v not in valid_models:
-            raise ValueError(
-                f"Model '{v}' not found. Supported models: {', '.join(valid_models)}"
-            )
-        return v
+        return validate_embedding_model(v)
 
 
 class BatchEmbeddingRequest(BaseModel):
@@ -257,12 +269,7 @@ class BatchEmbeddingRequest(BaseModel):
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         """Validate model name format."""
-        valid_models = ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]
-        if v not in valid_models:
-            raise ValueError(
-                f"Model '{v}' not found. Supported models: {', '.join(valid_models)}"
-            )
-        return v
+        return validate_embedding_model(v)
 
 
 class ChunkingResultEmbeddingRequest(BaseModel):
@@ -276,12 +283,7 @@ class ChunkingResultEmbeddingRequest(BaseModel):
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         """Validate model name format."""
-        valid_models = ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]
-        if v not in valid_models:
-            raise ValueError(
-                f"Model '{v}' not found. Supported models: {', '.join(valid_models)}"
-            )
-        return v
+        return validate_embedding_model(v)
 
 
 class DocumentEmbeddingRequest(BaseModel):
@@ -296,12 +298,7 @@ class DocumentEmbeddingRequest(BaseModel):
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         """Validate model name format."""
-        valid_models = ["qwen3-embedding-8b", "bge-m3", "jina-embeddings-v4"]
-        if v not in valid_models:
-            raise ValueError(
-                f"Model '{v}' not found. Supported models: {', '.join(valid_models)}"
-            )
-        return v
+        return validate_embedding_model(v)
 
 
 # Entity Models
@@ -318,15 +315,12 @@ class Vector(BaseModel):
     @field_validator('dimension')
     @classmethod
     def validate_dimension(cls, v: int) -> int:
-        """Validate dimension is one of supported sizes."""
-        # 支持常见的嵌入向量维度
-        # 768: BERT/Jina base models
-        # 1024: BGE-M3, Hunyuan
-        # 1536: OpenAI ada-002
-        # 2048: Jina v4
-        # 4096: Qwen3 8B
-        if v not in [768, 1024, 1536, 2048, 4096]:
-            raise ValueError(f"Dimension {v} not supported. Must be 768, 1024, 1536, 2048, or 4096")
+        """Validate dimension is within supported range."""
+        # 支持的嵌入向量维度范围:
+        # - 文本模型: 1024 (BGE-M3, Hunyuan), 4096 (Qwen3 8B)
+        # - 多模态模型: 64-4096 (Qwen3-VL-Embedding-8B 支持动态维度)
+        if v < 64 or v > 4096:
+            raise ValueError(f"Dimension {v} not supported. Must be between 64 and 4096")
         return v
     
     @field_validator('vector')
