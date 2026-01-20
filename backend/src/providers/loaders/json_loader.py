@@ -29,13 +29,14 @@ class JSONLoader:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Convert to formatted text
-            full_text = json.dumps(data, indent=2, ensure_ascii=False)
-            
-            # Extract text content if it's a structured document
+            # Extract text content for RAG retrieval
             extracted_text = self._extract_text_content(data)
+            
+            # If extraction yields content, use it; otherwise fall back to formatted JSON
             if extracted_text:
-                full_text = extracted_text + "\n\n---\n\n" + full_text
+                full_text = extracted_text
+            else:
+                full_text = json.dumps(data, indent=2, ensure_ascii=False)
             
             # Create page
             pages = [{
@@ -52,7 +53,8 @@ class JSONLoader:
                 "loader": self.name,
                 "metadata": {
                     "format": "json",
-                    "structure_type": self._get_structure_type(data)
+                    "structure_type": self._get_structure_type(data),
+                    "raw_json": data  # 保留原始 JSON 结构供参考
                 },
                 "pages": pages,
                 "tables": tables,

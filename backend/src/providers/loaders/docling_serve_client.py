@@ -551,6 +551,17 @@ class DoclingServeLoader(BaseLoader):
             full_text = '\n\n'.join(all_text_parts)
             total_chars = len(full_text)
             
+            # 对 HTML 格式，如果 Docling 没有返回图片，则主动从 Markdown 中提取
+            if file_format in ('html', 'htm'):
+                if not all_images:
+                    all_images = self._extract_images_from_markdown(full_text)
+                    logger.info(f"[HTML] 从 Markdown 中提取到 {len(all_images)} 张图片")
+                
+                # 生成 RAG 友好的结构化文本
+                structured_text = self._generate_html_structured_text(full_text, all_images)
+            else:
+                structured_text = None
+            
             # 对 Excel 文件，按 sheet 分割内容到不同的 pages
             if file_format in ('xlsx', 'xls') and all_sheet_names and full_text:
                 all_pages = self._split_excel_by_sheets(full_text, all_sheet_names)
@@ -570,7 +581,8 @@ class DoclingServeLoader(BaseLoader):
                 "filename": filename,
                 "format": file_format,
                 "table_count": len(all_tables),
-                "image_count": len(all_images)
+                "image_count": len(all_images),
+                "has_images": len(all_images) > 0
             }
             
             # 仅对 Excel 格式添加 sheet 元数据
@@ -578,7 +590,7 @@ class DoclingServeLoader(BaseLoader):
                 metadata["sheet_count"] = len(all_sheet_names)
                 metadata["sheet_names"] = all_sheet_names
             
-            return {
+            result = {
                 "success": True,
                 "loader": self.name,
                 "full_text": full_text,
@@ -590,6 +602,12 @@ class DoclingServeLoader(BaseLoader):
                 "metadata": metadata
             }
             
+            # 对 HTML 格式添加结构化文本
+            if structured_text:
+                result["structured_text"] = structured_text
+            
+            return result
+            
         except Exception as e:
             logger.error(f"解析响应失败: {e}", exc_info=True)
             return {
@@ -597,6 +615,244 @@ class DoclingServeLoader(BaseLoader):
                 "loader": self.name,
                 "error": f"解析响应失败: {e}"
             }
+    
+    def _extract_images_from_markdown(self, md_content: str) -> List[Dict[str, Any]]:
+        """
+        从 Markdown 内容中提取图片信息
+        
+        Docling 生成的 Markdown 中图片格式为: ![alt](src)
+        对于无法获取的图片，Docling 会生成: <!-- 🖼️❌ Image not available ... -->
+        
+        Args:
+            md_content: Markdown 文本内容
+        
+        Returns:
+            List[Dict]: 图片信息列表
+        """
+        import re
+        images = []
+        
+        # 匹配 Markdown 图片语法: ![alt](src) 或 ![alt](src "title")
+        img_pattern = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)')
+        
+        for idx, match in enumerate(img_pattern.finditer(md_content)):
+            alt_text = match.group(1) or f'图片{idx + 1}'
+            src = match.group(2)
+            title = match.group(3)
+            
+            # 获取图片上下文（前后各100字符）
+            start_pos = match.start()
+            end_pos = match.end()
+            
+            context_before = md_content[max(0, start_pos - 100):start_pos].strip()
+            context_after = md_content[end_pos:min(len(md_content), end_pos + 100)].strip()
+            
+            # 清理上下文中的换行
+            context_before = ' '.join(context_before.split())
+            context_after = ' '.join(context_after.split())
+            
+            # 检测图片类型
+            image_type = self._detect_image_mime_type(src)
+            
+            # 检查是否为 base64
+            is_base64 = src.startswith('data:') if src else False
+            
+            image_info = {
+                "page_number": 1,
+                "image_index": len(images),
+                "src": src,
+                "alt_text": alt_text,
+                "title": title,
+                "caption": title or alt_text,
+                "mime_type": image_type,
+                "is_base64": is_base64,
+                "context": {
+                    "text_before": context_before if context_before else None,
+                    "text_after": context_after if context_after else None
+                }
+            }
+            
+            # 如果是 base64，提取数据
+            if is_base64:
+                image_info["base64_data"] = src
+            
+            images.append(image_info)
+        
+        # 同时匹配 Docling 的图片占位符注释: <!-- 🖼️❌ Image not available ... -->
+        # 这表示 Docling 检测到了图片但无法提取
+        placeholder_pattern = re.compile(
+            r'([^\n]*)\n*<!-- 🖼️❌ Image not available[^>]*-->',
+            re.MULTILINE
+        )
+        
+        for match in placeholder_pattern.finditer(md_content):
+            # 获取占位符前面的文本作为 alt_text
+            preceding_text = match.group(1).strip()
+            
+            # 获取上下文
+            start_pos = match.start()
+            end_pos = match.end()
+            
+            context_before = md_content[max(0, start_pos - 150):start_pos].strip()
+            context_after = md_content[end_pos:min(len(md_content), end_pos + 150)].strip()
+            
+            # 清理上下文
+            context_before = ' '.join(context_before.split())
+            context_after = ' '.join(context_after.split())
+            
+            # 从上下文中提取更多信息
+            image_info = {
+                "page_number": 1,
+                "image_index": len(images),
+                "src": None,  # Docling 无法获取图片URL
+                "alt_text": preceding_text if preceding_text else f'图片{len(images) + 1}',
+                "title": None,
+                "caption": preceding_text,
+                "mime_type": None,
+                "is_base64": False,
+                "extracted_from": "docling_placeholder",
+                "context": {
+                    "text_before": context_before if context_before else None,
+                    "text_after": context_after if context_after else None
+                }
+            }
+            
+            images.append(image_info)
+        
+        return images
+    
+    def _detect_image_mime_type(self, src: str) -> Optional[str]:
+        """检测图片的 MIME 类型"""
+        if not src:
+            return None
+        
+        # base64 图片
+        if src.startswith('data:'):
+            try:
+                header = src.split(',')[0]
+                if ';' in header:
+                    return header.split(':')[1].split(';')[0]
+            except (IndexError, ValueError):
+                pass
+            return 'image/png'
+        
+        # 根据扩展名判断
+        src_lower = src.lower().split('?')[0]
+        
+        extension_map = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml',
+            '.ico': 'image/x-icon',
+            '.bmp': 'image/bmp',
+            '.avif': 'image/avif'
+        }
+        
+        for ext, mime in extension_map.items():
+            if src_lower.endswith(ext):
+                return mime
+        
+        return None
+    
+    def _generate_html_structured_text(self, md_content: str, images: List[Dict[str, Any]]) -> str:
+        """
+        生成 RAG 友好的结构化文本，在图片位置插入详细标记
+        
+        Args:
+            md_content: Markdown 文本内容
+            images: 提取的图片信息列表
+        
+        Returns:
+            str: 带有图片标记的结构化文本
+        """
+        import re
+        
+        if not images:
+            return md_content
+        
+        result = md_content
+        
+        # 1. 处理标准 Markdown 图片语法: ![alt](src)
+        img_pattern = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)')
+        matches = list(img_pattern.finditer(md_content))
+        
+        # 按位置从后往前替换，避免位置偏移
+        for idx, match in enumerate(reversed(matches)):
+            img_idx = len(matches) - 1 - idx
+            img_info = self._find_image_by_index(images, img_idx, 'markdown')
+            if img_info:
+                marker = self._build_image_marker(img_info)
+                result = result[:match.start()] + marker + result[match.end():]
+        
+        # 2. 处理 Docling 占位符: <!-- 🖼️❌ Image not available ... -->
+        # 同时包含前面的 alt_text 行
+        placeholder_pattern = re.compile(
+            r'([^\n]*)\n*<!-- 🖼️❌ Image not available[^>]*-->',
+            re.MULTILINE
+        )
+        placeholder_matches = list(placeholder_pattern.finditer(result))
+        
+        # 按位置从后往前替换
+        for idx, match in enumerate(reversed(placeholder_matches)):
+            # 查找对应的图片信息
+            img_info = self._find_image_by_index(images, len(placeholder_matches) - 1 - idx, 'docling_placeholder')
+            if img_info:
+                marker = self._build_image_marker(img_info)
+                result = result[:match.start()] + marker + result[match.end():]
+        
+        return result
+    
+    def _find_image_by_index(self, images: List[Dict[str, Any]], idx: int, source: str) -> Optional[Dict[str, Any]]:
+        """根据索引和来源查找图片信息"""
+        # 先尝试按索引匹配
+        for img in images:
+            if img.get('image_index') == idx:
+                # 检查来源是否匹配
+                img_source = img.get('extracted_from', 'markdown')
+                if source == 'docling_placeholder' and img_source == 'docling_placeholder':
+                    return img
+                elif source == 'markdown' and img_source != 'docling_placeholder':
+                    return img
+        
+        # 如果没找到完全匹配的，按索引返回
+        if idx < len(images):
+            return images[idx]
+        
+        return None
+    
+    def _build_image_marker(self, img_info: Dict[str, Any]) -> str:
+        """构建图片标记字符串"""
+        idx = img_info.get('image_index', 0)
+        src = img_info.get('src', '')
+        alt = img_info.get('alt_text', '')
+        caption = img_info.get('caption', '')
+        context = img_info.get('context', {})
+        
+        detail_parts = []
+        
+        if src:
+            detail_parts.append(f'src="{src}"')
+        if alt:
+            detail_parts.append(f'alt="{alt}"')
+        if caption and caption != alt:
+            detail_parts.append(f'caption="{caption}"')
+        
+        # 添加上下文提示
+        ctx_hints = []
+        if context and context.get('text_before'):
+            ctx_hints.append(f"前文: {context['text_before'][:50]}")
+        if context and context.get('text_after'):
+            ctx_hints.append(f"后文: {context['text_after'][:50]}")
+        if ctx_hints:
+            detail_parts.append(f'context="{"; ".join(ctx_hints)}"')
+        
+        if detail_parts:
+            return f"\n[IMAGE_{idx}] ({' '.join(detail_parts)})\n"
+        else:
+            return f"\n[IMAGE_{idx}]\n"
     
     def reset_availability_cache(self):
         """重置可用性缓存，强制重新检查"""
