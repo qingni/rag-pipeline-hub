@@ -643,87 +643,159 @@ async def get_chunking_result(
     return success_response(data=response_data)
 
 
-# Get latest chunking result for a document (optionally filtered by strategy and parameters)
-@router.get("/result/latest/{document_id}")
-async def get_latest_result_for_document(
-    document_id: str,
-    strategy_type: Optional[str] = Query(None, description="Filter by strategy type"),
-    parameters: Optional[str] = Query(None, description="Filter by parameters (JSON string)"),
+# T026: GET /api/chunking/result/{result_id}/parents - Get parent chunks
+@router.get("/result/{result_id}/parents")
+async def get_parent_chunks(
+    result_id: str,
+    include_children: bool = Query(False, description="Include child chunks in response"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
     """
-    Get the latest active chunking result for a document.
-    Can optionally filter by strategy type and/or parameters.
+    Get parent chunks for a parent-child chunking result.
     
     Args:
-        document_id: Document ID
-        strategy_type: Optional strategy type filter
-        parameters: Optional parameters filter (JSON string)
+        result_id: Result identifier
+        include_children: Whether to include child chunk previews
+        page: Page number
+        page_size: Items per page
         db: Database session
         
     Returns:
-        Latest chunking result or null if none exists
+        List of parent chunks with optional children
     """
-    from ..models.chunking_result import ResultStatus
+    from ..models.parent_chunk import ParentChunk
     
-    # Start with base query for this document
-    query = db.query(ChunkingResult).join(
-        ChunkingTask,
-        ChunkingResult.task_id == ChunkingTask.task_id
-    ).filter(
-        ChunkingTask.source_document_id == document_id,
-        ChunkingResult.status == ResultStatus.COMPLETED,
-        ChunkingResult.is_active == True
-    )
-    
-    # Apply strategy filter if provided
-    if strategy_type:
-        try:
-            strategy_enum = StrategyType[strategy_type.upper()]
-            query = query.filter(ChunkingTask.chunking_strategy == strategy_enum)
-        except KeyError:
-            raise ValidationError(f"Invalid strategy type: {strategy_type}")
-    
-    # Apply parameters filter if provided
-    if parameters:
-        try:
-            import json
-            params_dict = json.loads(parameters)
-            params_json = json.dumps(params_dict, sort_keys=True)
-            
-            # Filter by exact parameter match
-            query = query.filter(
-                func.json_extract(ChunkingResult.chunking_params, '$') == params_json
-            )
-        except json.JSONDecodeError:
-            raise ValidationError("Invalid parameters JSON")
-    
-    # Get the most recent result
-    result = query.order_by(ChunkingResult.created_at.desc()).first()
-    
+    # Verify result exists
+    result = db.query(ChunkingResult).filter(ChunkingResult.result_id == result_id).first()
     if not result:
+        raise NotFoundError("ChunkingResult", result_id)
+    
+    # Query parent chunks
+    query = db.query(ParentChunk).filter(
+        ParentChunk.result_id == result_id
+    ).order_by(ParentChunk.sequence_number)
+    
+    total = query.count()
+    
+    if total == 0:
         return success_response(
-            data=None,
-            message="No chunking results found for this document"
+            data=paginated_response(
+                items=[],
+                total=0,
+                page=page,
+                page_size=page_size
+            ),
+            message="No parent chunks found (not a parent-child chunking result)"
         )
     
-    # Get associated task info
-    task = db.query(ChunkingTask).filter(ChunkingTask.task_id == result.task_id).first()
+    offset = (page - 1) * page_size
+    parent_chunks = query.offset(offset).limit(page_size).all()
+    
+    items = []
+    for parent in parent_chunks:
+        parent_data = parent.to_dict(include_children=include_children)
+        items.append(parent_data)
     
     return success_response(
-        data={
-            "result_id": result.result_id,
-            "task_id": result.task_id,
-            "document_id": result.document_id,
-            "document_name": result.document_name,
-            "strategy_type": result.chunking_strategy.value,
-            "parameters": result.chunking_params,
-            "status": result.status.value,
-            "total_chunks": result.total_chunks,
-            "statistics": result.statistics,
-            "version": result.version,
-            "is_active": result.is_active,
-            "processing_time": result.processing_time,
-            "created_at": result.created_at.isoformat() if result.created_at else None
+        data=paginated_response(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size
+        )
+    )
+
+
+# T027: GET /api/chunking/result/{result_id}/chunks - Get chunks with parent filter
+@router.get("/result/{result_id}/chunks")
+async def get_result_chunks(
+    result_id: str,
+    parent_id: Optional[str] = Query(None, description="Filter by parent chunk ID"),
+    chunk_type: Optional[str] = Query(None, description="Filter by chunk type (text, table, image, code)"),
+    include_parent: bool = Query(False, description="Include parent chunk content"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db)
+):
+    """
+    Get chunks from a chunking result with filtering options.
+    
+    Args:
+        result_id: Result identifier
+        parent_id: Optional parent chunk ID filter
+        chunk_type: Optional chunk type filter
+        include_parent: Include parent chunk content for each chunk
+        page: Page number
+        page_size: Chunks per page
+        db: Database session
+        
+    Returns:
+        Paginated list of chunks
+    """
+    from ..models.chunk import Chunk, ChunkType
+    from ..models.parent_chunk import ParentChunk
+    
+    # Verify result exists
+    result = db.query(ChunkingResult).filter(ChunkingResult.result_id == result_id).first()
+    if not result:
+        raise NotFoundError("ChunkingResult", result_id)
+    
+    # Build query
+    query = db.query(Chunk).filter(Chunk.result_id == result_id)
+    
+    # Apply parent filter
+    if parent_id:
+        query = query.filter(Chunk.parent_id == parent_id)
+    
+    # Apply chunk type filter
+    if chunk_type:
+        try:
+            type_enum = ChunkType[chunk_type.upper()]
+            query = query.filter(Chunk.chunk_type == type_enum)
+        except KeyError:
+            raise ValidationError(f"Invalid chunk type: {chunk_type}. Must be one of: text, table, image, code")
+    
+    query = query.order_by(Chunk.sequence_number)
+    
+    total = query.count()
+    offset = (page - 1) * page_size
+    chunks = query.offset(offset).limit(page_size).all()
+    
+    # Build response
+    items = []
+    for chunk in chunks:
+        chunk_data = {
+            "id": chunk.id,
+            "sequence_number": chunk.sequence_number,
+            "content": chunk.content,
+            "chunk_type": chunk.chunk_type.value if chunk.chunk_type else "text",
+            "parent_id": chunk.parent_id,
+            "metadata": chunk.chunk_metadata,
+            "start_position": chunk.start_position,
+            "end_position": chunk.end_position,
+            "token_count": chunk.token_count
         }
+        
+        # Include parent content if requested
+        if include_parent and chunk.parent_id:
+            parent = db.query(ParentChunk).filter(ParentChunk.id == chunk.parent_id).first()
+            if parent:
+                chunk_data["parent"] = {
+                    "id": parent.id,
+                    "sequence_number": parent.sequence_number,
+                    "content": parent.content,
+                    "content_preview": parent.content[:200] + "..." if len(parent.content) > 200 else parent.content
+                }
+        
+        items.append(chunk_data)
+    
+    return success_response(
+        data=paginated_response(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size
+        )
     )

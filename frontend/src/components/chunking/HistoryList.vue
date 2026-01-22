@@ -3,6 +3,10 @@
     <t-card title="分块历史" :bordered="false">
       <template #actions>
         <t-space>
+          <t-button theme="danger" size="small" variant="outline" @click="handleClearAll" :disabled="historyData.length === 0">
+            <template #icon><t-icon name="delete" /></template>
+            清空
+          </t-button>
           <t-button theme="primary" size="small" variant="outline" @click="showFilters = !showFilters">
             <template #icon><t-icon name="filter" /></template>
             筛选
@@ -91,6 +95,9 @@
       <div v-if="selectedRowKeys.length > 0" class="batch-actions">
         <t-space>
           <span>已选择 {{ selectedRowKeys.length }} 项</span>
+          <t-button theme="danger" size="small" @click="handleBatchDelete">
+            批量删除
+          </t-button>
           <t-button theme="primary" size="small" @click="handleCompare" :disabled="selectedRowKeys.length < 2">
             对比结果
           </t-button>
@@ -175,7 +182,7 @@ const handleView = (row) => {
 }
 
 const handleDelete = (row) => {
-  DialogPlugin.confirm({
+  const dialog = DialogPlugin.confirm({
     header: '确认删除',
     body: `确定要删除 "${row.document_name}" 的分块结果吗？此操作将删除数据库记录和文件，无法恢复。`,
     theme: 'warning',
@@ -187,6 +194,7 @@ const handleDelete = (row) => {
     onConfirm: async () => {
       try {
         await chunkingStore.deleteResult(row.result_id)
+        dialog.destroy()
         MessagePlugin.success('删除成功')
         await loadHistory()
       } catch (error) {
@@ -224,6 +232,65 @@ const handleCompare = () => {
     return
   }
   emit('compare', selectedRowKeys.value)
+}
+
+const handleBatchDelete = () => {
+  const count = selectedRowKeys.value.length
+  const dialog = DialogPlugin.confirm({
+    header: '确认批量删除',
+    body: `确定要删除选中的 ${count} 条分块结果吗？此操作将删除数据库记录和文件，无法恢复。`,
+    theme: 'warning',
+    confirmBtn: {
+      content: '删除',
+      theme: 'danger'
+    },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        const response = await chunkingStore.batchDeleteResults(selectedRowKeys.value)
+        dialog.destroy()
+        if (response.data?.deleted_count > 0) {
+          MessagePlugin.success(`成功删除 ${response.data.deleted_count} 条记录`)
+          selectedRowKeys.value = []
+          await loadHistory()
+        }
+        if (response.data?.failed_ids?.length > 0) {
+          MessagePlugin.warning(`${response.data.failed_ids.length} 条记录删除失败`)
+        }
+      } catch (error) {
+        MessagePlugin.error(error.message || '批量删除失败')
+      }
+    }
+  })
+}
+
+const handleClearAll = () => {
+  const total = chunkingStore.historyTotalCount
+  const dialog = DialogPlugin.confirm({
+    header: '确认清空',
+    body: `确定要清空全部 ${total} 条分块历史记录吗？此操作将删除所有数据库记录和文件，无法恢复。`,
+    theme: 'danger',
+    confirmBtn: {
+      content: '清空全部',
+      theme: 'danger'
+    },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        // 获取所有记录的ID
+        const allIds = historyData.value.map(item => item.result_id)
+        const response = await chunkingStore.batchDeleteResults(allIds)
+        dialog.destroy()
+        if (response.data?.deleted_count > 0) {
+          MessagePlugin.success(`成功清空 ${response.data.deleted_count} 条记录`)
+          selectedRowKeys.value = []
+          await loadHistory()
+        }
+      } catch (error) {
+        MessagePlugin.error(error.message || '清空失败')
+      }
+    }
+  })
 }
 
 const getStrategyLabel = (type) => {

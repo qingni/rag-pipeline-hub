@@ -43,14 +43,27 @@ class ParagraphChunker(BaseChunker):
         if not text or len(text) == 0:
             return []
         
-        # Split by double newlines (paragraph boundaries)
-        paragraphs = re.split(r'\n\s*\n', text)
+        # Check if text is structured data (each line is a record)
+        # Detect by checking if text has single newlines but no double newlines,
+        # or if each line looks like a key:value pair
+        is_structured = self._is_structured_text(text)
+        
+        if is_structured:
+            # For structured data, split by single newline to keep each record intact
+            paragraphs = [line.strip() for line in text.split('\n') if line.strip()]
+        else:
+            # Standard paragraph splitting by double newlines
+            paragraphs = re.split(r'\n\s*\n', text)
         
         chunks = []
         current_chunk = []
         current_length = 0
         current_start = 0
         chunk_index = 0
+        
+        # For structured data, try to keep each record as its own chunk
+        if is_structured:
+            return self._chunk_structured_data(paragraphs, text, min_chunk_size, max_chunk_size)
         
         for para in paragraphs:
             para = para.strip()
@@ -142,6 +155,89 @@ class ParagraphChunker(BaseChunker):
                 paragraph_count=len(current_chunk)
             )
             chunks.append(chunk)
+        
+        return chunks
+    
+    def _is_structured_text(self, text: str) -> bool:
+        """
+        Detect if text is structured data (each line is a complete record).
+        
+        Args:
+            text: Input text
+            
+        Returns:
+            True if text appears to be structured data
+        """
+        # Check if no double newlines exist (all single-line records)
+        if '\n\n' not in text and '\n' in text:
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            if len(lines) >= 2:
+                # Check if most lines look like key:value pairs
+                # Pattern matches: "Key: Value" or "Key Name: Value Description"
+                # Allow multiple colons in a line (e.g., "Game: Title: Description")
+                kv_pattern = re.compile(r'^[^:]{2,100}:\s*.+$')
+                kv_count = sum(1 for line in lines if kv_pattern.match(line))
+                if kv_count / len(lines) > 0.5:
+                    return True
+                
+                # Also check if lines have consistent length (structured data often does)
+                # and each line is a complete record (no continuation indicators)
+                avg_len = sum(len(l) for l in lines) / len(lines)
+                if avg_len > 50 and all(len(l) > 30 for l in lines):
+                    # Lines are substantial and uniform - likely structured records
+                    return True
+        return False
+    
+    def _chunk_structured_data(
+        self, 
+        records: List[str], 
+        original_text: str,
+        min_chunk_size: int,
+        max_chunk_size: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Chunk structured data, keeping each record intact.
+        
+        For structured data like JSON key-value pairs, each line/record
+        should be kept as a complete unit. Only merge records if they're
+        very short, and never split a record in the middle.
+        
+        Args:
+            records: List of record strings (one per line)
+            original_text: Original text for position tracking
+            min_chunk_size: Minimum chunk size
+            max_chunk_size: Maximum chunk size
+            
+        Returns:
+            List of chunk dictionaries
+        """
+        chunks = []
+        chunk_index = 0
+        current_pos = 0
+        
+        for record in records:
+            if not record:
+                continue
+            
+            # Find position in original text
+            start_pos = original_text.find(record, current_pos)
+            if start_pos == -1:
+                start_pos = current_pos
+            end_pos = start_pos + len(record)
+            
+            # Create chunk for this record (one record = one chunk for structured data)
+            chunk = self._create_chunk(
+                content=record,
+                index=chunk_index,
+                start_pos=start_pos,
+                end_pos=end_pos,
+                strategy="paragraph",
+                paragraph_count=1,
+                is_structured_record=True
+            )
+            chunks.append(chunk)
+            chunk_index += 1
+            current_pos = end_pos
         
         return chunks
     

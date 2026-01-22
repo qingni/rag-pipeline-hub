@@ -84,6 +84,14 @@ class ChunkingService {
   }
 
   /**
+   * Batch delete chunking results
+   */
+  async batchDeleteResults(resultIds) {
+    const response = await api.post('/chunking/results/batch-delete', resultIds)
+    return response
+  }
+
+  /**
    * Export chunking result
    */
   async exportChunkingResult(resultId, format = 'json') {
@@ -138,6 +146,131 @@ class ChunkingService {
     }
     
     const response = await api.get(`/chunking/result/latest/${documentId}`, { params })
+    return response
+  }
+
+  // ============ NEW: Recommendation APIs ============
+
+  /**
+   * Get chunking strategy recommendations for a document
+   */
+  async getRecommendations(documentId, topN = 3) {
+    const response = await api.post('/chunking/recommend', {
+      document_id: documentId,
+      top_n: topN
+    })
+    return response
+  }
+
+  /**
+   * Analyze document structure features
+   */
+  async analyzeDocument(documentId) {
+    const response = await api.post('/chunking/analyze', {
+      document_id: documentId
+    })
+    return response
+  }
+
+  // ============ NEW: Parent-Child Chunking APIs ============
+
+  /**
+   * Get parent chunks for a parent-child chunking result
+   */
+  async getParentChunks(resultId, includeChildren = false, page = 1, pageSize = 20) {
+    const response = await api.get(`/chunking/result/${resultId}/parents`, {
+      params: {
+        include_children: includeChildren,
+        page,
+        page_size: pageSize
+      }
+    })
+    return response
+  }
+
+  /**
+   * Get chunks filtered by type
+   */
+  async getChunksByType(resultId, chunkType, page = 1, pageSize = 50) {
+    const response = await api.get(`/chunking/result/${resultId}/chunks`, {
+      params: {
+        chunk_type: chunkType,
+        page,
+        page_size: pageSize
+      }
+    })
+    return response
+  }
+
+  /**
+   * Get chunks filtered by parent
+   */
+  async getChunksByParent(resultId, parentId, page = 1, pageSize = 50, includeParent = false) {
+    const response = await api.get(`/chunking/result/${resultId}/chunks`, {
+      params: {
+        parent_id: parentId,
+        include_parent: includeParent,
+        page,
+        page_size: pageSize
+      }
+    })
+    return response
+  }
+
+  // ============ NEW: Preview & Compare APIs ============
+
+  /**
+   * Preview chunking with a strategy (uses first 10% of document)
+   */
+  async preview(documentId, strategyType, strategyParams = {}, previewRatio = 0.1) {
+    const response = await api.post('/chunking/preview', {
+      document_id: documentId,
+      strategy_type: strategyType,
+      strategy_params: strategyParams,
+      preview_ratio: previewRatio
+    })
+    return response
+  }
+
+  /**
+   * Compare multiple strategies side by side (max 3)
+   */
+  async compare(documentId, strategies) {
+    const response = await api.post('/chunking/compare', {
+      document_id: documentId,
+      strategies: strategies.map(s => ({
+        strategy_type: s.type || s.strategy_type,
+        strategy_params: s.params || s.strategy_params || {}
+      }))
+    })
+    return response
+  }
+
+  // ============ NEW: Version Management APIs ============
+
+  /**
+   * Get version history for a document
+   */
+  async getVersionHistory(documentId) {
+    const response = await api.get(`/chunking/versions/${documentId}`)
+    return response
+  }
+
+  /**
+   * Rollback to a specific version
+   */
+  async rollbackVersion(resultId) {
+    const response = await api.post(`/chunking/versions/${resultId}/rollback`)
+    return response
+  }
+
+  /**
+   * Compare multiple versions
+   */
+  async compareVersions(resultIds) {
+    const response = await api.post('/chunking/versions/compare', {
+      result_ids: resultIds
+    })
     return response
   }
 }

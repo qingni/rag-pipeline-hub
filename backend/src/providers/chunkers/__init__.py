@@ -4,6 +4,9 @@ from .character_chunker import CharacterChunker
 from .paragraph_chunker import ParagraphChunker
 from .heading_chunker import HeadingChunker
 from .semantic_chunker import SemanticChunker
+from .parent_child_chunker import ParentChildChunker
+from .multimodal_chunker import MultimodalChunker
+from .hybrid_chunker import HybridChunker
 
 
 # Chunker registry
@@ -11,7 +14,10 @@ CHUNKER_REGISTRY = {
     'character': CharacterChunker,
     'paragraph': ParagraphChunker,
     'heading': HeadingChunker,
-    'semantic': SemanticChunker
+    'semantic': SemanticChunker,
+    'parent_child': ParentChildChunker,
+    'multimodal': MultimodalChunker,
+    'hybrid': HybridChunker
 }
 
 
@@ -42,6 +48,9 @@ __all__ = [
     'ParagraphChunker',
     'HeadingChunker',
     'SemanticChunker',
+    'ParentChildChunker',
+    'MultimodalChunker',
+    'HybridChunker',
     'get_chunker',
     'CHUNKER_REGISTRY'
 ]

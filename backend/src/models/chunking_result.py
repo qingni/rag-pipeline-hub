@@ -71,6 +71,22 @@ class ChunkingResult(Base):
         lazy="select"
     )
     
+    # Parent chunks relationship for parent-child chunking (NEW)
+    parent_chunks = relationship(
+        "ParentChunk",
+        back_populates="result",
+        cascade="all, delete-orphan",
+        lazy="select"
+    )
+    
+    # Hybrid chunking configs relationship (NEW)
+    hybrid_configs = relationship(
+        "HybridChunkingConfig",
+        back_populates="result",
+        cascade="all, delete-orphan",
+        lazy="select"
+    )
+    
     # Indexes
     __table_args__ = (
         Index('idx_doc_strategy_time', 'document_name', 'chunking_strategy', 'created_at'),

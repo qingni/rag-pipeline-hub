@@ -23,6 +23,9 @@ class StrategyType(enum.Enum):
     PARAGRAPH = "paragraph"
     HEADING = "heading"
     SEMANTIC = "semantic"
+    PARENT_CHILD = "parent_child"  # 父子文档分块
+    HYBRID = "hybrid"              # 混合分块策略
+    MULTIMODAL = "multimodal"      # 多模态分块
 
 
 class ChunkingTask(Base):

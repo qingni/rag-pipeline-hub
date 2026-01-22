@@ -26,6 +26,11 @@ export const useChunkingStore = defineStore('chunking', {
     strategyParameters: {},
     strategiesLoading: false,
 
+    // Strategy recommendation (NEW)
+    recommendations: [],
+    documentFeatures: null,
+    recommendationsLoading: false,
+
     // Chunking task
     currentTask: null,
     taskPollingInterval: null,
@@ -38,6 +43,11 @@ export const useChunkingStore = defineStore('chunking', {
     chunksTotalCount: 0,
     resultLoading: false,
 
+    // Parent chunks for parent-child chunking (NEW)
+    parentChunks: [],
+    parentChunksLoading: false,
+    selectedParentChunk: null,
+
     // History
     historyList: [],
     historyPage: 1,
@@ -46,6 +56,12 @@ export const useChunkingStore = defineStore('chunking', {
     historyFilters: {},
     historyLoading: false,
 
+    // Preview and comparison (NEW)
+    previewResult: null,
+    previewLoading: false,
+    comparisonResults: [],
+    comparisonLoading: false,
+
     // Queue status
     queueStatus: null,
 
@@ -53,7 +69,11 @@ export const useChunkingStore = defineStore('chunking', {
     activeTab: 'chunking', // 'chunking' or 'history'
     selectedChunk: null,
     compareMode: false,
-    selectedResults: []
+    selectedResults: [],
+    viewMode: 'list', // 'list' or 'tree' (for parent-child)
+    
+    // Flag to prevent auto-strategy selection when user explicitly applies recommendation
+    userExplicitlySelectedStrategy: false
   }),
 
   getters: {
@@ -79,6 +99,25 @@ export const useChunkingStore = defineStore('chunking', {
      */
     getStrategyByType: (state) => (type) => {
       return state.strategies.find(s => s.type === type)
+    },
+
+    /**
+     * Check if recommendations are available (NEW)
+     */
+    hasRecommendations: (state) => state.recommendations.length > 0,
+
+    /**
+     * Get top recommendation (NEW)
+     */
+    topRecommendation: (state) => {
+      return state.recommendations.find(r => r.is_top) || state.recommendations[0]
+    },
+
+    /**
+     * Check if current result is parent-child type (NEW)
+     */
+    isParentChildResult: (state) => {
+      return state.currentResult?.strategy_type === 'parent_child'
     }
   },
 
@@ -141,7 +180,19 @@ export const useChunkingStore = defineStore('chunking', {
      */
     selectDocument(document) {
       this.selectedDocument = document
-      // Load latest chunking result for this document
+      // Reset strategy selection when changing documents
+      this.selectedStrategy = null
+      this.strategyParameters = {}
+      this.userExplicitlySelectedStrategy = false
+      
+      // Clear previous task and result immediately to avoid showing stale data
+      this.currentTask = null
+      this.currentResult = null
+      this.chunks = []
+      this.chunksTotalCount = 0
+      this.selectedChunk = null
+      
+      // Load latest chunking result for this document (async)
       this.loadLatestResultForDocument(document.id)
     },
 
@@ -160,12 +211,11 @@ export const useChunkingStore = defineStore('chunking', {
           // Load the full result with chunks
           await this.loadChunkingResult(response.data.result_id)
           
-          // Only update strategy/parameters if not explicitly provided (avoid circular calls)
-          // This happens when we're just selecting a document without specifying strategy
-          if (!strategyType && !parameters && this.strategies.length > 0) {
-            const matchingStrategy = this.strategies.find(s => s.type === response.data.strategy_type)
-            if (matchingStrategy && matchingStrategy.type !== this.selectedStrategy?.type) {
-              // Update strategy without triggering loadLatestResultForDocument again
+          // 不再自动选中历史策略，让用户根据智能推荐或手动选择策略
+          // 只有当用户明确指定了策略类型时才更新选中状态
+          if (strategyType) {
+            const matchingStrategy = this.strategies.find(s => s.type === strategyType)
+            if (matchingStrategy) {
               this.selectedStrategy = matchingStrategy
               this.strategyParameters = { ...response.data.parameters }
             }
@@ -406,6 +456,23 @@ export const useChunkingStore = defineStore('chunking', {
     },
 
     /**
+     * Batch delete chunking results
+     */
+    async batchDeleteResults(resultIds) {
+      try {
+        const response = await chunkingService.batchDeleteResults(resultIds)
+        if (response.success) {
+          // Refresh history list
+          await this.loadHistory(this.historyPage, this.historyFilters)
+        }
+        return response
+      } catch (error) {
+        console.error('Failed to batch delete results:', error)
+        throw error
+      }
+    },
+
+    /**
      * Reset state
      */
     reset() {
@@ -424,6 +491,196 @@ export const useChunkingStore = defineStore('chunking', {
      */
     switchTab(tab) {
       this.activeTab = tab
+    },
+
+    /**
+     * Load strategy recommendations for selected document (NEW)
+     */
+    async loadRecommendations(documentId = null) {
+      const docId = documentId || this.selectedDocument?.id
+      if (!docId) return
+
+      this.recommendationsLoading = true
+      try {
+        const response = await chunkingService.getRecommendations(docId)
+        if (response.success && response.data) {
+          this.recommendations = response.data.recommendations || []
+          this.documentFeatures = response.data.features || null
+        }
+      } catch (error) {
+        console.error('Failed to load recommendations:', error)
+        this.recommendations = []
+        this.documentFeatures = null
+      } finally {
+        this.recommendationsLoading = false
+      }
+    },
+
+    /**
+     * Analyze document features (NEW)
+     */
+    async analyzeDocument(documentId = null) {
+      const docId = documentId || this.selectedDocument?.id
+      if (!docId) return null
+
+      try {
+        const response = await chunkingService.analyzeDocument(docId)
+        if (response.success && response.data) {
+          this.documentFeatures = response.data.features
+          return response.data.features
+        }
+      } catch (error) {
+        console.error('Failed to analyze document:', error)
+      }
+      return null
+    },
+
+    /**
+     * Apply recommendation as current strategy (NEW)
+     */
+    applyRecommendation(recommendation) {
+      // Find matching strategy
+      const strategy = this.strategies.find(s => s.type === recommendation.strategy)
+      if (strategy) {
+        // Set flag to prevent auto-selection from overriding
+        this.userExplicitlySelectedStrategy = true
+        this.selectedStrategy = strategy
+        // Use suggested params from recommendation
+        this.strategyParameters = { ...recommendation.suggested_params }
+      }
+    },
+
+    /**
+     * Load parent chunks for parent-child result (NEW)
+     */
+    async loadParentChunks(resultId = null, includeChildren = false) {
+      const rId = resultId || this.currentResult?.result_id
+      if (!rId) return
+
+      this.parentChunksLoading = true
+      try {
+        const response = await chunkingService.getParentChunks(rId, includeChildren)
+        if (response.success && response.data) {
+          this.parentChunks = response.data.items || []
+        }
+      } catch (error) {
+        console.error('Failed to load parent chunks:', error)
+        this.parentChunks = []
+      } finally {
+        this.parentChunksLoading = false
+      }
+    },
+
+    /**
+     * Load chunks filtered by parent (NEW)
+     */
+    async loadChunksByParent(parentId, page = 1) {
+      const resultId = this.currentResult?.result_id
+      if (!resultId || !parentId) return []
+
+      try {
+        const response = await chunkingService.getChunksByParent(resultId, parentId, page)
+        if (response.success && response.data) {
+          return response.data.items || []
+        }
+      } catch (error) {
+        console.error('Failed to load chunks by parent:', error)
+      }
+      return []
+    },
+
+    /**
+     * Get single parent chunk with children (NEW)
+     */
+    async getParentWithChildren(parentId) {
+      const resultId = this.currentResult?.result_id
+      if (!resultId || !parentId) return null
+
+      try {
+        // Load parent chunks with children included
+        const response = await chunkingService.getParentChunks(resultId, true)
+        if (response.success && response.data?.items) {
+          return response.data.items.find(p => p.id === parentId)
+        }
+      } catch (error) {
+        console.error('Failed to get parent with children:', error)
+      }
+      return null
+    },
+
+    /**
+     * Select parent chunk for detailed view (NEW)
+     */
+    selectParentChunk(parentChunk) {
+      this.selectedParentChunk = parentChunk
+      this.selectedChunk = null  // Clear child selection when viewing parent
+    },
+
+    /**
+     * Clear parent chunk selection (NEW)
+     */
+    clearParentSelection() {
+      this.selectedParentChunk = null
+    },
+
+    /**
+     * Preview chunking result (NEW)
+     */
+    async previewChunking(strategyType = null, params = null) {
+      const docId = this.selectedDocument?.id
+      if (!docId) return
+
+      const strategy = strategyType || this.selectedStrategy?.type
+      const strategyParams = params || this.strategyParameters
+
+      this.previewLoading = true
+      try {
+        const response = await chunkingService.preview(docId, strategy, strategyParams)
+        if (response.success && response.data) {
+          this.previewResult = response.data
+        }
+      } catch (error) {
+        console.error('Failed to preview chunking:', error)
+        this.previewResult = null
+      } finally {
+        this.previewLoading = false
+      }
+    },
+
+    /**
+     * Compare multiple strategies (NEW)
+     */
+    async compareStrategies(strategies) {
+      const docId = this.selectedDocument?.id
+      if (!docId || !strategies?.length) return
+
+      this.comparisonLoading = true
+      try {
+        const response = await chunkingService.compare(docId, strategies)
+        if (response.success && response.data) {
+          this.comparisonResults = response.data.comparisons || []
+        }
+      } catch (error) {
+        console.error('Failed to compare strategies:', error)
+        this.comparisonResults = []
+      } finally {
+        this.comparisonLoading = false
+      }
+    },
+
+    /**
+     * Set view mode (list or tree) (NEW)
+     */
+    setViewMode(mode) {
+      this.viewMode = mode
+    },
+
+    /**
+     * Clear recommendations (NEW)
+     */
+    clearRecommendations() {
+      this.recommendations = []
+      this.documentFeatures = null
     }
   }
 })

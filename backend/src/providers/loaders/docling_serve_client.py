@@ -549,15 +549,26 @@ class DoclingServeLoader(BaseLoader):
             
             # 组合完整文本
             full_text = '\n\n'.join(all_text_parts)
+            
+            # 从 Markdown 中提取图片信息（如果 Docling API 没有返回 figures）
+            if not all_images:
+                all_images = self._extract_images_from_markdown(full_text)
+                if all_images:
+                    logger.info(f"从 Markdown 中提取到 {len(all_images)} 张图片")
+            
+            # 关键：将内联 base64 图片转换为占位符格式
+            # 目的：避免超长 base64 字符串干扰语义分块和消耗 token
+            if all_images:
+                original_len = len(full_text)
+                full_text = self._convert_inline_images_to_placeholders(full_text, all_images)
+                reduced_chars = original_len - len(full_text)
+                if reduced_chars > 0:
+                    logger.info(f"[图片占位符转换] 减少 {reduced_chars} 字符 ({reduced_chars / original_len * 100:.1f}%)")
+            
             total_chars = len(full_text)
             
-            # 对 HTML 格式，如果 Docling 没有返回图片，则主动从 Markdown 中提取
+            # 对 HTML 格式，生成 RAG 友好的结构化文本
             if file_format in ('html', 'htm'):
-                if not all_images:
-                    all_images = self._extract_images_from_markdown(full_text)
-                    logger.info(f"[HTML] 从 Markdown 中提取到 {len(all_images)} 张图片")
-                
-                # 生成 RAG 友好的结构化文本
                 structured_text = self._generate_html_structured_text(full_text, all_images)
             else:
                 structured_text = None
@@ -574,6 +585,14 @@ class DoclingServeLoader(BaseLoader):
                     "char_count": total_chars
                 }]
                 total_pages = 1
+            # 对已有的 pages 也进行占位符转换
+            elif all_pages and all_images:
+                for page in all_pages:
+                    if page.get("text"):
+                        page["text"] = self._convert_inline_images_to_placeholders(
+                            page["text"], all_images
+                        )
+                        page["char_count"] = len(page["text"])
             
             # 构建基础元数据
             metadata = {
@@ -666,15 +685,17 @@ class DoclingServeLoader(BaseLoader):
                 "caption": title or alt_text,
                 "mime_type": image_type,
                 "is_base64": is_base64,
-                "context": {
-                    "text_before": context_before if context_before else None,
-                    "text_after": context_after if context_after else None
-                }
+                "context_before": context_before if context_before else None,
+                "context_after": context_after if context_after else None
             }
             
-            # 如果是 base64，提取数据
+            # 如果是 base64，提取纯数据部分（去掉 data:image/xxx;base64, 前缀）
             if is_base64:
-                image_info["base64_data"] = src
+                # 分离 data URL 的 header 和数据部分
+                if ',' in src:
+                    image_info["base64_data"] = src.split(',', 1)[1]
+                else:
+                    image_info["base64_data"] = src
             
             images.append(image_info)
         
@@ -711,16 +732,81 @@ class DoclingServeLoader(BaseLoader):
                 "mime_type": None,
                 "is_base64": False,
                 "extracted_from": "docling_placeholder",
-                "context": {
-                    "text_before": context_before if context_before else None,
-                    "text_after": context_after if context_after else None
-                }
+                "context_before": context_before if context_before else None,
+                "context_after": context_after if context_after else None
             }
             
             images.append(image_info)
         
         return images
     
+    def _convert_inline_images_to_placeholders(
+        self,
+        md_content: str,
+        images: List[Dict[str, Any]]
+    ) -> str:
+        """
+        将 Markdown 中的内联 base64 图片转换为占位符格式
+        
+        目的：
+        1. 避免超长 base64 字符串干扰语义分块
+        2. 减少 token 消耗
+        3. 保持文本语义连贯性
+        
+        转换示例：
+        原: ![Image](data:image/png;base64,iVBORw0KGgo...)
+        改: [IMAGE_1: Image]
+        
+        Args:
+            md_content: 原始 Markdown 内容
+            images: 已提取的图片信息列表
+        
+        Returns:
+            str: 转换后的文本（图片位置用占位符替代）
+        """
+        import re
+        
+        if not images:
+            return md_content
+        
+        result = md_content
+        
+        # 匹配所有 Markdown 图片（包括 base64 和普通 URL）
+        # 使用非贪婪匹配来处理超长的 base64 字符串
+        img_pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
+        
+        # 找出所有匹配项并从后往前替换（避免位置偏移）
+        matches = list(img_pattern.finditer(md_content))
+        
+        for idx, match in enumerate(reversed(matches)):
+            img_idx = len(matches) - 1 - idx
+            alt_text = match.group(1) or f'图片{img_idx + 1}'
+            
+            # 构建占位符: [IMAGE_N: 描述]
+            placeholder = f"[IMAGE_{img_idx + 1}: {alt_text}]"
+            
+            # 替换原始图片标签
+            result = result[:match.start()] + placeholder + result[match.end():]
+        
+        # 同时处理 Docling 的无效图片占位符: <!-- 🖼️❌ Image not available ... -->
+        placeholder_pattern = re.compile(
+            r'([^\n]*)\n*<!-- 🖼️❌ Image not available[^>]*-->',
+            re.MULTILINE
+        )
+        placeholder_matches = list(placeholder_pattern.finditer(result))
+        
+        # 占位符图片的索引从 Markdown 图片之后开始
+        start_idx = len(matches)
+        
+        for idx, match in enumerate(reversed(placeholder_matches)):
+            img_idx = start_idx + len(placeholder_matches) - 1 - idx
+            alt_text = match.group(1).strip() or f'图片{img_idx + 1}'
+            
+            placeholder = f"[IMAGE_{img_idx + 1}: {alt_text}]"
+            result = result[:match.start()] + placeholder + result[match.end():]
+        
+        return result
+
     def _detect_image_mime_type(self, src: str) -> Optional[str]:
         """检测图片的 MIME 类型"""
         if not src:

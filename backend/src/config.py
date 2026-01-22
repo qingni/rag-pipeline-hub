@@ -70,6 +70,20 @@ class Settings(BaseSettings):
     DOCLING_SERVE_TIMEOUT: int = 600  # 10 分钟，适应大文件处理
     DOCLING_SERVE_ENABLED: bool = True
     
+    # Chunking Optimization Configuration
+    # Semantic Chunker: bge-m3 (fast) / qwen3-embedding-8b (high-precision)
+    SEMANTIC_CHUNKER_MODEL: str = "bge-m3"
+    SEMANTIC_CHUNKER_USE_EMBEDDING: bool = True
+    SEMANTIC_CHUNKER_SIMILARITY_THRESHOLD: float = 0.7
+    
+    # Multimodal Chunker: qwen3-vl-embedding-8b for image-text unified embedding
+    MULTIMODAL_EMBEDDING_MODEL: str = "qwen3-vl-embedding-8b"
+    MULTIMODAL_CHUNKER_USE_EMBEDDING: bool = False  # 默认不使用（未来功能）
+    
+    # Large document processing
+    LARGE_DOCUMENT_THRESHOLD: int = 50000000  # 5000万字符
+    STREAM_SEGMENT_SIZE: int = 100000  # 流式处理段大小
+    
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000

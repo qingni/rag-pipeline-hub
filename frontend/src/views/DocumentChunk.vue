@@ -310,7 +310,7 @@ onUnmounted(() => {
 }
 
 .result-header :deep(.t-card__body) {
-  padding: 16px 24px 0px 24px;
+  padding: 0px 24px 0px 24px;
 }
 
 /* 结果行样式 */

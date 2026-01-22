@@ -161,12 +161,246 @@ class ChunkingParameterValidator:
         }
     
     @staticmethod
+    def validate_parent_child_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate parameters for parent-child chunking strategy.
+        
+        Args:
+            params: Parameters dictionary
+        
+        Returns:
+            Validated parameters dictionary
+        
+        Raises:
+            ValueError: If parameters are invalid
+        """
+        parent_chunk_size = params.get('parent_chunk_size', 2000)
+        child_chunk_size = params.get('child_chunk_size', 500)
+        child_overlap = params.get('child_overlap', 50)
+        parent_overlap = params.get('parent_overlap', 200)
+        
+        # Validate parent chunk size
+        if not isinstance(parent_chunk_size, int):
+            raise ValueError("parent_chunk_size must be an integer")
+        
+        if parent_chunk_size < 500:
+            raise ValueError("parent_chunk_size must be at least 500")
+        
+        if parent_chunk_size > 10000:
+            raise ValueError("parent_chunk_size cannot exceed 10000")
+        
+        # Validate child chunk size
+        if not isinstance(child_chunk_size, int):
+            raise ValueError("child_chunk_size must be an integer")
+        
+        if child_chunk_size < ChunkingParameterValidator.MIN_CHUNK_SIZE:
+            raise ValueError(f"child_chunk_size must be at least {ChunkingParameterValidator.MIN_CHUNK_SIZE}")
+        
+        if child_chunk_size > 2000:
+            raise ValueError("child_chunk_size cannot exceed 2000")
+        
+        # Validate relationship
+        if child_chunk_size >= parent_chunk_size:
+            raise ValueError("child_chunk_size must be less than parent_chunk_size")
+        
+        # Validate overlaps
+        if not isinstance(child_overlap, int) or child_overlap < 0:
+            raise ValueError("child_overlap must be a non-negative integer")
+        
+        if child_overlap >= child_chunk_size:
+            raise ValueError("child_overlap must be less than child_chunk_size")
+        
+        if not isinstance(parent_overlap, int) or parent_overlap < 0:
+            raise ValueError("parent_overlap must be a non-negative integer")
+        
+        if parent_overlap >= parent_chunk_size:
+            raise ValueError("parent_overlap must be less than parent_chunk_size")
+        
+        return {
+            'parent_chunk_size': parent_chunk_size,
+            'child_chunk_size': child_chunk_size,
+            'child_overlap': child_overlap,
+            'parent_overlap': parent_overlap
+        }
+    
+    @staticmethod
+    def validate_multimodal_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate parameters for multimodal chunking strategy.
+        
+        Args:
+            params: Parameters dictionary
+        
+        Returns:
+            Validated parameters dictionary
+        
+        Raises:
+            ValueError: If parameters are invalid
+        """
+        # Boolean extraction flags
+        include_tables = params.get('include_tables', True)
+        include_images = params.get('include_images', True)
+        include_code = params.get('include_code', True)
+        
+        if not isinstance(include_tables, bool):
+            raise ValueError("include_tables must be a boolean")
+        
+        if not isinstance(include_images, bool):
+            raise ValueError("include_images must be a boolean")
+        
+        if not isinstance(include_code, bool):
+            raise ValueError("include_code must be a boolean")
+        
+        # Text strategy
+        text_strategy = params.get('text_strategy', 'character')
+        valid_text_strategies = ['character', 'paragraph', 'none']
+        if text_strategy not in valid_text_strategies:
+            # Auto-fallback to 'character' for unsupported strategies (e.g., from hybrid strategy switch)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Unsupported text_strategy '{text_strategy}' for multimodal, falling back to 'character'")
+            text_strategy = 'character'
+        
+        # Text chunk parameters
+        text_chunk_size = params.get('text_chunk_size', 500)
+        if not isinstance(text_chunk_size, int):
+            raise ValueError("text_chunk_size must be an integer")
+        
+        if text_chunk_size < 100:
+            raise ValueError("text_chunk_size must be at least 100")
+        
+        if text_chunk_size > 5000:
+            raise ValueError("text_chunk_size cannot exceed 5000")
+        
+        text_overlap = params.get('text_overlap', 50)
+        if not isinstance(text_overlap, int):
+            raise ValueError("text_overlap must be an integer")
+        
+        if text_overlap < 0:
+            raise ValueError("text_overlap must be non-negative")
+        
+        if text_overlap >= text_chunk_size:
+            raise ValueError("text_overlap must be less than text_chunk_size")
+        
+        # Extraction thresholds
+        min_table_rows = params.get('min_table_rows', 2)
+        if not isinstance(min_table_rows, int) or min_table_rows < 1:
+            raise ValueError("min_table_rows must be a positive integer")
+        
+        min_code_lines = params.get('min_code_lines', 3)
+        if not isinstance(min_code_lines, int) or min_code_lines < 1:
+            raise ValueError("min_code_lines must be a positive integer")
+        
+        # Image processing
+        extract_image_base64 = params.get('extract_image_base64', False)
+        if not isinstance(extract_image_base64, bool):
+            raise ValueError("extract_image_base64 must be a boolean")
+        
+        return {
+            'include_tables': include_tables,
+            'include_images': include_images,
+            'include_code': include_code,
+            'text_strategy': text_strategy,
+            'text_chunk_size': text_chunk_size,
+            'text_overlap': text_overlap,
+            'min_table_rows': min_table_rows,
+            'min_code_lines': min_code_lines,
+            'extract_image_base64': extract_image_base64
+        }
+    
+    @staticmethod
+    def validate_hybrid_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate parameters for hybrid chunking strategy.
+        
+        Args:
+            params: Parameters dictionary
+        
+        Returns:
+            Validated parameters dictionary
+        
+        Raises:
+            ValueError: If parameters are invalid
+        """
+        # Text strategy
+        text_strategy = params.get('text_strategy', 'semantic')
+        valid_text_strategies = ['semantic', 'paragraph', 'character', 'heading']
+        if text_strategy not in valid_text_strategies:
+            raise ValueError(f"text_strategy must be one of {valid_text_strategies}")
+        
+        # Code strategy
+        code_strategy = params.get('code_strategy', 'lines')
+        valid_code_strategies = ['lines', 'character', 'none']
+        if code_strategy not in valid_code_strategies:
+            raise ValueError(f"code_strategy must be one of {valid_code_strategies}")
+        
+        # Table strategy
+        table_strategy = params.get('table_strategy', 'independent')
+        valid_table_strategies = ['independent', 'merge_with_text']
+        if table_strategy not in valid_table_strategies:
+            raise ValueError(f"table_strategy must be one of {valid_table_strategies}")
+        
+        # Text chunk parameters
+        text_chunk_size = params.get('text_chunk_size', 500)
+        if not isinstance(text_chunk_size, int):
+            raise ValueError("text_chunk_size must be an integer")
+        
+        if text_chunk_size < 100:
+            raise ValueError("text_chunk_size must be at least 100")
+        
+        if text_chunk_size > 5000:
+            raise ValueError("text_chunk_size cannot exceed 5000")
+        
+        text_overlap = params.get('text_overlap', 50)
+        if not isinstance(text_overlap, int):
+            raise ValueError("text_overlap must be an integer")
+        
+        if text_overlap < 0:
+            raise ValueError("text_overlap must be non-negative")
+        
+        if text_overlap >= text_chunk_size:
+            raise ValueError("text_overlap must be less than text_chunk_size")
+        
+        # Code chunk parameters
+        code_chunk_lines = params.get('code_chunk_lines', 50)
+        if not isinstance(code_chunk_lines, int) or code_chunk_lines < 10:
+            raise ValueError("code_chunk_lines must be at least 10")
+        
+        code_overlap_lines = params.get('code_overlap_lines', 5)
+        if not isinstance(code_overlap_lines, int) or code_overlap_lines < 0:
+            raise ValueError("code_overlap_lines must be non-negative")
+        
+        # Semantic-specific parameters
+        similarity_threshold = params.get('similarity_threshold', 0.5)
+        if text_strategy == 'semantic':
+            if not isinstance(similarity_threshold, (int, float)):
+                raise ValueError("similarity_threshold must be a number")
+            if not 0.1 <= similarity_threshold <= 0.9:
+                raise ValueError("similarity_threshold must be between 0.1 and 0.9")
+        
+        use_embedding = params.get('use_embedding', True)
+        if not isinstance(use_embedding, bool):
+            raise ValueError("use_embedding must be a boolean")
+        
+        return {
+            'text_strategy': text_strategy,
+            'code_strategy': code_strategy,
+            'table_strategy': table_strategy,
+            'text_chunk_size': text_chunk_size,
+            'text_overlap': text_overlap,
+            'code_chunk_lines': code_chunk_lines,
+            'code_overlap_lines': code_overlap_lines,
+            'similarity_threshold': similarity_threshold,
+            'use_embedding': use_embedding
+        }
+    
+    @staticmethod
     def validate(strategy: str, params: Dict[str, Any]) -> None:
         """
         Validate parameters for given strategy.
         
         Args:
-            strategy: Strategy name (character, paragraph, heading, semantic)
+            strategy: Strategy name (character, paragraph, heading, semantic, parent_child, multimodal, hybrid)
             params: Parameters dictionary
         
         Raises:
@@ -177,6 +411,9 @@ class ChunkingParameterValidator:
             'paragraph': ChunkingParameterValidator.validate_paragraph_params,
             'heading': ChunkingParameterValidator.validate_heading_params,
             'semantic': ChunkingParameterValidator.validate_semantic_params,
+            'parent_child': ChunkingParameterValidator.validate_parent_child_params,
+            'multimodal': ChunkingParameterValidator.validate_multimodal_params,
+            'hybrid': ChunkingParameterValidator.validate_hybrid_params,
         }
         
         validator = validators.get(strategy)

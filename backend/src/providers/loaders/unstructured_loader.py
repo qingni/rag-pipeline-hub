@@ -54,7 +54,7 @@ class UnstructuredLoader:
         file_path: str,
         extract_images: bool = True,
         save_images: bool = True,
-        embed_images_base64: bool = False
+        embed_images_base64: bool = True  # 默认启用 base64，用于多模态嵌入
     ) -> Dict[str, Any]:
         """Extract text and images from document using Unstructured.
         

@@ -1,0 +1,326 @@
+"""Document structure analyzer for intelligent chunking recommendation."""
+import re
+from typing import Dict, Any, List, Optional, Tuple
+from ..models.document_features import DocumentFeatures
+
+
+class DocumentAnalyzer:
+    """Analyzes document structure for chunking strategy recommendation.
+    
+    This analyzer extracts structural features from documents including:
+    - Heading hierarchy
+    - Paragraph statistics
+    - Table and image counts
+    - Code block analysis
+    - Overall document complexity
+    """
+    
+    # Regex patterns for structure detection
+    HEADING_PATTERNS = {
+        1: re.compile(r'^#\s+(.+)$', re.MULTILINE),  # H1
+        2: re.compile(r'^##\s+(.+)$', re.MULTILINE),  # H2
+        3: re.compile(r'^###\s+(.+)$', re.MULTILINE),  # H3
+        4: re.compile(r'^####\s+(.+)$', re.MULTILINE),  # H4
+        5: re.compile(r'^#####\s+(.+)$', re.MULTILINE),  # H5
+        6: re.compile(r'^######\s+(.+)$', re.MULTILINE),  # H6
+    }
+    
+    # HTML heading patterns
+    HTML_HEADING_PATTERN = re.compile(r'<h([1-6])[^>]*>.*?</h\1>', re.IGNORECASE | re.DOTALL)
+    
+    # Table patterns
+    MARKDOWN_TABLE_PATTERN = re.compile(r'^\|.*\|$\n^\|[-:\s|]+\|$', re.MULTILINE)
+    HTML_TABLE_PATTERN = re.compile(r'<table[^>]*>.*?</table>', re.IGNORECASE | re.DOTALL)
+    
+    # Image patterns
+    MARKDOWN_IMAGE_PATTERN = re.compile(r'!\[([^\]]*)\]\([^)]+\)')
+    HTML_IMAGE_PATTERN = re.compile(r'<img[^>]+>', re.IGNORECASE)
+    
+    # Code block patterns
+    FENCED_CODE_PATTERN = re.compile(r'```[\s\S]*?```')
+    INDENTED_CODE_PATTERN = re.compile(r'^(?: {4}|\t).*$', re.MULTILINE)
+    
+    def analyze(
+        self, 
+        text: str, 
+        document_result: Optional[Dict[str, Any]] = None
+    ) -> DocumentFeatures:
+        """
+        Analyze document structure and extract features.
+        
+        Args:
+            text: Document text content
+            document_result: Optional document loading result with structured data
+        
+        Returns:
+            DocumentFeatures with extracted characteristics
+        """
+        features = DocumentFeatures()
+        
+        if not text:
+            return features
+        
+        # Basic statistics
+        features.total_char_count = len(text)
+        features.total_word_count = len(text.split())
+        
+        # Analyze headings
+        heading_levels = self._analyze_headings(text)
+        features.heading_levels = heading_levels
+        features.heading_count = sum(heading_levels.values())
+        
+        # Analyze paragraphs
+        paragraph_stats = self._analyze_paragraphs(text)
+        features.paragraph_count = paragraph_stats["count"]
+        features.avg_paragraph_length = paragraph_stats["avg_length"]
+        features.max_paragraph_length = paragraph_stats["max_length"]
+        features.min_paragraph_length = paragraph_stats["min_length"]
+        
+        # Analyze multimodal content
+        if document_result:
+            # Use structured data from document loader
+            # Support multiple result formats:
+            # 1. { content: { tables: [], images: [] } }
+            # 2. { tables: [], images: [] }
+            # 3. { metadata: { table_count, image_count } }
+            content = document_result.get("content", {})
+            
+            # Try to get from content first
+            tables = content.get("tables", [])
+            images = content.get("images", [])
+            
+            # If not in content, try root level
+            if not tables:
+                tables = document_result.get("tables", [])
+            if not images:
+                images = document_result.get("images", [])
+            
+            # If still empty, check metadata for counts
+            if not tables and not images:
+                metadata = document_result.get("metadata", {})
+                features.table_count = metadata.get("table_count", 0)
+                features.image_count = metadata.get("image_count", 0)
+            else:
+                features.table_count = len(tables) if isinstance(tables, list) else 0
+                features.image_count = len(images) if isinstance(images, list) else 0
+            
+            # If still no images detected, fall back to pattern matching on text
+            if features.image_count == 0:
+                features.image_count = self._count_images(text)
+            if features.table_count == 0:
+                features.table_count = self._count_tables(text)
+        else:
+            # Fall back to pattern matching
+            features.table_count = self._count_tables(text)
+            features.image_count = self._count_images(text)
+        
+        # Analyze code blocks
+        code_stats = self._analyze_code_blocks(text)
+        features.code_block_count = code_stats["count"]
+        features.code_block_ratio = code_stats["ratio"]
+        
+        # Determine document characteristics
+        features.has_clear_structure = self._has_clear_structure(features)
+        features.is_technical_document = self._is_technical_document(features)
+        features.is_narrative_document = self._is_narrative_document(features)
+        features.is_structured_data = self._is_structured_data(text, document_result)
+        features.document_format = self._get_document_format(document_result)
+        features.estimated_complexity = self._estimate_complexity(features)
+        
+        return features
+    
+    def _analyze_headings(self, text: str) -> Dict[int, int]:
+        """Count headings at each level."""
+        heading_levels = {}
+        
+        # Count Markdown headings
+        for level, pattern in self.HEADING_PATTERNS.items():
+            matches = pattern.findall(text)
+            if matches:
+                heading_levels[level] = heading_levels.get(level, 0) + len(matches)
+        
+        # Count HTML headings
+        for match in self.HTML_HEADING_PATTERN.finditer(text):
+            level = int(match.group(1))
+            heading_levels[level] = heading_levels.get(level, 0) + 1
+        
+        return heading_levels
+    
+    def _analyze_paragraphs(self, text: str) -> Dict[str, Any]:
+        """Analyze paragraph statistics."""
+        # Split by double newlines or multiple newlines
+        paragraphs = re.split(r'\n\s*\n', text)
+        paragraphs = [p.strip() for p in paragraphs if p.strip()]
+        
+        if not paragraphs:
+            return {"count": 0, "avg_length": 0, "max_length": 0, "min_length": 0}
+        
+        lengths = [len(p) for p in paragraphs]
+        return {
+            "count": len(paragraphs),
+            "avg_length": sum(lengths) / len(lengths),
+            "max_length": max(lengths),
+            "min_length": min(lengths)
+        }
+    
+    def _count_tables(self, text: str) -> int:
+        """Count tables in text."""
+        count = 0
+        
+        # Count Markdown tables
+        count += len(self.MARKDOWN_TABLE_PATTERN.findall(text))
+        
+        # Count HTML tables
+        count += len(self.HTML_TABLE_PATTERN.findall(text))
+        
+        return count
+    
+    def _count_images(self, text: str) -> int:
+        """Count images in text."""
+        count = 0
+        
+        # Count Markdown images
+        count += len(self.MARKDOWN_IMAGE_PATTERN.findall(text))
+        
+        # Count HTML images
+        count += len(self.HTML_IMAGE_PATTERN.findall(text))
+        
+        return count
+    
+    def _analyze_code_blocks(self, text: str) -> Dict[str, Any]:
+        """Analyze code blocks in text."""
+        # Find all code blocks
+        fenced_blocks = self.FENCED_CODE_PATTERN.findall(text)
+        
+        total_code_length = sum(len(block) for block in fenced_blocks)
+        code_ratio = total_code_length / len(text) if text else 0
+        
+        return {
+            "count": len(fenced_blocks),
+            "ratio": code_ratio
+        }
+    
+    def _has_clear_structure(self, features: DocumentFeatures) -> bool:
+        """Determine if document has clear hierarchical structure."""
+        # Clear structure = multiple heading levels with reasonable counts
+        if features.heading_count < 3:
+            return False
+        
+        # Check if there's a hierarchy
+        levels_with_headings = len([l for l, c in features.heading_levels.items() if c > 0])
+        return levels_with_headings >= 2
+    
+    def _is_technical_document(self, features: DocumentFeatures) -> bool:
+        """Determine if document is technical (code-heavy, tables, etc.)."""
+        return (
+            features.code_block_ratio > 0.2 or
+            features.code_block_count > 3 or
+            features.table_count > 2
+        )
+    
+    def _is_narrative_document(self, features: DocumentFeatures) -> bool:
+        """Determine if document is narrative (continuous text, few structures)."""
+        return (
+            features.heading_count < 3 and
+            features.table_count < 2 and
+            features.code_block_count < 2 and
+            features.avg_paragraph_length > 200
+        )
+    
+    def _is_structured_data(self, text: str, document_result: Optional[Dict[str, Any]] = None) -> bool:
+        """Determine if document contains structured data (JSON, key-value pairs, etc.).
+        
+        Structured data should be chunked by line/paragraph to keep each record intact.
+        """
+        # Check if loader indicates structured format
+        if document_result:
+            loader = document_result.get("loader", "")
+            metadata = document_result.get("metadata", {})
+            doc_format = metadata.get("format", "")
+            
+            # JSON, CSV, or similar structured formats
+            if loader in ("json", "csv") or doc_format in ("json", "csv"):
+                return True
+            
+            # Check for raw_json in metadata (indicates parsed JSON)
+            if metadata.get("raw_json"):
+                return True
+        
+        # Heuristic: check if text looks like key-value pairs
+        # Pattern: each line is roughly "Key: Value" or "Key = Value"
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        if len(lines) >= 3:
+            kv_pattern = re.compile(r'^.{2,50}:\s+.+$')  # "Key: Value" pattern
+            kv_count = sum(1 for line in lines if kv_pattern.match(line))
+            if kv_count / len(lines) > 0.6:  # More than 60% lines are key-value
+                return True
+        
+        return False
+    
+    def _get_document_format(self, document_result: Optional[Dict[str, Any]] = None) -> str:
+        """Get the original document format."""
+        if not document_result:
+            return ""
+        
+        # Check loader type
+        loader = document_result.get("loader", "")
+        if loader:
+            return loader
+        
+        # Check metadata format
+        metadata = document_result.get("metadata", {})
+        return metadata.get("format", "")
+    
+    def _estimate_complexity(self, features: DocumentFeatures) -> str:
+        """Estimate document complexity."""
+        score = 0
+        
+        # Heading complexity
+        if features.heading_count > 10:
+            score += 2
+        elif features.heading_count > 5:
+            score += 1
+        
+        # Multimodal complexity
+        if features.table_count > 5 or features.image_count > 10:
+            score += 2
+        elif features.table_count > 0 or features.image_count > 0:
+            score += 1
+        
+        # Code complexity
+        if features.code_block_ratio > 0.3:
+            score += 2
+        elif features.code_block_count > 0:
+            score += 1
+        
+        # Size complexity
+        if features.total_char_count > 50000:
+            score += 1
+        
+        if score >= 4:
+            return "high"
+        elif score >= 2:
+            return "medium"
+        else:
+            return "low"
+
+
+# Singleton instance
+_analyzer_instance = None
+
+
+def get_document_analyzer() -> DocumentAnalyzer:
+    """Get the document analyzer singleton instance."""
+    global _analyzer_instance
+    if _analyzer_instance is None:
+        _analyzer_instance = DocumentAnalyzer()
+    return _analyzer_instance
+
+
+def analyze_document(
+    text: str, 
+    document_result: Optional[Dict[str, Any]] = None
+) -> DocumentFeatures:
+    """Convenience function to analyze document features."""
+    analyzer = get_document_analyzer()
+    return analyzer.analyze(text, document_result)

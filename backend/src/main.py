@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
     from .models import chunking_strategy, chunking_task, embedding_models
     from .models import vector_index, index_statistics, query_history
     from .models import search, generation, loading_task
+    from .models import parent_chunk, hybrid_chunking_config  # New models for chunking optimization
     
     # Initialize database tables
     init_db()
@@ -123,7 +124,7 @@ async def api_health_check():
 
 # Import and register API routers
 from .api import documents, loading, processing, chunking
-from .api import chunking_preview, chunking_history
+from .api import chunking_preview, chunking_history, chunking_recommend
 from .api import embedding_routes, embedding_query_routes
 from .api import vector_index
 from .api import search
@@ -135,6 +136,7 @@ app.include_router(processing.router, prefix="/api/v1/processing", tags=["Proces
 app.include_router(chunking.router, prefix="/api/v1/chunking", tags=["Chunking"])
 app.include_router(chunking_preview.router, prefix="/api/v1/chunking", tags=["Chunking - Preview"])
 app.include_router(chunking_history.router, prefix="/api/v1/chunking", tags=["Chunking - History"])
+app.include_router(chunking_recommend.router, prefix="/api/v1", tags=["Chunking - Recommendation"])
 app.include_router(embedding_routes.router, prefix="/api/v1", tags=["Embedding"])
 app.include_router(embedding_query_routes.router, prefix="/api/v1", tags=["Embedding - Queries"])
 app.include_router(vector_index.router, prefix="/api", tags=["Vector Index"])

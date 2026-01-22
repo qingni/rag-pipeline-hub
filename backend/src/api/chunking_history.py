@@ -364,6 +364,68 @@ async def delete_result(
     )
 
 
+@router.post("/results/batch-delete")
+async def batch_delete_results(
+    result_ids: List[str],
+    db: Session = Depends(get_db)
+):
+    """
+    Batch delete chunking results.
+    
+    Args:
+        result_ids: List of result IDs to delete
+        db: Database session
+        
+    Returns:
+        Deletion summary
+    """
+    from pathlib import Path
+    from ..config import settings
+    
+    if not result_ids:
+        from ..utils.error_handlers import ValidationError
+        raise ValidationError("No result IDs provided")
+    
+    deleted_count = 0
+    failed_ids = []
+    
+    for result_id in result_ids:
+        result = db.query(ChunkingResult).filter(
+            ChunkingResult.result_id == result_id
+        ).first()
+        
+        if not result:
+            failed_ids.append(result_id)
+            continue
+        
+        # Delete JSON file
+        if result.json_file_path:
+            file_path = Path(result.json_file_path)
+            if not file_path.is_absolute():
+                file_path = Path(settings.RESULTS_DIR).parent / result.json_file_path
+            
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                except Exception as e:
+                    print(f"Failed to delete file {file_path}: {e}")
+        
+        # Delete database record
+        db.delete(result)
+        deleted_count += 1
+    
+    db.commit()
+    
+    return success_response(
+        data={
+            "deleted_count": deleted_count,
+            "failed_ids": failed_ids,
+            "total_requested": len(result_ids)
+        },
+        message=f"Successfully deleted {deleted_count} result(s)"
+    )
+
+
 @router.get("/export/{result_id}")
 async def export_result(
     result_id: str,

@@ -166,32 +166,13 @@ class HTMLLoader:
                         idx = image_map[img_id]
                         img_info = images[idx] if idx < len(images) else {}
                         
-                        # 构建图片标记
-                        src = img_info.get('src', '')
-                        alt = img_info.get('alt_text', '')
+                        # 构建图片标记（不包含 base64 数据）
+                        alt = img_info.get('alt_text', '') or f'图片{idx + 1}'
                         caption = img_info.get('caption', '')
-                        context = img_info.get('context', {})
                         
-                        # 生成RAG友好的图片描述
-                        img_marker = f"\n[IMAGE_{idx}]"
-                        img_details = []
-                        if src:
-                            img_details.append(f"src=\"{src}\"")
-                        if alt:
-                            img_details.append(f"alt=\"{alt}\"")
-                        if caption:
-                            img_details.append(f"caption=\"{caption}\"")
-                        if context:
-                            ctx_parts = []
-                            if context.get('text_before'):
-                                ctx_parts.append(f"前文: {context['text_before']}")
-                            if context.get('text_after'):
-                                ctx_parts.append(f"后文: {context['text_after']}")
-                            if ctx_parts:
-                                img_details.append(f"context=\"{'; '.join(ctx_parts)}\"")
-                        
-                        if img_details:
-                            img_marker += f" ({' '.join(img_details)})"
+                        # 使用统一的占位符格式: [IMAGE_N: 描述]
+                        description = caption or alt
+                        img_marker = f"\n[IMAGE_{idx + 1}: {description}]"
                         
                         lines.append(img_marker)
                         lines.append('')
@@ -268,24 +249,21 @@ class HTMLLoader:
                         lines.append('#' * level + ' ' + heading_text)
                         lines.append('')
                 
-                # 处理图片 - 生成Markdown图片语法
+                # 处理图片 - 生成占位符（不嵌入 base64）
                 elif tag_name == 'img':
                     img_id = id(child)
                     if img_id in image_map:
                         idx = image_map[img_id]
                         img_info = images[idx] if idx < len(images) else {}
                         
-                        src = img_info.get('src', '')
                         alt = img_info.get('alt_text', '') or f'图片{idx + 1}'
                         caption = img_info.get('caption', '')
                         
-                        if src:
-                            # 生成Markdown图片语法
-                            lines.append('')
-                            lines.append(f'![{alt}]({src})')
-                            if caption:
-                                lines.append(f'*{caption}*')
-                            lines.append('')
+                        # 使用统一的占位符格式（不包含 src，避免 base64 污染文本）
+                        description = caption or alt
+                        lines.append('')
+                        lines.append(f'[IMAGE_{idx + 1}: {description}]')
+                        lines.append('')
                 
                 # 处理段落
                 elif tag_name == 'p':
@@ -460,9 +438,14 @@ class HTMLLoader:
                 "context": context
             }
             
-            # 如果是base64图片，提取mime类型
+            # 如果是base64图片，提取数据用于多模态嵌入
             if is_base64 and src:
                 image_info["mime_type"] = self._extract_base64_mime(src)
+                # 提取纯 base64 数据（去掉 data:image/xxx;base64, 前缀）
+                if ',' in src:
+                    image_info["base64_data"] = src.split(',', 1)[1]
+                # 清理 src 字段，避免数据重复
+                image_info["src"] = None
             
             images.append(image_info)
         

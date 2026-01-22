@@ -41,6 +41,7 @@ langchain-community==0.3.14
 langchain-text-splitters==0.3.4
 langchain-core==0.3.31
 langchain-openai==0.2.14
+langchain-experimental==0.3.4
 
 # AI and Embeddings
 openai==1.109.1

@@ -1,0 +1,725 @@
+openapi: 3.0.3
+info:
+  title: Document Chunking Optimization API
+  description: 文档分块功能优化 API - 支持父子分块、多模态分块、智能推荐
+  version: 2.0.0
+  
+servers:
+  - url: /api
+    description: Backend API
+
+tags:
+  - name: Chunking
+    description: 分块核心操作
+  - name: Recommendation
+    description: 策略推荐
+  - name: Preview
+    description: 分块预览与对比
+  - name: Version
+    description: 版本管理
+
+paths:
+  # ============ 分块核心操作 ============
+  /chunking/chunk:
+    post:
+      tags: [Chunking]
+      summary: 创建分块任务
+      description: 支持普通分块、父子分块、混合分块、多模态分块
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChunkingRequest'
+      responses:
+        '200':
+          description: 分块任务创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkingTaskResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /chunking/stream:
+    post:
+      tags: [Chunking]
+      summary: 流式分块（大文档）
+      description: 对大文档进行流式分块处理，渐进式返回结果
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamChunkingRequest'
+      responses:
+        '200':
+          description: SSE 流式响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events 流
+
+  /chunking/result/{result_id}:
+    get:
+      tags: [Chunking]
+      summary: 获取分块结果
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: include_parent
+          in: query
+          description: 是否包含父块信息（父子分块场景）
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: 分块结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkingResultResponse'
+
+  /chunking/result/{result_id}/chunks:
+    get:
+      tags: [Chunking]
+      summary: 获取分块列表（分页）
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: chunk_type
+          in: query
+          description: 按类型筛选
+          schema:
+            type: string
+            enum: [text, table, image, code]
+        - name: parent_id
+          in: query
+          description: 按父块筛选
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 分块列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkListResponse'
+
+  /chunking/result/{result_id}/parents:
+    get:
+      tags: [Chunking]
+      summary: 获取父块列表（父子分块）
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 父块列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParentChunkListResponse'
+
+  # ============ 策略推荐 ============
+  /chunking/recommend:
+    post:
+      tags: [Recommendation]
+      summary: 获取分块策略推荐
+      description: 分析文档结构特征，推荐最适合的分块策略
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendRequest'
+      responses:
+        '200':
+          description: 策略推荐结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationResponse'
+
+  /chunking/analyze:
+    post:
+      tags: [Recommendation]
+      summary: 分析文档结构特征
+      description: 返回文档的结构分析结果，用于智能推荐
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [document_id]
+              properties:
+                document_id:
+                  type: string
+      responses:
+        '200':
+          description: 文档特征分析结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentFeaturesResponse'
+
+  # ============ 分块预览与对比 ============
+  /chunking/preview:
+    post:
+      tags: [Preview]
+      summary: 分块预览
+      description: 使用文档前 10% 内容进行试分块
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewRequest'
+      responses:
+        '200':
+          description: 预览结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewResponse'
+
+  /chunking/compare:
+    post:
+      tags: [Preview]
+      summary: 策略对比
+      description: 并排对比最多 3 种策略的分块效果
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompareRequest'
+      responses:
+        '200':
+          description: 对比结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompareResponse'
+
+  # ============ 版本管理 ============
+  /chunking/versions/{document_id}:
+    get:
+      tags: [Version]
+      summary: 获取文档的分块版本历史
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 版本历史列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionHistoryResponse'
+
+  /chunking/versions/{result_id}/rollback:
+    post:
+      tags: [Version]
+      summary: 回滚到指定版本
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 回滚成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  active_version:
+                    type: integer
+
+  /chunking/versions/compare:
+    post:
+      tags: [Version]
+      summary: 版本对比
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [result_ids]
+              properties:
+                result_ids:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 2
+                  maxItems: 3
+      responses:
+        '200':
+          description: 版本对比结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionCompareResponse'
+
+components:
+  schemas:
+    # ============ 请求 Schemas ============
+    ChunkingRequest:
+      type: object
+      required: [document_id, strategy_type]
+      properties:
+        document_id:
+          type: string
+          description: 文档 ID（来自文档加载结果）
+        strategy_type:
+          type: string
+          enum: [character, paragraph, heading, semantic, parent_child, hybrid, multimodal]
+        strategy_params:
+          $ref: '#/components/schemas/StrategyParams'
+        hybrid_config:
+          $ref: '#/components/schemas/HybridConfig'
+
+    StreamChunkingRequest:
+      allOf:
+        - $ref: '#/components/schemas/ChunkingRequest'
+        - type: object
+          properties:
+            segment_size:
+              type: integer
+              default: 100000
+              description: 每次处理的字符数
+
+    StrategyParams:
+      type: object
+      description: 策略参数（根据 strategy_type 不同）
+      properties:
+        # Character
+        chunk_size:
+          type: integer
+          minimum: 100
+          maximum: 5000
+          default: 500
+        overlap:
+          type: integer
+          minimum: 0
+          maximum: 500
+          default: 50
+        # Semantic
+        similarity_threshold:
+          type: number
+          minimum: 0.1
+          maximum: 0.9
+          default: 0.3
+        min_chunk_size:
+          type: integer
+          default: 300
+        max_chunk_size:
+          type: integer
+          default: 1200
+        # Parent-Child
+        parent_size:
+          type: integer
+          minimum: 500
+          maximum: 5000
+          default: 2000
+        child_size:
+          type: integer
+          minimum: 100
+          maximum: 1000
+          default: 400
+        child_overlap:
+          type: integer
+          minimum: 0
+          maximum: 200
+          default: 50
+        # Multimodal
+        include_tables:
+          type: boolean
+          default: true
+        include_images:
+          type: boolean
+          default: true
+        text_strategy:
+          type: string
+          enum: [character, paragraph, semantic]
+          default: semantic
+
+    HybridConfig:
+      type: object
+      description: 混合分块配置
+      properties:
+        text:
+          $ref: '#/components/schemas/ContentTypeConfig'
+        code:
+          $ref: '#/components/schemas/ContentTypeConfig'
+        table:
+          $ref: '#/components/schemas/ContentTypeConfig'
+        image:
+          $ref: '#/components/schemas/ContentTypeConfig'
+
+    ContentTypeConfig:
+      type: object
+      properties:
+        strategy:
+          type: string
+          enum: [character, paragraph, heading, semantic, line, independent]
+        params:
+          type: object
+
+    RecommendRequest:
+      type: object
+      required: [document_id]
+      properties:
+        document_id:
+          type: string
+        top_n:
+          type: integer
+          default: 3
+          description: 返回前 N 个推荐
+
+    PreviewRequest:
+      type: object
+      required: [document_id, strategy_type]
+      properties:
+        document_id:
+          type: string
+        strategy_type:
+          type: string
+        strategy_params:
+          $ref: '#/components/schemas/StrategyParams'
+        preview_ratio:
+          type: number
+          default: 0.1
+          description: 预览文档的比例 (0-1)
+
+    CompareRequest:
+      type: object
+      required: [document_id, strategies]
+      properties:
+        document_id:
+          type: string
+        strategies:
+          type: array
+          items:
+            type: object
+            properties:
+              strategy_type:
+                type: string
+              strategy_params:
+                $ref: '#/components/schemas/StrategyParams'
+          minItems: 2
+          maxItems: 3
+
+    # ============ 响应 Schemas ============
+    ChunkingTaskResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        result_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, partial, failed]
+        total_chunks:
+          type: integer
+        statistics:
+          $ref: '#/components/schemas/ChunkingStatistics'
+
+    ChunkingResultResponse:
+      type: object
+      properties:
+        result_id:
+          type: string
+        document_id:
+          type: string
+        strategy_type:
+          type: string
+        strategy_params:
+          type: object
+        version:
+          type: integer
+        is_active:
+          type: boolean
+        total_chunks:
+          type: integer
+        statistics:
+          $ref: '#/components/schemas/ChunkingStatistics'
+        parent_chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParentChunk'
+          description: 仅父子分块时返回
+        created_at:
+          type: string
+          format: date-time
+
+    ChunkingStatistics:
+      type: object
+      properties:
+        total_chunks:
+          type: integer
+        avg_chunk_size:
+          type: number
+        min_chunk_size:
+          type: integer
+        max_chunk_size:
+          type: integer
+        text_chunks:
+          type: integer
+        table_chunks:
+          type: integer
+        image_chunks:
+          type: integer
+        code_chunks:
+          type: integer
+        parent_count:
+          type: integer
+          description: 父块数量（父子分块）
+        processing_time_ms:
+          type: number
+
+    ChunkListResponse:
+      type: object
+      properties:
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Chunk'
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    Chunk:
+      type: object
+      properties:
+        id:
+          type: string
+        sequence_number:
+          type: integer
+        content:
+          type: string
+        content_preview:
+          type: string
+          description: 前 100 字符
+        chunk_type:
+          type: string
+          enum: [text, table, image, code]
+        parent_id:
+          type: string
+        metadata:
+          type: object
+
+    ParentChunk:
+      type: object
+      properties:
+        id:
+          type: string
+        sequence_number:
+          type: integer
+        content:
+          type: string
+        content_preview:
+          type: string
+        child_count:
+          type: integer
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Chunk'
+
+    ParentChunkListResponse:
+      type: object
+      properties:
+        parents:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParentChunk'
+        total:
+          type: integer
+
+    RecommendationResponse:
+      type: object
+      properties:
+        document_id:
+          type: string
+        features:
+          $ref: '#/components/schemas/DocumentFeatures'
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Recommendation'
+
+    DocumentFeatures:
+      type: object
+      properties:
+        heading_count:
+          type: integer
+        heading_levels:
+          type: object
+          additionalProperties:
+            type: integer
+        paragraph_count:
+          type: integer
+        avg_paragraph_length:
+          type: number
+        table_count:
+          type: integer
+        image_count:
+          type: integer
+        code_block_count:
+          type: integer
+        code_block_ratio:
+          type: number
+        total_char_count:
+          type: integer
+
+    DocumentFeaturesResponse:
+      type: object
+      properties:
+        document_id:
+          type: string
+        features:
+          $ref: '#/components/schemas/DocumentFeatures'
+
+    Recommendation:
+      type: object
+      properties:
+        strategy:
+          type: string
+        strategy_name:
+          type: string
+        reason:
+          type: string
+        confidence:
+          type: number
+        estimated_chunks:
+          type: integer
+        is_top:
+          type: boolean
+        suggested_params:
+          type: object
+
+    PreviewResponse:
+      type: object
+      properties:
+        document_id:
+          type: string
+        strategy_type:
+          type: string
+        preview_chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Chunk'
+        statistics:
+          $ref: '#/components/schemas/ChunkingStatistics'
+        estimated_total:
+          type: integer
+
+    CompareResponse:
+      type: object
+      properties:
+        document_id:
+          type: string
+        comparisons:
+          type: array
+          items:
+            type: object
+            properties:
+              strategy_type:
+                type: string
+              strategy_params:
+                type: object
+              preview_chunks:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Chunk'
+              statistics:
+                $ref: '#/components/schemas/ChunkingStatistics'
+
+    VersionHistoryResponse:
+      type: object
+      properties:
+        document_id:
+          type: string
+        versions:
+          type: array
+          items:
+            type: object
+            properties:
+              result_id:
+                type: string
+              version:
+                type: integer
+              is_active:
+                type: boolean
+              strategy_type:
+                type: string
+              total_chunks:
+                type: integer
+              created_at:
+                type: string
+                format: date-time
+
+    VersionCompareResponse:
+      type: object
+      properties:
+        versions:
+          type: array
+          items:
+            type: object
+            properties:
+              result_id:
+                type: string
+              version:
+                type: integer
+              statistics:
+                $ref: '#/components/schemas/ChunkingStatistics'
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              detail:
+                type: string

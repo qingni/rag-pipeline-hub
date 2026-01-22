@@ -230,7 +230,7 @@ StandardDocumentResult = {
         "full_text": str,
         "pages": List[PageContent],
         "tables": List[TableContent],  # Docling 特有
-        "images": List[ImageContent],  # Docling 特有
+        "images": List[ImageContent],  # 图片数据（含 base64）
         "formulas": List[FormulaContent]  # Docling 特有
     },
     "statistics": {
@@ -242,6 +242,38 @@ StandardDocumentResult = {
     }
 }
 ```
+
+#### 图片数据结构（占位符 + 结构化元数据方案）
+
+为支持多模态嵌入，图片采用占位符 + 结构化元数据方案：
+
+**占位符格式（full_text 中）**：
+```
+[IMAGE_N: 图片描述]
+```
+
+**图片元数据结构（images 数组）**：
+```python
+ImageContent = {
+    "image_index": int,           # 图片索引（对应占位符中的 N）
+    "file_path": str,             # 图片文件路径（用于展示）
+    "base64_data": str,           # Base64 编码数据（用于多模态嵌入）
+    "mime_type": str,             # MIME 类型（image/png, image/jpeg 等）
+    "alt_text": str,              # 替代文本/描述
+    "caption": str,               # 图片标题
+    "width": int,                 # 图片宽度
+    "height": int,                # 图片高度
+    "page_number": int,           # 所在页码
+    "context_before": str,        # 图片前的上下文文本
+    "context_after": str          # 图片后的上下文文本
+}
+```
+
+**设计说明**：
+- `embed_images_base64` 默认启用，确保图片数据包含 base64 编码
+- 文本中保留占位符 `[IMAGE_N: 描述]`，保持文档结构清晰
+- 分块器根据占位符匹配 images 数组，关联完整图片数据
+- `file_path` 用于前端展示，`base64_data` 用于多模态嵌入
 
 ### Assumptions
 
