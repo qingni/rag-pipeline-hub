@@ -466,7 +466,7 @@ class LoadingService:
             "loader_type": actual_loader
         }
     
-    def get_async_task_status(
+    async def get_async_task_status(
         self,
         db: Session,
         task_id: str
@@ -475,6 +475,7 @@ class LoadingService:
         获取异步任务状态
         
         会同时查询 Docling Serve 的最新状态并更新本地记录。
+        使用异步 HTTP 客户端避免阻塞。
         
         Args:
             db: 数据库会话
@@ -488,6 +489,8 @@ class LoadingService:
                 "document_id": str
             }
         """
+        import httpx
+        
         # 查找本地任务
         task = db.query(LoadingTask).filter(LoadingTask.id == task_id).first()
         if not task:
@@ -504,13 +507,79 @@ class LoadingService:
                 "processing_time": task.processing_time
             }
         
-        # 查询 Docling Serve 的最新状态
+        # 使用异步 HTTP 客户端查询 Docling Serve 的最新状态
         if task.external_task_id and docling_serve_loader:
-            poll_result = docling_serve_loader.poll_task_status(task.external_task_id)
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    base_url = docling_serve_loader.base_url
+                    headers = {}
+                    if docling_serve_loader.api_key:
+                        headers["Authorization"] = f"Bearer {docling_serve_loader.api_key}"
+                    
+                    response = await client.get(
+                        f"{base_url}/v1/status/poll/{task.external_task_id}",
+                        headers=headers
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        task_status = result.get("task_status") or result.get("status", "pending")
+                        progress = result.get("progress", 0)
+                        
+                        # 映射状态
+                        status_map = {
+                            "pending": "pending",
+                            "started": "started",
+                            "running": "started",
+                            "success": "success",
+                            "completed": "success",
+                            "failure": "failure",
+                            "failed": "failure",
+                            "error": "failure"
+                        }
+                        new_status = status_map.get(task_status.lower(), task_status)
+                        new_progress = progress
+                        
+                        # 如果任务成功但没有进度信息，设为 100%
+                        if new_status == "success" and new_progress == 0:
+                            new_progress = 100
+                        
+                        poll_result = {
+                            "success": True,
+                            "status": new_status,
+                            "progress": new_progress
+                        }
+                    else:
+                        poll_result = {
+                            "success": False,
+                            "error": f"HTTP {response.status_code}"
+                        }
+            except httpx.TimeoutException:
+                logger.warning(f"Timeout polling task status for {task.id}")
+                poll_result = {"success": False, "error": "Timeout"}
+            except Exception as e:
+                logger.warning(f"Error polling task status: {e}")
+                poll_result = {"success": False, "error": str(e)}
+            
+            logger.info(f"Poll result for task {task.id}: {poll_result}")
             
             if poll_result.get("success"):
                 new_status = poll_result.get("status")
                 new_progress = poll_result.get("progress", 0)
+                
+                # 对于 started 状态，Docling Serve 不提供实时进度
+                # 我们根据已等待时间模拟进度（10%-90%范围）
+                if new_status == LoadingTaskStatus.STARTED and new_progress == 0:
+                    # 根据已等待时间计算模拟进度
+                    start_time = task.started_at or task.created_at
+                    if start_time:
+                        elapsed = (datetime.utcnow() - start_time).total_seconds()
+                        # 每 5 秒增加约 5%，最高到 90%
+                        new_progress = min(10 + int(elapsed / 5) * 5, 90)
+                    else:
+                        new_progress = 10
+                
+                logger.info(f"Task {task.id}: new_status={new_status}, new_progress={new_progress}, current_status={task.status}, current_progress={task.progress}")
                 
                 # 更新本地状态
                 if new_status != task.status:

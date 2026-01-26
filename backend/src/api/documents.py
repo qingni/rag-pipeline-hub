@@ -11,6 +11,11 @@ from ..utils.validators import validate_file_upload
 from ..utils.formatters import success_response, paginated_response, document_to_dict
 from ..utils.error_handlers import NotFoundError
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+# 线程池用于执行 IO 密集型操作，避免阻塞事件循环
+_io_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="file_io")
 
 router = APIRouter()
 
@@ -42,8 +47,16 @@ async def upload_document(
         from ..utils.error_handlers import ValidationError
         raise ValidationError(f"文件 '{file.filename}' 已存在，请勿重复上传")
     
-    # Save file
-    storage_path, content_hash = file_storage.save_upload(file.file, file.filename)
+    # 读取文件内容（UploadFile 是异步的，需要先读取）
+    file_content = await file.read()
+    filename = file.filename
+    
+    # 在线程池中执行 IO 密集型操作，避免阻塞事件循环
+    loop = asyncio.get_event_loop()
+    storage_path, content_hash = await loop.run_in_executor(
+        _io_executor,
+        lambda: file_storage.save_upload_bytes(file_content, filename)
+    )
     
     # Get file size
     file_size = os.path.getsize(storage_path)

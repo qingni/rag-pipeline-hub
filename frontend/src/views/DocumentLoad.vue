@@ -115,7 +115,7 @@
           
           <!-- 异步模式提示 -->
           <t-alert 
-            v-if="shouldUseAsync && !asyncMode"
+            v-if="shouldUseAsync && !taskQueued"
             theme="info" 
             style="margin-bottom: 12px"
           >
@@ -126,35 +126,45 @@
             </template>
           </t-alert>
           
-          <!-- 异步加载进度 -->
-          <div v-if="asyncMode" class="async-progress-section">
-            <div class="progress-header">
-              <span class="progress-label">正在处理中...</span>
-              <span class="progress-value">{{ taskProgress }}%</span>
+          <!-- 任务已加入队列提示 -->
+          <div v-if="taskQueued" class="queue-success-section">
+            <div class="queue-success-header">
+              <CheckCircleIcon :size="20" class="queue-success-icon" />
+              <span class="queue-success-title">已加入处理队列</span>
             </div>
-            <t-progress 
-              :percentage="taskProgress" 
-              :color="{ from: '#3b82f6', to: '#10b981' }"
-              size="small"
-            />
-            <p class="progress-hint">您可以继续进行其他操作，处理完成后会自动显示结果</p>
-            <t-button
-              variant="outline"
-              theme="danger"
-              size="small"
-              @click="cancelAsyncTask"
-              style="margin-top: 8px"
-            >
-              <template #icon>
-                <XCircleIcon :size="16" />
-              </template>
-              取消任务
-            </t-button>
+            <p class="queue-success-hint">
+              任务正在后台处理中，您可以继续上传其他文档。
+              <br />
+              点击右下角的队列按钮查看处理进度。
+            </p>
+            <div class="queue-success-actions">
+              <t-button
+                variant="outline"
+                size="small"
+                @click="resetForNewTask"
+              >
+                <template #icon>
+                  <PlusIcon :size="16" />
+                </template>
+                继续上传
+              </t-button>
+              <t-button
+                variant="text"
+                theme="danger"
+                size="small"
+                @click="cancelQueuedTask"
+              >
+                <template #icon>
+                  <XCircleIcon :size="16" />
+                </template>
+                取消任务
+              </t-button>
+            </div>
           </div>
           
           <!-- 加载按钮 -->
           <t-button
-            v-if="!asyncMode"
+            v-if="!taskQueued"
             theme="primary"
             block
             size="large"
@@ -168,8 +178,8 @@
           </t-button>
         </div>
         
-        <!-- 处理进度 -->
-        <ProcessingProgress :status="status" :error="error" />
+        <!-- 处理进度 - 仅在非队列模式时显示 -->
+        <ProcessingProgress v-if="!taskQueued" :status="status" :error="error" />
       </div>
     </div>
     
@@ -249,8 +259,10 @@ import {
   Download as DownloadIcon,
   CheckCircle as CheckCircleIcon,
   Circle as CircleIcon,
-  XCircle as XCircleIcon
+  XCircle as XCircleIcon,
+  Plus as PlusIcon
 } from 'lucide-vue-next'
+import { useLoadingQueueStore } from '../stores/loadingQueueStore'
 import DocumentUploader from '../components/document/DocumentUploader.vue'
 import DocumentList from '../components/document/DocumentList.vue'
 import DocumentPreview from '../components/document/DocumentPreview.vue'
@@ -260,6 +272,7 @@ import ResultPreview from '../components/processing/ResultPreview.vue'
 
 const processingStore = useProcessingStore()
 const documentStore = useDocumentStore()
+const loadingQueueStore = useLoadingQueueStore()
 
 const selectedDocument = ref(null)
 const loaderType = ref('')
@@ -270,14 +283,9 @@ const loadResult = ref(null)
 const activeTab = ref('preview') // Tab 切换状态
 const showFallbackNotice = ref(true) // 降级通知显示状态
 
-// 异步加载状态
-const asyncMode = ref(false)
-const taskId = ref(null)
-const taskProgress = ref(0)
-let pollInterval = null
-
-// 轮询间隔（毫秒）
-const POLL_INTERVAL = 3000
+// 任务队列状态
+const taskQueued = ref(false)
+const queuedTaskId = ref(null)
 
 // Docling 状态
 const doclingStatus = ref(null)
@@ -301,22 +309,23 @@ onMounted(() => {
   
   // 每 5 秒检查一次健康状态
   healthCheckInterval = setInterval(checkHealth, 5000)
+  
+  // 监听任务完成事件，刷新文档列表
+  window.addEventListener('loading-task-complete', handleTaskComplete)
 })
 
 onUnmounted(() => {
   if (healthCheckInterval) {
     clearInterval(healthCheckInterval)
   }
-  // 清理轮询
-  stopPolling()
+  window.removeEventListener('loading-task-complete', handleTaskComplete)
 })
 
-// 停止轮询
-function stopPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval)
-    pollInterval = null
-  }
+// 处理任务完成事件
+function handleTaskComplete(event) {
+  console.log('[DocumentLoad] 任务完成事件:', event.detail)
+  // 刷新文档列表
+  documentStore.fetchDocuments()
 }
 
 const doclingStatusText = computed(() => {
@@ -352,7 +361,6 @@ const shouldUseAsync = computed(() => {
   if (!selectedDocument.value) return false
   
   const loader = loaderType.value || 'auto'
-  const fileSizeMB = selectedDocument.value.size / (1024 * 1024)
   const format = selectedDocument.value.format?.toLowerCase()
   
   // Docling 始终使用异步
@@ -360,10 +368,11 @@ const shouldUseAsync = computed(() => {
     return true
   }
   
-  // 自动模式下，复杂格式的大文件使用异步
+  // 自动模式下，复杂格式始终使用异步（因为后端会使用 Docling Serve）
+  // 这些格式的主要解析器是 docling_serve，处理时间较长
   if (loader === 'auto' || loader === '') {
-    const complexFormats = ['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls']
-    if (complexFormats.includes(format) && fileSizeMB > 2) {
+    const complexFormats = ['pdf', 'docx', 'doc', 'pptx', 'ppt']
+    if (complexFormats.includes(format)) {
       return true
     }
   }
@@ -373,10 +382,16 @@ const shouldUseAsync = computed(() => {
 
 // 异步模式提示
 const asyncModeHint = computed(() => {
-  if (shouldUseAsync.value) {
-    return '将使用异步模式加载，您可以在加载过程中进行其他操作'
+  if (!shouldUseAsync.value) return ''
+  
+  const format = selectedDocument.value?.format?.toLowerCase()
+  const complexFormats = ['pdf', 'docx', 'doc', 'pptx', 'ppt']
+  
+  if (complexFormats.includes(format)) {
+    return '复杂文档将使用 Docling 高精度解析，任务将加入队列在后台处理'
   }
-  return ''
+  
+  return '将使用异步模式加载，您可以在加载过程中进行其他操作'
 })
 
 const formatLoaderMap = {
@@ -461,10 +476,8 @@ async function handleSelectDocument(document) {
   error.value = null
   loadResult.value = null
   activeTab.value = 'preview' // 切换到文档预览 tab
-  asyncMode.value = false
-  taskId.value = null
-  taskProgress.value = 0
-  stopPolling()
+  taskQueued.value = false
+  queuedTaskId.value = null
   
   // 如果文档状态为就绪，自动加载最新的加载结果
   if (document.status === 'ready') {
@@ -496,10 +509,8 @@ function handleDeleteDocument(documentId) {
     status.value = 'idle'
     error.value = null
     loadResult.value = null
-    asyncMode.value = false
-    taskId.value = null
-    taskProgress.value = 0
-    stopPolling()
+    taskQueued.value = false
+    queuedTaskId.value = null
   }
 }
 
@@ -510,7 +521,7 @@ async function loadDocument() {
   status.value = 'processing'
   error.value = null
   
-  // 判断是否使用异步模式
+  // 判断是否使用异步模式（加入队列）
   if (shouldUseAsync.value) {
     await loadDocumentAsync()
   } else {
@@ -520,8 +531,6 @@ async function loadDocument() {
 
 // 同步加载
 async function loadDocumentSync() {
-  asyncMode.value = false
-  
   try {
     const result = await processingStore.loadDocument(
       selectedDocument.value.id,
@@ -550,99 +559,76 @@ async function loadDocumentSync() {
   }
 }
 
-// 异步加载
+// 异步加载 - 加入队列
 async function loadDocumentAsync() {
-  asyncMode.value = true
-  taskProgress.value = 0
-  
   try {
+    console.log('[DocumentLoad] 开始提交异步任务...')
+    
     // 1. 提交异步任务
     const taskData = await processingStore.loadDocumentAsync(
       selectedDocument.value.id,
       loaderType.value || 'docling_serve'
     )
     
-    taskId.value = taskData.task_id
-    status.value = 'processing'
-    loading.value = false // 提交后立即解除 loading，允许用户操作
+    console.log('[DocumentLoad] 异步任务提交成功:', taskData)
     
-    // 2. 开始轮询
-    pollInterval = setInterval(pollTaskStatus, POLL_INTERVAL)
+    if (!taskData || !taskData.task_id) {
+      throw new Error('服务器返回的任务数据无效')
+    }
     
-    // 立即执行一次轮询
-    await pollTaskStatus()
+    queuedTaskId.value = taskData.task_id
+    taskQueued.value = true
+    status.value = 'idle' // 重置状态，允许继续操作
+    loading.value = false
+    
+    // 2. 将任务添加到队列 Store 进行统一管理
+    // 重要：必须传递 external_task_id，用于区分异步任务并正确轮询状态
+    loadingQueueStore.addTask({
+      task_id: taskData.task_id,
+      external_task_id: taskData.external_task_id,  // Docling Serve 返回的外部任务 ID
+      document_id: selectedDocument.value.id,
+      document_name: selectedDocument.value.filename,
+      loader_type: loaderType.value || 'docling_serve',
+      status: 'pending',
+      progress: 0,
+      created_at: new Date().toISOString()
+    })
+    
+    // 3. 开始队列轮询（如果尚未开始）
+    loadingQueueStore.startPolling()
+    
+    console.log('[DocumentLoad] 任务已加入队列:', taskData.task_id, 'external:', taskData.external_task_id)
     
   } catch (err) {
     error.value = err.message
     status.value = 'failed'
     loading.value = false
-    asyncMode.value = false
+    taskQueued.value = false
   }
 }
 
-// 轮询任务状态
-async function pollTaskStatus() {
-  if (!taskId.value) return
+// 重置以便继续上传新任务
+function resetForNewTask() {
+  selectedDocument.value = null
+  loaderType.value = ''
+  status.value = 'idle'
+  error.value = null
+  loadResult.value = null
+  taskQueued.value = false
+  queuedTaskId.value = null
+}
+
+// 取消已加入队列的任务
+async function cancelQueuedTask() {
+  if (!queuedTaskId.value) return
   
   try {
-    const statusData = await processingStore.pollTaskStatus(taskId.value)
+    await processingStore.cancelTask(queuedTaskId.value)
+    loadingQueueStore.removeTask(queuedTaskId.value)
     
-    if (!statusData) return
-    
-    taskProgress.value = statusData.progress || 0
-    
-    if (statusData.status === 'success') {
-      stopPolling()
-      await fetchAsyncResult()
-    } else if (statusData.status === 'failure') {
-      stopPolling()
-      error.value = statusData.error_message || '处理失败'
-      status.value = 'failed'
-      asyncMode.value = false
-    }
-  } catch (err) {
-    console.error('轮询失败:', err)
-  }
-}
-
-// 获取异步任务结果
-async function fetchAsyncResult() {
-  try {
-    const result = await processingStore.fetchTaskResult(taskId.value)
-    loadResult.value = result
-    status.value = 'completed'
-    
-    // 刷新文档列表以更新状态
-    await documentStore.fetchDocuments(documentStore.currentPage)
-    
-    // 更新选中的文档信息
-    const updatedDoc = documentStore.documents.find(d => d.id === selectedDocument.value.id)
-    if (updatedDoc) {
-      selectedDocument.value = updatedDoc
-    }
-    
-    // 自动切换到加载结果 tab
-    activeTab.value = 'result'
-    asyncMode.value = false
-    
-  } catch (err) {
-    error.value = err.message
-    status.value = 'failed'
-    asyncMode.value = false
-  }
-}
-
-// 取消异步任务
-async function cancelAsyncTask() {
-  if (!taskId.value) return
-  
-  try {
-    await processingStore.cancelTask(taskId.value)
-    stopPolling()
+    taskQueued.value = false
+    queuedTaskId.value = null
     status.value = 'idle'
-    asyncMode.value = false
-    taskId.value = null
-    taskProgress.value = 0
   } catch (err) {
     console.error('取消任务失败:', err)
   }
@@ -897,5 +883,43 @@ function downloadResult() {
   color: #6b7280;
   margin-top: 8px;
   margin-bottom: 0;
+}
+
+/* 任务已加入队列成功提示样式 */
+.queue-success-section {
+  background-color: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.queue-success-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.queue-success-icon {
+  color: #16a34a;
+}
+
+.queue-success-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #15803d;
+}
+
+.queue-success-hint {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+}
+
+.queue-success-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>

@@ -57,11 +57,16 @@ export const useProcessingStore = defineStore('processing', () => {
     try {
       const response = await processingService.loadDocumentAsync(documentId, loaderType)
       
+      console.log('[Processing] loadDocumentAsync response:', response)
+      
       if (response.success) {
         currentTaskId.value = response.data.task_id
         taskStatus.value = response.data.status
         status.value = 'processing'
         return response.data
+      } else {
+        // 处理 success=false 的情况
+        throw new Error(response.message || '提交异步任务失败')
       }
     } catch (err) {
       error.value = err.message

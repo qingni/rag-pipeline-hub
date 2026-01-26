@@ -41,6 +41,31 @@ class FileStorageManager:
         
         return str(storage_path), file_hash
     
+    def save_upload_bytes(self, content: bytes, filename: str) -> tuple[str, str]:
+        """
+        Save uploaded file bytes to storage (for async operations).
+        
+        Args:
+            content: File content as bytes
+            filename: Original filename
+            
+        Returns:
+            Tuple of (storage_path, content_hash)
+        """
+        # Calculate hash from bytes
+        file_hash = hashlib.sha256(content).hexdigest()
+        
+        # Create subdirectory based on first 2 chars of hash
+        subdir = self.upload_dir / file_hash[:2]
+        subdir.mkdir(exist_ok=True)
+        
+        # Save file
+        storage_path = subdir / f"{file_hash}_{filename}"
+        with open(storage_path, "wb") as f:
+            f.write(content)
+        
+        return str(storage_path), file_hash
+    
     def get_file_path(self, storage_path: str) -> Path:
         """
         Get full path to stored file.

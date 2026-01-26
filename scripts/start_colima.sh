@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # ==============================================================================
-# Colima Docker Runtime Startup Script (macOS)
+# Colima Docker Runtime Startup Script (macOS M3 Pro 36GB Optimized)
 # ==============================================================================
-# Purpose: Automatically start Colima Docker runtime for Milvus on macOS
+# Purpose: Start Colima with optimized settings for Docling Serve
 # Usage: bash scripts/start_colima.sh
 # ==============================================================================
 
@@ -16,10 +16,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-COLIMA_CPU=4
-COLIMA_MEMORY=8
-COLIMA_DISK=50
+# Optimized Configuration for M3 Pro 36GB
+COLIMA_CPU=8
+COLIMA_MEMORY=20
+COLIMA_DISK=100
 
 # ==============================================================================
 # Helper Functions
@@ -92,37 +92,47 @@ install_colima() {
 }
 
 # ==============================================================================
-# Colima Startup
+# Colima Cleanup and Startup
 # ==============================================================================
 
-start_colima() {
-    print_info "Checking Colima status..."
+cleanup_colima() {
+    print_info "Cleaning up existing Colima instance..."
     
     if colima status &> /dev/null; then
-        print_success "Colima is already running"
-        colima status
-        return 0
+        print_info "Stopping running Colima..."
+        colima stop || true
     fi
     
-    print_info "Starting Colima with configuration:"
+    print_info "Deleting existing Colima instance..."
+    colima delete --force || true
+    
+    print_success "Colima cleanup complete"
+}
+
+start_colima() {
+    print_info "Starting Colima with optimized configuration:"
     echo "  - CPU: ${COLIMA_CPU} cores"
     echo "  - Memory: ${COLIMA_MEMORY} GB"
     echo "  - Disk: ${COLIMA_DISK} GB"
+    echo "  - Arch: aarch64 (Apple Silicon)"
+    echo "  - VM Type: vz (Apple Virtualization)"
+    echo "  - Rosetta: enabled"
     
     colima start \
         --cpu "${COLIMA_CPU}" \
         --memory "${COLIMA_MEMORY}" \
         --disk "${COLIMA_DISK}" \
-        --arch "$(uname -m)" \
+        --arch aarch64 \
         --vm-type vz \
-        --mount-type virtiofs \
+        --vz-rosetta \
         || {
-            print_warning "Failed to start with VZ runtime, trying QEMU..."
+            print_warning "Failed to start with VZ + Rosetta, trying without Rosetta..."
             colima start \
                 --cpu "${COLIMA_CPU}" \
                 --memory "${COLIMA_MEMORY}" \
                 --disk "${COLIMA_DISK}" \
-                --arch "$(uname -m)"
+                --arch aarch64 \
+                --vm-type vz
         }
     
     print_success "Colima started successfully"
@@ -161,25 +171,27 @@ verify_docker() {
 
 main() {
     echo "=================================================================="
-    echo "  Colima Docker Runtime Startup Script"
+    echo "  Colima Docker Runtime Startup Script (M3 Pro 36GB Optimized)"
     echo "=================================================================="
     echo ""
     
     detect_os
     check_homebrew
     install_colima
+    cleanup_colima
     start_colima
     verify_docker
     
     echo ""
     echo "=================================================================="
-    print_success "Colima setup complete! Docker is ready for Milvus deployment."
+    print_success "Colima setup complete! Docker is ready."
     echo "=================================================================="
     echo ""
     echo "Next steps:"
-    echo "  1. Run: cd docker/milvus && docker-compose up -d"
-    echo "  2. Verify Milvus: docker ps"
-    echo "  3. Test connection: python backend/scripts/test_milvus_connection.py"
+    echo "  1. Start Docling Serve:"
+    echo "     cd docker/docling && docker-compose up -d"
+    echo "  2. Verify containers: docker ps"
+    echo "  3. Monitor resources: docker stats"
     echo ""
     echo "Useful commands:"
     echo "  - Stop Colima:   colima stop"

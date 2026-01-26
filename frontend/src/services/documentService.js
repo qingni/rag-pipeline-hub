@@ -15,6 +15,7 @@ const documentService = {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
+      timeout: 120000,  // 上传超时 2 分钟（小文件 < 10MB）
       onUploadProgress: (progressEvent) => {
         if (onProgress) {
           const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)

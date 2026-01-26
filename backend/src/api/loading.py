@@ -2,13 +2,15 @@
 
 Enhanced loading API with Docling integration and fallback strategy support.
 Includes async loading endpoints for large files.
+Supports multi-task queue management for parallel processing.
 """
-from fastapi import APIRouter, Depends, Query, Path
+from fastapi import APIRouter, Depends, Query, Path, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from ..storage.database import get_db
 from ..services.loading_service import loading_service
+from ..services.task_queue_service import task_queue_service
 from ..utils.formatters import success_response, processing_result_to_dict
 from ..utils.validators import validate_document_id
 
@@ -34,6 +36,77 @@ class AsyncLoadRequest(BaseModel):
     loader_type: Optional[str] = Field(
         None,
         description="Loader type to use. For async, typically 'docling_serve'"
+    )
+
+
+class BatchStatusRequest(BaseModel):
+    """Batch task status request."""
+    task_ids: List[str] = Field(..., description="List of task IDs to query")
+
+
+# ==================== 任务队列 API ====================
+
+@router.get("/load/queue/stats")
+async def get_queue_stats():
+    """
+    Get task queue statistics.
+    
+    Returns queue status including:
+    - Total tasks count
+    - Tasks by status (pending, running, success, failure)
+    - Tasks by category (local_fast, local_medium, local_heavy, remote)
+    - Pool configurations
+    """
+    stats = task_queue_service.get_queue_stats()
+    
+    return success_response(
+        data=stats,
+        message="Queue stats retrieved"
+    )
+
+
+@router.get("/load/queue/active")
+async def get_active_tasks():
+    """
+    Get all active tasks in the queue.
+    
+    Returns tasks that are currently pending, queued, or running.
+    """
+    tasks = task_queue_service.get_active_tasks()
+    
+    return success_response(
+        data={
+            "tasks": tasks,
+            "total": len(tasks)
+        },
+        message="Active tasks retrieved"
+    )
+
+
+@router.post("/load/queue/batch-status")
+async def get_batch_task_status(
+    request: BatchStatusRequest
+):
+    """
+    Get status for multiple tasks in one request.
+    
+    Reduces frontend polling overhead by fetching multiple task statuses at once.
+    
+    Args:
+        request: Contains list of task_ids to query
+        
+    Returns:
+        Dictionary mapping task_id to task status
+    """
+    statuses = task_queue_service.get_batch_status(request.task_ids)
+    
+    return success_response(
+        data={
+            "statuses": statuses,
+            "queried": len(request.task_ids),
+            "found": len(statuses)
+        },
+        message="Batch status retrieved"
     )
 
 
@@ -112,7 +185,7 @@ async def get_load_task_status(
         status: pending/started/success/failure
         progress: 0-100 (if available)
     """
-    result = loading_service.get_async_task_status(db, task_id)
+    result = await loading_service.get_async_task_status(db, task_id)
     
     return success_response(
         data=result,

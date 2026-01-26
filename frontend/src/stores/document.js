@@ -19,7 +19,7 @@ export const useDocumentStore = defineStore('document', () => {
   const totalDocuments = ref(0)
   
   // Actions
-  async function uploadDocument(file) {
+  async function uploadDocument(file, onProgress = null) {
     loading.value = true
     error.value = null
     uploadProgress.value = 0
@@ -27,6 +27,8 @@ export const useDocumentStore = defineStore('document', () => {
     try {
       const response = await documentService.uploadDocument(file, (progress) => {
         uploadProgress.value = progress
+        // 也调用外部进度回调（如果提供）
+        onProgress?.(progress)
       })
       
       if (response.success) {
@@ -87,20 +89,29 @@ export const useDocumentStore = defineStore('document', () => {
   }
   
   async function getDocumentPreview(documentId, pages = 3) {
-    loading.value = true
+    // 注意：此方法不设置全局 loading 状态，避免与其他操作（如轮询）竞争
+    // DocumentPreview 组件有自己的 loading 状态
     error.value = null
     
     try {
       const response = await documentService.getDocumentPreview(documentId, pages)
       
-      if (response.success) {
+      console.log('[DocumentStore] getDocumentPreview 响应:', {
+        documentId: documentId?.slice(0, 8),
+        success: response.success,
+        hasData: !!response.data
+      })
+      
+      if (response.success && response.data) {
         return response.data
       }
+      
+      // 如果响应不成功或没有数据，返回默认对象
+      throw new Error(response.message || '获取预览失败')
     } catch (err) {
+      console.error('[DocumentStore] getDocumentPreview 错误:', err)
       error.value = err.message
       throw err
-    } finally {
-      loading.value = false
     }
   }
   

@@ -38,6 +38,15 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
     
+    # 异步初始化 Docling Serve 可用性状态
+    from .providers.loaders.docling_serve_client import docling_serve_loader
+    if docling_serve_loader:
+        try:
+            available = await docling_serve_loader.is_available_async()
+            print(f"Docling Serve status: {'available' if available else 'unavailable'}")
+        except Exception as e:
+            print(f"Docling Serve check failed: {e}")
+    
     print("Application startup complete")
     
     yield
@@ -97,10 +106,15 @@ async def health_check():
     """Health check endpoint."""
     from .providers.loaders.docling_serve_client import docling_serve_loader
     
-    # Check Docling Serve status
+    # 使用异步方法检查 Docling Serve 状态，避免阻塞事件循环
     docling_status = "unavailable"
-    if docling_serve_loader and docling_serve_loader.is_available():
-        docling_status = "ready"
+    docling_available = False
+    
+    if docling_serve_loader:
+        # 使用异步方法，只调用一次
+        docling_available = await docling_serve_loader.is_available_async()
+        if docling_available:
+            docling_status = "ready"
     
     return {
         "success": True,
@@ -109,8 +123,8 @@ async def health_check():
         "components": {
             "docling_serve": {
                 "status": docling_status,
-                "available": docling_serve_loader.is_available() if docling_serve_loader else False,
-                "ready": docling_status == "ready"
+                "available": docling_available,
+                "ready": docling_available
             }
         }
     }
@@ -129,8 +143,10 @@ from .api import embedding_routes, embedding_query_routes
 from .api import vector_index
 from .api import search
 from .api import generation
+from .api import upload_chunked
 
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
+app.include_router(upload_chunked.router, prefix="/api/v1", tags=["Chunked Upload"])
 app.include_router(loading.router, prefix="/api/v1/processing", tags=["Processing - Load"])
 app.include_router(processing.router, prefix="/api/v1/processing", tags=["Processing - Results"])
 app.include_router(chunking.router, prefix="/api/v1/chunking", tags=["Chunking"])

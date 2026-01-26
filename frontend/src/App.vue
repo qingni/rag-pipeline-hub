@@ -6,11 +6,14 @@
         <router-view />
       </div>
     </div>
+    <!-- 全局加载队列面板 -->
+    <LoadingQueuePanel />
   </div>
 </template>
 
 <script setup>
 import NavigationBar from './components/layout/NavigationBar.vue'
+import LoadingQueuePanel from './components/loading/LoadingQueuePanel.vue'
 </script>
 
 <style>

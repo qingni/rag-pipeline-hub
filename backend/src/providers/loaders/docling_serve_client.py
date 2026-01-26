@@ -82,9 +82,23 @@ class DoclingServeLoader(BaseLoader):
     
     def is_available(self) -> bool:
         """
-        检查 Docling Serve 服务是否可用
+        检查 Docling Serve 服务是否可用（同步版本，仅返回缓存值）
         
-        使用带过期时间的缓存，避免服务启动后一直返回不可用
+        注意：此方法不再发起 HTTP 请求，仅返回缓存的可用性状态。
+        如需实时检查，请使用 is_available_async()。
+        """
+        # 直接返回缓存的可用性状态，避免阻塞事件循环
+        if self._available is not None:
+            return self._available
+        # 首次调用时返回 False，等待异步检查
+        return False
+    
+    async def is_available_async(self) -> bool:
+        """
+        异步检查 Docling Serve 服务是否可用
+        
+        使用带过期时间的缓存，避免服务启动后一直返回不可用。
+        此方法使用异步 HTTP 客户端，不会阻塞事件循环。
         """
         current_time = time.time()
         
@@ -95,8 +109,8 @@ class DoclingServeLoader(BaseLoader):
         # 如果之前不可用，每次都重新检查（允许服务恢复）
         # 或者缓存已过期，也重新检查
         try:
-            with httpx.Client(timeout=5) as client:
-                response = client.get(f"{self.base_url}/health")
+            async with httpx.AsyncClient(timeout=3.0) as client:  # 使用异步客户端，缩短超时
+                response = await client.get(f"{self.base_url}/health")
                 self._available = response.status_code == 200
                 self._last_availability_check = current_time
                 if self._available:
@@ -113,13 +127,20 @@ class DoclingServeLoader(BaseLoader):
         return self._available
     
     def get_unavailable_reason(self) -> Optional[str]:
-        """返回不可用的原因"""
-        self.is_available()  # 确保检查最新状态
+        """返回不可用的原因（仅返回缓存值，不发起检查）"""
         return self._unavailable_reason
     
     def extract_text(self, file_path: str) -> Dict[str, Any]:
         """
-        同步解析文档
+        解析文档（使用异步 API + 轮询）
+        
+        内部使用异步端点 /v1/convert/file/async 提交任务，
+        然后轮询状态直到完成，最后获取结果。
+        
+        优点：
+        1. 不会因单个大文件阻塞服务器
+        2. 可追踪处理进度
+        3. 超时控制更精确
         
         Args:
             file_path: 文件路径
@@ -137,6 +158,8 @@ class DoclingServeLoader(BaseLoader):
                 - images: List[Dict] (可选)
                 - error: str (失败时)
         """
+        import time
+        
         path = Path(file_path)
         
         # 验证文件
@@ -155,77 +178,74 @@ class DoclingServeLoader(BaseLoader):
                 "error": f"不支持的文件格式: {path.suffix}"
             }
         
-        # 读取文件并编码为 Base64
-        try:
-            with open(file_path, 'rb') as f:
-                file_content = base64.b64encode(f.read()).decode('utf-8')
-        except Exception as e:
+        # 1. 提交异步任务
+        logger.info(f"[Docling] 提交异步任务: {path.name}")
+        submit_result = self.submit_async_convert(file_path)
+        
+        if not submit_result.get("success"):
             return {
                 "success": False,
                 "loader": self.name,
-                "error": f"读取文件失败: {e}"
+                "error": submit_result.get("error", "提交异步任务失败")
             }
         
-        # 构建请求体
-        # Docling Serve API 格式参考: http://localhost:5001/docs
-        # 对 Excel 文件额外请求 JSON 格式以获取 Sheet 名称等元数据
-        to_formats = ["md", "json"] if file_format in ('xlsx', 'xls') else ["md"]
+        task_id = submit_result.get("task_id")
+        if not task_id:
+            return {
+                "success": False,
+                "loader": self.name,
+                "error": "未获取到任务 ID"
+            }
         
-        request_body = {
-            "options": {
-                "to_formats": to_formats,
-                "do_ocr": True,
-                "force_ocr": True,  # 强制 OCR，对扫描件 PDF 必须
-                "ocr_engine": "rapidocr",  # 使用 RapidOCR（支持中文）
-                "ocr_lang": ["ch_sim", "en"],  # 简体中文+英文 OCR
-                "table_mode": "accurate",
-                "abort_on_error": False,
-                "include_images": True,  # 提取图片
-                "images_scale": 2.0,  # 图片缩放比例
-                "image_export_mode": "embedded"  # 嵌入图片为 Base64
-            },
-            "sources": [
-                {
-                    "kind": "file",
-                    "base64_string": file_content,
-                    "filename": path.name
-                }
-            ]
-        }
+        # 2. 轮询等待完成
+        poll_interval = 1.0  # 初始轮询间隔（秒）
+        max_poll_interval = 5.0  # 最大轮询间隔
+        total_wait_time = 0
+        max_wait_time = self.timeout  # 使用配置的超时时间
         
-        # 发送请求（带重试）
-        last_error = None
-        for attempt in range(self.max_retries):
-            try:
-                with httpx.Client(timeout=self.timeout) as client:
-                    response = client.post(
-                        f"{self.base_url}/v1/convert/source",
-                        headers=self.headers,
-                        json=request_body
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        return self._parse_response(result, path.name, file_format)
-                    else:
-                        last_error = f"HTTP {response.status_code}: {response.text}"
-                        logger.warning(f"请求失败 (尝试 {attempt + 1}/{self.max_retries}): {last_error}")
-                        
-            except httpx.TimeoutException:
-                last_error = "请求超时"
-                logger.warning(f"请求超时 (尝试 {attempt + 1}/{self.max_retries})")
-            except Exception as e:
-                last_error = str(e)
-                logger.warning(f"请求异常 (尝试 {attempt + 1}/{self.max_retries}): {e}")
+        logger.info(f"[Docling] 开始轮询任务状态: task_id={task_id}")
+        
+        while total_wait_time < max_wait_time:
+            time.sleep(poll_interval)
+            total_wait_time += poll_interval
             
-            if attempt < self.max_retries - 1:
-                time.sleep(self.retry_delay * (attempt + 1))
+            status_result = self.poll_task_status(task_id)
+            
+            if not status_result.get("success"):
+                # 轮询失败，继续尝试
+                logger.warning(f"[Docling] 轮询失败: {status_result.get('error')}")
+                continue
+            
+            status = status_result.get("status")
+            progress = status_result.get("progress", 0)
+            
+            if status == "success":
+                logger.info(f"[Docling] 任务完成: task_id={task_id}, 耗时={total_wait_time:.1f}s")
+                break
+            elif status == "failure":
+                error_msg = status_result.get("error", "任务处理失败")
+                logger.error(f"[Docling] 任务失败: {error_msg}")
+                return {
+                    "success": False,
+                    "loader": self.name,
+                    "error": error_msg
+                }
+            else:
+                # pending/started，继续等待
+                logger.debug(f"[Docling] 任务进行中: status={status}, progress={progress}%, 已等待={total_wait_time:.1f}s")
+                # 渐进式增加轮询间隔
+                poll_interval = min(poll_interval * 1.2, max_poll_interval)
+        else:
+            # 超时
+            logger.error(f"[Docling] 任务超时: task_id={task_id}, 等待={total_wait_time:.1f}s")
+            return {
+                "success": False,
+                "loader": self.name,
+                "error": f"任务超时（等待 {total_wait_time:.0f}s）"
+            }
         
-        return {
-            "success": False,
-            "loader": self.name,
-            "error": f"文档解析失败: {last_error}"
-        }
+        # 3. 获取结果
+        return self.get_task_result(task_id, path.name, file_format)
     
     def _extract_sheet_info(self, doc: Dict[str, Any], md_content: str) -> Tuple[List[str], int]:
         """
@@ -993,7 +1013,7 @@ class DoclingServeLoader(BaseLoader):
                 # 对于需要传递多个值的字段（如 to_formats），使用列表
                 data = {
                     "do_ocr": "true",
-                    "force_ocr": "true",
+                    "force_ocr": "false",  # 不强制 OCR，让 Docling 自动判断
                     "ocr_engine": "rapidocr",
                     "ocr_lang": "ch_sim,en",
                     "table_mode": "accurate",
@@ -1003,7 +1023,13 @@ class DoclingServeLoader(BaseLoader):
                     "to_formats": ["md", "json"] if is_excel else ["md"],
                 }
                 
-                with httpx.Client(timeout=30) as client:
+                timeout_config = httpx.Timeout(
+                    connect=10.0,
+                    read=self.timeout,
+                    write=self.timeout,
+                    pool=self.timeout
+                )
+                with httpx.Client(timeout=timeout_config) as client:
                     response = client.post(
                         f"{self.base_url}/v1/convert/file/async",
                         files=files,
@@ -1054,7 +1080,13 @@ class DoclingServeLoader(BaseLoader):
             }
         """
         try:
-            with httpx.Client(timeout=10) as client:
+            timeout_config = httpx.Timeout(
+                connect=5.0,
+                read=min(30.0, float(self.timeout)),
+                write=min(30.0, float(self.timeout)),
+                pool=min(30.0, float(self.timeout))
+            )
+            with httpx.Client(timeout=timeout_config) as client:
                 response = client.get(
                     f"{self.base_url}/v1/status/poll/{task_id}",
                     headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
@@ -1077,6 +1109,12 @@ class DoclingServeLoader(BaseLoader):
                         "error": "failure"
                     }
                     normalized_status = status_map.get(task_status.lower(), task_status)
+                    
+                    # 如果任务成功但没有进度信息，设为 100%
+                    if normalized_status == "success" and progress == 0:
+                        progress = 100
+                    # 注意：不再硬编码 started 状态为 50%
+                    # 进度值由后端 loading_service 根据轮询次数逐步计算
                     
                     return {
                         "success": True,
@@ -1125,7 +1163,13 @@ class DoclingServeLoader(BaseLoader):
             Dict: 符合项目规范的解析结果（与 extract_text 返回格式一致）
         """
         try:
-            with httpx.Client(timeout=60) as client:
+            timeout_config = httpx.Timeout(
+                connect=10.0,
+                read=self.timeout,
+                write=self.timeout,
+                pool=self.timeout
+            )
+            with httpx.Client(timeout=timeout_config) as client:
                 response = client.get(
                     f"{self.base_url}/v1/result/{task_id}",
                     headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}

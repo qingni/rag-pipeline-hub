@@ -16,6 +16,11 @@ services:
       - DOCLING_SERVE_MAX_SYNC_WAIT=600          # 同步等待超时: 10分钟
       - DOCLING_SERVE_MAX_DOCUMENT_TIMEOUT=1800  # 文档处理超时: 30分钟
       - UVICORN_TIMEOUT_KEEP_ALIVE=300           # HTTP 连接保持: 5分钟
+      # 性能优化配置 - M3 Pro 36GB
+      - UVICORN_WORKERS=4                        # 多 worker 并行处理
+      - OMP_NUM_THREADS=4                        # OpenMP 线程数
+      - MKL_NUM_THREADS=4                        # MKL 线程数
+      - NUMEXPR_MAX_THREADS=4                    # NumExpr 线程数
     volumes:
       # 容器内实际路径是 /opt/app-root/src/.cache
       - docling_cache:/opt/app-root/src/.cache
@@ -30,9 +35,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G
+          cpus: '6'           # 限制使用 6 核（留 2 核给系统）
+          memory: 12G         # 增加到 12GB
         reservations:
-          memory: 4G
+          cpus: '4'           # 保证至少 4 核
+          memory: 6G          # 保证至少 6GB
 
 volumes:
   docling_cache:

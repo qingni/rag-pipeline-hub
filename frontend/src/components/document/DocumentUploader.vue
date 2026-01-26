@@ -8,6 +8,7 @@
       :max="1"
       :size-limit="{ size: MAX_FILE_SIZE, unit: 'B' }"
       :before-upload="handleBeforeUpload"
+      :disabled="uploading"
       @change="handleFileChange"
       theme="file"
     >
@@ -21,16 +22,61 @@
     
     <!-- 文件格式提示 -->
     <div class="upload-tips">
-      <p class="tips-text">支持格式: PDF, DOCX, XLSX, PPTX, HTML, CSV, JSON, XML, TXT, MD 等 20+ 种格式 (最大50MB)</p>
+      <p class="tips-text">
+        支持格式: PDF, DOCX, XLSX, PPTX, HTML, CSV, JSON, XML, TXT, MD 等 20+ 种格式 (最大50MB)
+        <br />
+        <span class="tips-feature">大文件自动启用断点续传</span>
+      </p>
     </div>
     
     <!-- 上传进度 -->
-    <div v-if="uploading" class="mt-3">
+    <div v-if="uploading" class="progress-section">
+      <!-- 阶段指示器 -->
+      <div class="phase-indicator">
+        <div 
+          class="phase-item" 
+          :class="{ active: uploadPhase === 'hashing', done: phaseOrder > 0 }"
+        >
+          <HashIcon :size="14" />
+          <span>计算哈希</span>
+        </div>
+        <ChevronRightIcon :size="14" class="phase-arrow" />
+        <div 
+          class="phase-item" 
+          :class="{ active: uploadPhase === 'uploading', done: phaseOrder > 1 }"
+        >
+          <UploadIcon :size="14" />
+          <span>上传文件</span>
+        </div>
+        <ChevronRightIcon :size="14" class="phase-arrow" />
+        <div 
+          class="phase-item" 
+          :class="{ active: uploadPhase === 'completing', done: phaseOrder > 2 }"
+        >
+          <CheckCircleIcon :size="14" />
+          <span>完成</span>
+        </div>
+      </div>
+      
       <t-progress 
-        :percentage="progress" 
+        :percentage="displayProgress" 
         :status="uploadStatus"
+        :label="progressLabel"
       />
-      <p class="text-xs text-gray-500 mt-1 text-center">{{ uploadLabel }}</p>
+      
+      <!-- 取消按钮 -->
+      <div class="upload-actions">
+        <t-button 
+          v-if="canCancel"
+          theme="default" 
+          variant="text" 
+          size="small"
+          @click="cancelUpload"
+        >
+          <XIcon :size="14" />
+          取消上传
+        </t-button>
+      </div>
     </div>
     
     <!-- 错误提示 -->
@@ -47,7 +93,7 @@
     <t-alert 
       v-if="uploadSuccess" 
       theme="success" 
-      message="文档上传成功"
+      :message="successMessage"
       class="mt-3"
       close
       @close="uploadSuccess = false"
@@ -58,21 +104,67 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useDocumentStore } from '../../stores/document'
-import { UploadCloud as UploadCloudIcon } from 'lucide-vue-next'
+import { useLoadingQueueStore } from '../../stores/loadingQueueStore'
+import chunkedUploadService from '../../services/chunkedUploadService'
+import { 
+  UploadCloud as UploadCloudIcon,
+  Hash as HashIcon,
+  Upload as UploadIcon,
+  CheckCircle as CheckCircleIcon,
+  ChevronRight as ChevronRightIcon,
+  X as XIcon
+} from 'lucide-vue-next'
 
 const documentStore = useDocumentStore()
+const loadingQueueStore = useLoadingQueueStore()
 
+// State
 const files = ref([])
 const uploading = ref(false)
-const progress = ref(0)
+const uploadPhase = ref('idle') // idle, hashing, uploading, completing
+const hashProgress = ref(0)
+const uploadProgress = ref(0)
 const error = ref(null)
 const uploadSuccess = ref(false)
+const successMessage = ref('文档上传成功')
+
+// 取消控制器
+let abortController = null
 
 const emit = defineEmits(['upload-complete'])
 
+// 常量
 const MAX_FILE_SIZE = 52428800 // 50MB
-// 支持的所有文件格式
+const LARGE_FILE_THRESHOLD = 10 * 1024 * 1024 // 10MB，超过此大小使用分片上传
 const acceptedFormats = '.pdf,.doc,.docx,.txt,.md,.markdown,.xlsx,.xls,.pptx,.ppt,.html,.htm,.csv,.json,.xml,.rtf,.odt,.ods,.odp'
+
+// Computed
+const phaseOrder = computed(() => {
+  const phases = ['idle', 'hashing', 'uploading', 'completing', 'done']
+  return phases.indexOf(uploadPhase.value)
+})
+
+const displayProgress = computed(() => {
+  if (uploadPhase.value === 'hashing') {
+    return Math.round(hashProgress.value * 0.1) // 哈希计算占 10%
+  } else if (uploadPhase.value === 'uploading') {
+    return 10 + Math.round(uploadProgress.value * 0.85) // 上传占 85%
+  } else if (uploadPhase.value === 'completing') {
+    return 95
+  }
+  return 0
+})
+
+const progressLabel = computed(() => {
+  if (uploadPhase.value === 'hashing') {
+    return `计算文件哈希... ${hashProgress.value}%`
+  } else if (uploadPhase.value === 'uploading') {
+    return `上传中... ${uploadProgress.value}%`
+  } else if (uploadPhase.value === 'completing') {
+    return '正在完成...'
+  }
+  return ''
+})
 
 const uploadStatus = computed(() => {
   if (error.value) return 'error'
@@ -81,24 +173,21 @@ const uploadStatus = computed(() => {
   return 'default'
 })
 
-const uploadLabel = computed(() => {
-  if (uploading.value) {
-    return `上传中... ${progress.value}%`
-  }
-  return null
+const canCancel = computed(() => {
+  return uploading.value && uploadPhase.value !== 'completing'
 })
 
+// Methods
 function validateFile(file) {
-  // 支持的所有文件扩展名
   const allowedExtensions = [
-    '.pdf', '.doc', '.docx',           // 文档
-    '.txt', '.md', '.markdown',        // 文本
-    '.xlsx', '.xls',                   // Excel
-    '.pptx', '.ppt',                   // PowerPoint
-    '.html', '.htm',                   // 网页
-    '.csv', '.json', '.xml',           // 数据格式
-    '.rtf',                            // 富文本
-    '.odt', '.ods', '.odp'             // OpenDocument
+    '.pdf', '.doc', '.docx',
+    '.txt', '.md', '.markdown',
+    '.xlsx', '.xls',
+    '.pptx', '.ppt',
+    '.html', '.htm',
+    '.csv', '.json', '.xml',
+    '.rtf',
+    '.odt', '.ods', '.odp'
   ]
   const fileExt = '.' + file.name.split('.').pop().toLowerCase()
   
@@ -114,7 +203,6 @@ function validateFile(file) {
     throw new Error('文件为空')
   }
   
-  // Check for duplicate filename
   const existingDoc = documentStore.documents.find(
     doc => doc.filename === file.name
   )
@@ -140,33 +228,137 @@ async function handleFileChange(fileList) {
   
   const file = fileList[0].raw
   
-  try {
-    error.value = null
-    uploadSuccess.value = false
-    uploading.value = true
-    progress.value = 0
-    
-    const document = await documentStore.uploadDocument(file)
-    
-    uploadSuccess.value = true
-    emit('upload-complete', document)
-    
-    // 清空文件列表
-    setTimeout(() => {
-      files.value = []
-    }, 1000)
-    
-  } catch (err) {
-    error.value = err.message || '上传失败'
-  } finally {
-    uploading.value = false
+  // 根据文件大小选择上传方式
+  if (file.size > LARGE_FILE_THRESHOLD) {
+    await uploadLargeFile(file)
+  } else {
+    await uploadSmallFile(file)
   }
 }
 
-// Watch upload progress
+/**
+ * 小文件上传（使用原有方式）
+ */
+async function uploadSmallFile(file) {
+  try {
+    resetState()
+    uploading.value = true
+    uploadPhase.value = 'uploading'
+    uploadProgress.value = 0
+    
+    // 暂停轮询，减少并发请求
+    loadingQueueStore.pausePolling()
+    
+    console.log('[DocumentUploader] 开始小文件上传:', file.name, file.size)
+    
+    const document = await documentStore.uploadDocument(file, (progress) => {
+      console.log('[DocumentUploader] 上传进度:', progress)
+      uploadProgress.value = progress
+    })
+    
+    // 确保进度显示 100%
+    uploadProgress.value = 100
+    
+    console.log('[DocumentUploader] 上传完成:', document)
+    
+    uploadSuccess.value = true
+    successMessage.value = '文档上传成功'
+    emit('upload-complete', document)
+    
+    clearFiles()
+    
+  } catch (err) {
+    console.error('[DocumentUploader] 上传失败:', err)
+    error.value = err.message || '上传失败'
+  } finally {
+    uploading.value = false
+    uploadPhase.value = 'idle'
+    // 恢复轮询
+    loadingQueueStore.resumePolling()
+  }
+}
+
+/**
+ * 大文件上传（使用分片上传）
+ */
+async function uploadLargeFile(file) {
+  abortController = new AbortController()
+  
+  try {
+    resetState()
+    uploading.value = true
+    
+    // 暂停轮询，减少并发请求
+    loadingQueueStore.pausePolling()
+    
+    const result = await chunkedUploadService.uploadWithResume(file, {
+      onHashProgress: (progress) => {
+        hashProgress.value = progress
+      },
+      onUploadProgress: (progress) => {
+        uploadProgress.value = progress
+      },
+      onPhaseChange: (phase) => {
+        uploadPhase.value = phase
+      },
+      signal: abortController.signal
+    })
+    
+    if (result.success) {
+      uploadSuccess.value = true
+      
+      if (result.instant_upload) {
+        successMessage.value = '秒传成功！文件已存在'
+      } else {
+        successMessage.value = '文档上传成功'
+      }
+      
+      // 刷新文档列表
+      await documentStore.fetchDocuments(1)
+      
+      emit('upload-complete', result.document)
+      clearFiles()
+    }
+    
+  } catch (err) {
+    if (err.message === '上传已取消') {
+      // 用户取消，不显示错误
+      return
+    }
+    error.value = err.message || '上传失败'
+  } finally {
+    uploading.value = false
+    uploadPhase.value = 'idle'
+    abortController = null
+    // 恢复轮询
+    loadingQueueStore.resumePolling()
+  }
+}
+
+function cancelUpload() {
+  if (abortController) {
+    abortController.abort()
+  }
+}
+
+function resetState() {
+  error.value = null
+  uploadSuccess.value = false
+  hashProgress.value = 0
+  uploadProgress.value = 0
+  uploadPhase.value = 'idle'
+}
+
+function clearFiles() {
+  setTimeout(() => {
+    files.value = []
+  }, 1000)
+}
+
+// Watch upload progress for small files
 documentStore.$subscribe((_mutation, state) => {
-  if (uploading.value) {
-    progress.value = state.uploadProgress
+  if (uploading.value && uploadPhase.value === 'uploading' && !abortController) {
+    uploadProgress.value = state.uploadProgress
   }
 })
 </script>
@@ -212,12 +404,59 @@ documentStore.$subscribe((_mutation, state) => {
   line-height: 1.5;
 }
 
-.upload-hint {
+.tips-feature {
+  color: #667eea;
+  font-weight: 500;
+}
+
+/* 进度区域 */
+.progress-section {
+  margin-top: 12px;
+}
+
+/* 阶段指示器 */
+.phase-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.phase-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
   font-size: 12px;
-  color: #6b7280;
-  line-height: 1.6;
-  margin: 0;
-  display: block;
-  white-space: pre-line;
+  color: #9ca3af;
+  background: #f5f5f5;
+  transition: all 0.3s;
+}
+
+.phase-item.active {
+  color: #667eea;
+  background: #eef2ff;
+  font-weight: 500;
+}
+
+.phase-item.done {
+  color: #52c41a;
+  background: #f6ffed;
+}
+
+.phase-arrow {
+  color: #d9d9d9;
+}
+
+/* 上传操作 */
+.upload-actions {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.mt-3 {
+  margin-top: 12px;
 }
 </style>

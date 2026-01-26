@@ -12,6 +12,182 @@ from typing import Dict, Any, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _extract_docx_images_with_position(file_path: str, figures_dir: Path, doc_id: str,
+                                        save_images: bool = True, embed_base64: bool = True) -> Tuple[List[Dict[str, Any]], Dict[int, List[int]]]:
+    """使用 python-docx 从 DOCX 文件中提取图片，并精确记录其在段落中的位置。
+    
+    通过遍历段落和 run，检查每个 run 中是否有 <a:blip> 元素来定位图片位置，
+    而不是简单地遍历 relationship 列表。
+    
+    Args:
+        file_path: DOCX 文件路径
+        figures_dir: 图片保存目录
+        doc_id: 文档 ID
+        save_images: 是否保存图片文件
+        embed_base64: 是否嵌入 base64 数据
+    
+    Returns:
+        Tuple[图片信息列表, 段落-图片索引映射 {段落索引: [图片索引列表]}]
+    """
+    images = []
+    # 记录每个段落包含哪些图片的索引
+    paragraph_image_map: Dict[int, List[int]] = {}
+    
+    try:
+        from docx import Document
+        
+        # XML 命名空间 URI 定义 (用于 findall)
+        PIC_NS = '{http://schemas.openxmlformats.org/drawingml/2006/picture}'
+        BLIP_NS = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+        REL_NS = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
+        WP_NS = '{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}'
+        
+        doc = Document(file_path)
+        paragraphs = list(doc.paragraphs)
+        image_index = 0
+        
+        # 遍历每个段落
+        for para_idx, paragraph in enumerate(paragraphs):
+            # 获取段落前后的文本作为上下文
+            context_before = paragraphs[para_idx - 1].text if para_idx > 0 else None
+            context_after = paragraphs[para_idx + 1].text if para_idx < len(paragraphs) - 1 else None
+            
+            # 查找段落中的所有图片 (pic:pic 元素) - 使用 findall 和完整命名空间
+            pics = paragraph._element.findall(f'.//{PIC_NS}pic')
+            
+            for pic in pics:
+                # 获取图片的 embed 引用 - 查找 a:blip 元素
+                blips = pic.findall(f'.//{BLIP_NS}blip')
+                if not blips:
+                    continue
+                
+                # 获取 r:embed 属性
+                embed_id = blips[0].get(f'{REL_NS}embed')
+                if not embed_id:
+                    continue
+                
+                try:
+                    # 通过 embed_id 获取图片数据
+                    image_part = doc.part.related_parts.get(embed_id)
+                    if not image_part:
+                        continue
+                    
+                    image_bytes = image_part.blob
+                    content_type = image_part.content_type
+                    
+                    # 尝试获取 alt text (描述文本) - 从 docPr 元素
+                    alt_text = None
+                    try:
+                        # 向上查找 wp:inline 或 wp:anchor，然后找 docPr
+                        parent = pic.getparent()
+                        while parent is not None:
+                            tag = parent.tag
+                            if tag in (f'{WP_NS}inline', f'{WP_NS}anchor'):
+                                # 找到 docPr 元素
+                                doc_pr = parent.find(f'{WP_NS}docPr')
+                                if doc_pr is not None:
+                                    alt_text = doc_pr.get('descr') or doc_pr.get('name')
+                                break
+                            parent = parent.getparent()
+                    except Exception:
+                        pass
+                    
+                    # 根据 content_type 确定扩展名
+                    ext_map = {
+                        'image/png': 'png',
+                        'image/jpeg': 'jpg',
+                        'image/gif': 'gif',
+                        'image/webp': 'webp',
+                        'image/bmp': 'bmp',
+                        'image/tiff': 'tiff',
+                    }
+                    ext = ext_map.get(content_type, 'png')
+                    
+                    image_info = {
+                        "page_number": 1,  # DOCX 不分页，统一设为 1
+                        "image_index": image_index,
+                        "paragraph_index": para_idx,  # 记录段落位置（关键改进）
+                        "caption": None,
+                        "alt_text": alt_text,
+                        "bbox": None,
+                        "file_path": None,
+                        "base64_data": None,
+                        "mime_type": content_type,
+                        "width": None,
+                        "height": None,
+                        "context_before": context_before[:200] if context_before else None,
+                        "context_after": context_after[:200] if context_after else None,
+                        "image_type": "embedded",
+                        "ocr_text": None
+                    }
+                    
+                    # 保存图片文件
+                    if save_images:
+                        doc_figures_dir = figures_dir / doc_id
+                        doc_figures_dir.mkdir(parents=True, exist_ok=True)
+                        filename = f"{doc_id}-1-{image_index}.{ext}"
+                        file_save_path = doc_figures_dir / filename
+                        
+                        with open(file_save_path, 'wb') as f:
+                            f.write(image_bytes)
+                        image_info["file_path"] = str(file_save_path)
+                        logger.debug(f"[python-docx] Saved image at paragraph {para_idx}: {file_save_path}")
+                    
+                    # 嵌入 base64
+                    if embed_base64:
+                        image_info["base64_data"] = base64.b64encode(image_bytes).decode('utf-8')
+                    
+                    # 获取图片尺寸
+                    try:
+                        from PIL import Image as PILImage
+                        import io
+                        img = PILImage.open(io.BytesIO(image_bytes))
+                        image_info["width"], image_info["height"] = img.size
+                    except Exception:
+                        pass
+                    
+                    images.append(image_info)
+                    
+                    # 记录段落-图片映射
+                    if para_idx not in paragraph_image_map:
+                        paragraph_image_map[para_idx] = []
+                    paragraph_image_map[para_idx].append(image_index)
+                    
+                    image_index += 1
+                    
+                except Exception as e:
+                    logger.warning(f"[python-docx] Failed to extract image from paragraph {para_idx}: {e}")
+                    continue
+        
+        logger.info(f"[python-docx] Extracted {len(images)} images with position from DOCX, "
+                    f"distributed across {len(paragraph_image_map)} paragraphs")
+        
+    except ImportError:
+        logger.warning("[python-docx] python-docx not installed, cannot extract DOCX images")
+    except Exception as e:
+        logger.warning(f"[python-docx] Failed to extract images from DOCX: {e}")
+    
+    return images, paragraph_image_map
+
+
+def _extract_docx_paragraphs(file_path: str) -> List[str]:
+    """使用 python-docx 提取 DOCX 文件的所有段落文本。
+    
+    Args:
+        file_path: DOCX 文件路径
+    
+    Returns:
+        段落文本列表
+    """
+    try:
+        from docx import Document
+        doc = Document(file_path)
+        return [p.text for p in doc.paragraphs]
+    except Exception as e:
+        logger.warning(f"[python-docx] Failed to extract paragraphs: {e}")
+        return []
+
+
 class UnstructuredLoader:
     """Load documents using Unstructured library with multimodal support.
     
@@ -76,22 +252,55 @@ class UnstructuredLoader:
             
             path = Path(file_path)
             doc_id = self._generate_doc_id(path)
+            file_ext = path.suffix.lower()
             
             # 确保图片目录存在
             figures_path = Path(self.figures_dir)
             if save_images and not figures_path.exists():
                 figures_path.mkdir(parents=True, exist_ok=True)
             
-            # Partition document with full extraction options
-            elements = partition(
-                filename=file_path,
-                strategy="hi_res",
-                extract_images_in_pdf=extract_images,
-                infer_table_structure=True,
-                ocr_languages="chi_sim+eng",
-                extract_image_block_to_payload=True,  # 提取图片到 payload
-                extract_image_block_types=["Image", "Figure"],  # 提取的图片类型
-            )
+            # 对于 DOCX 文件，使用改进的 python-docx 方法提取图片（包含位置信息）
+            docx_images = []
+            docx_paragraph_image_map: Dict[int, List[int]] = {}
+            docx_paragraphs: List[str] = []
+            is_docx = file_ext in (".docx", ".doc")
+            
+            if is_docx and extract_images:
+                docx_images, docx_paragraph_image_map = _extract_docx_images_with_position(
+                    file_path=file_path,
+                    figures_dir=figures_path,
+                    doc_id=doc_id,
+                    save_images=save_images,
+                    embed_base64=embed_images_base64
+                )
+                # 同时提取段落文本用于位置对应
+                docx_paragraphs = _extract_docx_paragraphs(file_path)
+                logger.info(f"[Unstructured] Extracted {len(docx_images)} images from DOCX with position info, "
+                            f"{len(docx_paragraphs)} paragraphs")
+            
+            # 构建 partition 参数 (根据文件类型差异化配置)
+            partition_kwargs = {
+                "filename": file_path,
+                "strategy": "hi_res",
+                "infer_table_structure": True,
+                "languages": ["chi_sim", "eng"],  # 使用新参数替代 ocr_languages
+            }
+            
+            # PDF 专用图片提取参数
+            if file_ext == ".pdf" and extract_images:
+                partition_kwargs["extract_images_in_pdf"] = True
+                partition_kwargs["extract_image_block_to_payload"] = True
+                partition_kwargs["extract_image_block_types"] = ["Image", "Figure"]
+            
+            # PPTX 等 Office 文档：指定图片输出目录 (DOCX 使用 python-docx 处理)
+            if file_ext in (".pptx", ".ppt") and extract_images:
+                # 为当前文档创建专属图片目录
+                doc_figures_dir = figures_path / doc_id
+                doc_figures_dir.mkdir(parents=True, exist_ok=True)
+                partition_kwargs["extract_image_block_output_dir"] = str(doc_figures_dir)
+                partition_kwargs["extract_image_block_types"] = ["Image", "Figure"]
+            
+            elements = partition(**partition_kwargs)
             
             # Process elements
             pages_text: Dict[int, List[str]] = {}
@@ -99,58 +308,101 @@ class UnstructuredLoader:
             images: List[Dict[str, Any]] = []
             tables: List[Dict[str, Any]] = []
             
-            image_index = 0
-            prev_text = ""  # 跟踪上一个文本元素，用于图片上下文
+            # 统计元素类型用于调试
+            element_type_counts = {}
             
-            for i, element in enumerate(elements):
-                page_num = getattr(element.metadata, 'page_number', 1) if hasattr(element, 'metadata') else 1
-                element_type = type(element).__name__
+            # 对于 DOCX 文件：使用 python-docx 的段落和图片位置信息
+            if is_docx and docx_images:
+                # 图片已有完整信息，直接添加
+                images.extend(docx_images)
                 
-                if page_num not in pages_text:
-                    pages_text[page_num] = []
+                # 构建带图片占位符的文本
+                page_num = 1
+                pages_text[page_num] = []
                 
-                # 处理图片元素
-                if element_type in ('Image', 'Figure') and extract_images:
-                    image_info = self._process_image_element(
-                        element=element,
-                        image_index=image_index,
-                        page_num=page_num,
-                        doc_id=doc_id,
-                        figures_path=figures_path,
-                        save_images=save_images,
-                        embed_base64=embed_images_base64,
-                        context_before=prev_text[-200:] if prev_text else None  # 保留最后200字符作为上下文
-                    )
-                    if image_info:
-                        images.append(image_info)
-                        # 在文本中插入图片占位符
-                        placeholder = f"[IMAGE_{image_index}: {image_info.get('caption') or '图片'}]"
-                        pages_text[page_num].append(placeholder)
-                        full_text.append(placeholder)
-                        image_index += 1
+                for para_idx, para_text in enumerate(docx_paragraphs):
+                    # 先添加段落文本
+                    if para_text:
+                        pages_text[page_num].append(para_text)
+                        full_text.append(para_text)
+                    
+                    # 检查该段落是否有图片，如果有则在文本后添加图片占位符
+                    if para_idx in docx_paragraph_image_map:
+                        for img_idx in docx_paragraph_image_map[para_idx]:
+                            if img_idx < len(docx_images):
+                                img_info = docx_images[img_idx]
+                                placeholder = f"[IMAGE_{img_idx}: {img_info.get('alt_text') or '图片'}]"
+                                pages_text[page_num].append(placeholder)
+                                full_text.append(placeholder)
                 
-                # 处理表格元素
-                elif element_type == 'Table':
-                    table_info = self._process_table_element(element, page_num, len(tables))
-                    if table_info:
-                        tables.append(table_info)
-                        # 表格文本也加入
-                        table_text = element.text
-                        pages_text[page_num].append(table_text)
-                        full_text.append(table_text)
-                        prev_text = table_text
+                # 处理 unstructured 的表格元素 (DOCX 表格仍然用 unstructured)
+                for element in elements:
+                    element_type = type(element).__name__
+                    element_type_counts[element_type] = element_type_counts.get(element_type, 0) + 1
+                    
+                    if element_type == 'Table':
+                        table_info = self._process_table_element(element, page_num, len(tables))
+                        if table_info:
+                            tables.append(table_info)
                 
-                # 处理普通文本元素
-                else:
-                    text = element.text
-                    if text:
-                        pages_text[page_num].append(text)
-                        full_text.append(text)
-                        prev_text = text
-                        
-                        # 更新上一个图片的 context_after
-                        if images and not images[-1].get('context_after'):
-                            images[-1]['context_after'] = text[:200]  # 前200字符
+                logger.info(f"[Unstructured] DOCX processed with position-aware images")
+            
+            else:
+                # 非 DOCX 文件：使用原有逻辑处理
+                image_index = 0
+                prev_text = ""  # 跟踪上一个文本元素，用于图片上下文
+                
+                for i, element in enumerate(elements):
+                    raw_page_num = getattr(element.metadata, 'page_number', None) if hasattr(element, 'metadata') else None
+                    page_num = raw_page_num if isinstance(raw_page_num, int) and raw_page_num > 0 else 1
+                    element_type = type(element).__name__
+                    element_type_counts[element_type] = element_type_counts.get(element_type, 0) + 1
+                    
+                    if page_num not in pages_text:
+                        pages_text[page_num] = []
+                    
+                    # 处理图片元素
+                    if element_type in ('Image', 'Figure') and extract_images:
+                        image_info = self._process_image_element(
+                            element=element,
+                            image_index=image_index,
+                            page_num=page_num,
+                            doc_id=doc_id,
+                            figures_path=figures_path,
+                            save_images=save_images,
+                            embed_base64=embed_images_base64,
+                            context_before=prev_text[-200:] if prev_text else None  # 保留最后200字符作为上下文
+                        )
+                        if image_info:
+                            images.append(image_info)
+                            # 在文本中插入图片占位符
+                            placeholder = f"[IMAGE_{image_index}: {image_info.get('caption') or '图片'}]"
+                            pages_text[page_num].append(placeholder)
+                            full_text.append(placeholder)
+                            image_index += 1
+                    
+                    # 处理表格元素
+                    elif element_type == 'Table':
+                        table_info = self._process_table_element(element, page_num, len(tables))
+                        if table_info:
+                            tables.append(table_info)
+                            # 表格文本也加入
+                            table_text = element.text
+                            pages_text[page_num].append(table_text)
+                            full_text.append(table_text)
+                            prev_text = table_text
+                    
+                    # 处理普通文本元素
+                    else:
+                        text = element.text
+                        if text:
+                            pages_text[page_num].append(text)
+                            full_text.append(text)
+                            prev_text = text
+                            
+                            # 更新上一个图片的 context_after
+                            if images and not images[-1].get('context_after'):
+                                images[-1]['context_after'] = text[:200]  # 前200字符
             
             # Format pages
             pages = []
@@ -162,6 +414,9 @@ class UnstructuredLoader:
                     "char_count": len(text)
                 })
             
+            # 日志：元素类型统计
+            logger.info(f"[Unstructured] Element types: {element_type_counts}")
+            
             return {
                 "success": True,
                 "loader": self.name,
@@ -169,7 +424,8 @@ class UnstructuredLoader:
                     "elements_count": len(elements),
                     "image_count": len(images),
                     "table_count": len(tables),
-                    "multimodal_ready": len(images) > 0  # 标记是否有多模态内容
+                    "multimodal_ready": len(images) > 0,  # 标记是否有多模态内容
+                    "element_types": element_type_counts  # 添加元素类型统计
                 },
                 "pages": pages,
                 "images": images,
@@ -256,42 +512,65 @@ class UnstructuredLoader:
                         "y2": coords.points[2][1] if len(coords.points) > 2 else 0
                     }
                 
-                # 图片数据 (从 payload 提取)
-                image_base64 = getattr(metadata, 'image_base64', None)
-                if not image_base64:
-                    # 尝试从其他属性获取
-                    image_base64 = getattr(metadata, 'image', None)
-                
-                if image_base64:
-                    # 检测图片格式
-                    mime_type = self._detect_image_mime(image_base64)
-                    image_info["mime_type"] = mime_type
-                    
-                    # 保存图片文件
-                    if save_images:
-                        ext = mime_type.split('/')[-1] if mime_type else 'png'
-                        filename = f"{doc_id}-{page_num}-{image_index}.{ext}"
-                        file_path = figures_path / filename
+                # 方式1: 从 image_path 获取已保存的图片 (DOCX/PPTX 等)
+                image_path = getattr(metadata, 'image_path', None)
+                if image_path and os.path.exists(image_path):
+                    image_info["file_path"] = image_path
+                    # 读取图片获取 base64 和尺寸
+                    try:
+                        with open(image_path, 'rb') as f:
+                            image_data = f.read()
                         
-                        try:
-                            # 解码并保存
-                            image_data = base64.b64decode(image_base64)
-                            with open(file_path, 'wb') as f:
-                                f.write(image_data)
-                            image_info["file_path"] = str(file_path)
-                            
-                            # 获取图片尺寸
-                            size = self._get_image_size(image_data)
-                            if size:
-                                image_info["width"], image_info["height"] = size
-                                
-                            logger.debug(f"Saved image: {file_path}")
-                        except Exception as e:
-                            logger.warning(f"Failed to save image: {e}")
+                        # 检测 MIME 类型
+                        image_info["mime_type"] = self._detect_image_mime_from_bytes(image_data)
+                        
+                        # 获取尺寸
+                        size = self._get_image_size(image_data)
+                        if size:
+                            image_info["width"], image_info["height"] = size
+                        
+                        # 嵌入 Base64
+                        if embed_base64:
+                            image_info["base64_data"] = base64.b64encode(image_data).decode('utf-8')
+                        
+                        logger.debug(f"Loaded image from path: {image_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to read image from path {image_path}: {e}")
+                
+                # 方式2: 从 base64 payload 获取 (PDF)
+                if not image_info["file_path"]:
+                    image_base64 = getattr(metadata, 'image_base64', None)
+                    if not image_base64:
+                        image_base64 = getattr(metadata, 'image', None)
                     
-                    # 嵌入 Base64
-                    if embed_base64:
-                        image_info["base64_data"] = image_base64
+                    if image_base64:
+                        # 检测图片格式
+                        mime_type = self._detect_image_mime(image_base64)
+                        image_info["mime_type"] = mime_type
+                        
+                        # 保存图片文件
+                        if save_images:
+                            ext = mime_type.split('/')[-1] if mime_type else 'png'
+                            filename = f"{doc_id}-{page_num}-{image_index}.{ext}"
+                            file_path = figures_path / filename
+                            
+                            try:
+                                image_data = base64.b64decode(image_base64)
+                                with open(file_path, 'wb') as f:
+                                    f.write(image_data)
+                                image_info["file_path"] = str(file_path)
+                                
+                                size = self._get_image_size(image_data)
+                                if size:
+                                    image_info["width"], image_info["height"] = size
+                                    
+                                logger.debug(f"Saved image: {file_path}")
+                            except Exception as e:
+                                logger.warning(f"Failed to save image: {e}")
+                        
+                        # 嵌入 Base64
+                        if embed_base64:
+                            image_info["base64_data"] = image_base64
                 
                 # OCR 文字
                 ocr_text = getattr(metadata, 'text_as_html', None) or getattr(metadata, 'ocr_text', None)
@@ -358,14 +637,20 @@ class UnstructuredLoader:
         try:
             # 解码前几个字节来检测格式
             data = base64.b64decode(base64_data[:32] + '==')
-            
+            return self._detect_image_mime_from_bytes(data)
+        except:
+            return 'image/png'
+    
+    def _detect_image_mime_from_bytes(self, data: bytes) -> str:
+        """Detect image MIME type from binary data."""
+        try:
             if data[:8] == b'\x89PNG\r\n\x1a\n':
                 return 'image/png'
             elif data[:2] == b'\xff\xd8':
                 return 'image/jpeg'
             elif data[:6] in (b'GIF87a', b'GIF89a'):
                 return 'image/gif'
-            elif data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+            elif len(data) >= 12 and data[:4] == b'RIFF' and data[8:12] == b'WEBP':
                 return 'image/webp'
             else:
                 return 'image/png'  # 默认
