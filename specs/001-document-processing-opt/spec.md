@@ -143,11 +143,20 @@
 - **FR-007**: 系统必须基于文件大小和复杂度智能选择解析器
 - **FR-008**: 系统必须在解析失败时自动降级并通知用户使用了备用方案
 - **FR-009**: 系统必须设计统一的标准化数据结构，所有解析器输出都转换为此格式
+- **FR-009a**: 系统必须支持通过 Docling Serve 的异步 API 加载大文件，提供 `/load/async`、`/load/task/{task_id}/status`、`/load/task/{task_id}/result`、`/load/task/{task_id}/cancel` 等端点
+- **FR-009b**: 异步加载必须通过 `LoadingTask` 实体追踪任务状态（pending/started/success/failure/cancelled）、进度和处理耗时，并在任务成功后持久化结果为标准化加载结果 JSON
 
 #### 格式扩展
 - **FR-010**: 系统必须按分批策略扩展格式支持（第1批：PDF/DOCX/XLSX/PPTX）
 - **FR-011**: 系统必须支持新增格式的专用解析器（CSV、JSON、HTML、XML、EPUB等）
 - **FR-012**: 系统必须更新格式映射配置，支持多解析器降级策略
+
+#### 加载结果持久化与预览
+- **FR-012a**: 每次文档加载必须创建一条 `ProcessingResult` 记录，`processing_type` 固定为 "load"，记录解析器类型、总页数、总字符数、处理耗时、是否使用降级等元数据
+- **FR-012b**: 文档实体的 `status` 字段必须按照 `uploaded` → `processing` → `ready` / `error` 状态机流转，并在加载失败时写入错误信息
+- **FR-012c**: 系统必须将加载结果以 JSON 文件持久化到磁盘，文件路径记录在 `ProcessingResult.result_path`，供后续预览和分块功能复用
+- **FR-012d**: `/documents` 列表接口需要展示最近一次加载耗时和实际使用的解析器（provider），用于诊断加载性能和质量
+- **FR-012e**: `/documents/{document_id}/preview` 接口必须优先从最近一次成功的加载结果 JSON 中读取 `full_text` 和分页信息，并根据文档状态返回 `not_loaded`、`processing`、`error`、`ready` 四类预览状态
 
 #### 文档更新
 - **FR-013**: 系统必须更新 `README.md`，移除文档解析功能描述，添加 Docling 集成说明
