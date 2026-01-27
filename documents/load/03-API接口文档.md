@@ -2,7 +2,7 @@
 
 **生成日期**: 2025-12-10  
 **项目**: RAG Framework - 文档加载模块  
-**基础路径**: `/api`
+**基础路径**: `/api/v1`
 
 ---
 
@@ -53,7 +53,7 @@
 
 ### 2.1 上传文档
 
-**接口**: `POST /documents/upload`
+**接口**: `POST /documents`
 
 **描述**: 上传文档文件到系统
 
@@ -74,7 +74,7 @@
 **请求示例**:
 ```bash
 curl -X POST \
-  http://localhost:8000/api/documents/upload \
+  http://localhost:8000/api/v1/documents \
   -F "file=@/path/to/document.pdf"
 ```
 
@@ -102,16 +102,13 @@ curl -X POST \
 
 **接口**: `GET /documents`
 
-**描述**: 获取已上传的文档列表
+**描述**: 获取已上传的文档列表，并附带最近一次加载耗时和解析器信息
 
 **参数**:
 - `page` (int, default=1): 页码
 - `page_size` (int, default=20): 每页数量
-- `search` (string, optional): 文件名搜索
-- `format` (string, optional): 格式过滤(pdf/docx/doc/txt/md)
 - `status` (string, optional): 状态过滤(uploaded/processing/ready/error)
-- `sort_by` (string, default="upload_time"): 排序字段
-- `sort_order` (string, default="desc"): 排序方向(asc/desc)
+- `has_chunking_result` (bool, optional): 是否只展示已经完成分块的文档
 
 **响应**:
 ```json
@@ -126,7 +123,9 @@ curl -X POST \
         "size_bytes": 1024000,
         "status": "ready",
         "upload_time": "2025-12-10T10:00:00Z",
-        "last_processed": "2025-12-10T10:05:00Z"
+        "last_processed": "2025-12-10T10:05:00Z",
+        "loading_time": 2.53,
+        "provider": "docling_serve"  
       }
     ],
     "total": 100,
@@ -136,7 +135,6 @@ curl -X POST \
   }
 }
 ```
-
 ---
 
 ### 2.3 获取文档详情
@@ -193,30 +191,27 @@ curl -X POST \
 
 ## 3. 加载相关接口
 
-### 3.1 加载文档
+### 3.1 同步加载文档
 
-**接口**: `POST /loading/load`
+**接口**: `POST /processing/load`
 
-**描述**: 对已上传的文档执行加载操作,提取文本内容
+**描述**: 对已上传的文档执行同步加载操作, 提取文本内容并立即生成 `ProcessingResult`
 
 **请求体**:
 ```json
 {
   "document_id": "doc_123456",
-  "loader_type": "pymupdf"
+  "loader_type": null,
+  "enable_fallback": true
 }
 ```
 
 **参数说明**:
 - `document_id` (string, required): 文档ID
 - `loader_type` (string, optional): 加载器类型
-  - `null` 或空: 自动选择(推荐)
-  - `"pymupdf"`: PyMuPDF加载器
-  - `"pypdf"`: PyPDF加载器
-  - `"unstructured"`: Unstructured加载器
-  - `"docx"`: DOCX加载器
-  - `"doc"`: DOC加载器
-  - `"text"`: 文本加载器
+  - `null` 或空: 自动选择(推荐，由 `fallback_manager` 根据格式和大小选择策略)
+  - 具体值: `"docling_serve"`, `"pymupdf"`, `"pypdf"`, `"unstructured"`, `"docx"`, `"doc"`, `"text"` 等
+- `enable_fallback` (bool, default=true): 是否启用多级降级策略
 
 **响应**:
 ```json
@@ -227,16 +222,136 @@ curl -X POST \
     "id": "result_789",
     "document_id": "doc_123456",
     "processing_type": "load",
-    "provider": "pymupdf",
+    "provider": "docling_serve",
     "status": "completed",
-    "result_path": "/path/to/results/load/doc_123456_pymupdf_20251210_100500.json",
+    "result_path": "/path/to/results/load/doc_123456_docling_serve_20251210_100500.json",
     "extra_metadata": {
       "total_pages": 10,
       "total_chars": 5234,
-      "loader_type": "pymupdf",
-      "file_format": "pdf"
+      "loader_type": "docling_serve",
+      "file_format": "pdf",
+      "processing_time": 2.53,
+      "fallback_used": false,
+      "fallback_reason": null,
+      "table_count": 3,
+      "image_count": 5
     },
     "created_at": "2025-12-10T10:05:00Z"
+  }
+}
+```
+
+### 3.2 异步加载任务
+
+Docling Serve 对大文件/复杂文档推荐使用异步加载模式，通过任务队列和 `LoadingTask` 追踪进度。
+
+#### 3.2.1 提交异步加载任务
+
+**接口**: `POST /processing/load/async`
+
+**请求体**:
+```json
+{
+  "document_id": "doc_123456",
+  "loader_type": "docling_serve"
+}
+```
+
+**响应**:
+```json
+{
+  "success": true,
+  "message": "Async loading task submitted",
+  "data": {
+    "task_id": "task_abc123",
+    "external_task_id": "docling-task-xyz",
+    "status": "pending",
+    "document_id": "doc_123456",
+    "loader_type": "docling_serve"
+  }
+}
+```
+
+#### 3.2.2 查询异步任务状态
+
+**接口**: `GET /processing/load/task/{task_id}/status`
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "task_id": "task_abc123",
+    "status": "started",          
+    "progress": 35,                
+    "document_id": "doc_123456",
+    "error_message": null,
+    "processing_time": null
+  },
+  "message": "Task status retrieved"
+}
+```
+
+#### 3.2.3 获取异步任务结果
+
+**接口**: `GET /processing/load/task/{task_id}/result`
+
+**描述**: 任务成功后获取完整的加载结果（包含 `ProcessingResult` 信息和解析后的 JSON 数据）
+
+**响应**:
+```json
+{
+  "success": true,
+  "message": "Task result retrieved",
+  "data": {
+    "id": "result_789",
+    "document_id": "doc_123456",
+    "processing_type": "load",
+    "provider": "docling_serve",
+    "status": "completed",
+    "result_path": "/path/to/results/load/doc_123456_docling_serve_20251210_100500.json",
+    "extra_metadata": {
+      "total_pages": 10,
+      "total_chars": 5234,
+      "loader_type": "docling_serve",
+      "file_format": "pdf",
+      "processing_time": 12.34,
+      "async_mode": true,
+      "table_count": 3,
+      "image_count": 5
+    },
+    "created_at": "2025-12-10T10:05:00Z",
+    "result_data": {
+      "success": true,
+      "loader": "docling_serve",
+      "full_text": "...markdown...",
+      "pages": [
+        {"page_number": 1, "text": "...", "char_count": 523}
+      ],
+      "total_pages": 10,
+      "total_chars": 5234,
+      "tables": [...],
+      "images": [...],
+      "metadata": {"image_count": 5, "table_count": 3}
+    },
+    "task_id": "task_abc123"
+  }
+}
+```
+
+#### 3.2.4 取消异步任务
+
+**接口**: `POST /processing/load/task/{task_id}/cancel`
+
+**响应**:
+```json
+{
+  "success": true,
+  "message": "Task cancellation requested",
+  "data": {
+    "task_id": "task_abc123",
+    "cancelled": true,
+    "status": "cancelled"
   }
 }
 ```
@@ -257,16 +372,51 @@ curl -X POST \
 
 ---
 
+### 3.3 任务队列与批量状态查询
+
+为了支持前端轮询和多任务并行,加载模块还暴露了任务队列相关接口。
+
+**接口 1**: `GET /processing/load/queue/stats`  
+**描述**: 获取当前任务队列统计信息(各状态任务数量、不同类别池的配置等)。
+
+**接口 2**: `GET /processing/load/queue/active`  
+**描述**: 获取当前处于 pending/queued/running 状态的所有任务列表。
+
+**接口 3**: `POST /processing/load/queue/batch-status`  
+**请求体**:
+```json
+{
+  "task_ids": ["task_abc123", "task_def456"]
+}
+```
+**描述**: 批量查询多个任务的状态,减少前端轮询请求次数。返回结构示例:
+```json
+{
+  "success": true,
+  "data": {
+    "statuses": {
+      "task_abc123": {"status": "started", "progress": 30},
+      "task_def456": {"status": "success", "progress": 100}
+    },
+    "queried": 2,
+    "found": 2
+  },
+  "message": "Batch status retrieved"
+}
+```
+
+---
+
 ## 4. 结果查询接口
 
 ### 4.1 获取处理结果列表
 
-**接口**: `GET /processing/results`
+**接口**: `GET /processing/results/{document_id}`
 
 **描述**: 获取指定文档的处理结果列表
 
 **参数**:
-- `document_id` (string, required): 文档ID
+- `document_id` (string, required): 文档ID（路径参数）
 - `processing_type` (string, optional): 处理类型(load/chunk等)
 
 **响应**:
@@ -278,25 +428,27 @@ curl -X POST \
       "id": "result_789",
       "document_id": "doc_123456",
       "processing_type": "load",
-      "provider": "pymupdf",
+      "provider": "docling_serve",
       "status": "completed",
+      "result_path": "/path/to/results/load/doc_123456_docling_serve_20251210_100500.json",
       "created_at": "2025-12-10T10:05:00Z",
       "extra_metadata": {
         "total_pages": 10,
-        "total_chars": 5234
+        "total_chars": 5234,
+        "loader_type": "docling_serve",
+        "file_format": "pdf"
       }
     }
   ]
 }
 ```
-
 ---
 
 ### 4.2 获取处理结果详情
 
-**接口**: `GET /processing/results/{result_id}`
+**接口**: `GET /processing/results/detail/{result_id}`
 
-**描述**: 获取指定处理结果的详细信息,包括完整的结果数据
+**描述**: 获取指定处理结果的详细信息,包括完整的结果数据（从 JSON 文件中加载）
 
 **响应**:
 ```json
@@ -352,15 +504,11 @@ curl -X POST \
 
 ### 4.3 下载结果JSON
 
-**接口**: `GET /processing/results/{result_id}/download`
+**接口**: `GET /processing/results/detail/{result_id}`
 
-**描述**: 下载处理结果的JSON文件
+**描述**: 通过结果详情接口获取完整结果数据,并在客户端将返回的 JSON 保存为文件(可配合 `curl -o` 或 SDK 中的 `download_result` 方法使用)。
 
-**响应**: JSON文件下载
-
-**Content-Type**: `application/json`
-
-**文件名**: `{document_name}_{processing_type}_result.json`
+**响应**: 同 [4.2 获取处理结果详情](#42-获取处理结果详情),包含 `result_data` 字段; 前端/客户端可自行决定只保存 `data.result_data` 或完整响应。
 
 ---
 
@@ -368,9 +516,9 @@ curl -X POST \
 
 ### 5.1 获取可用加载器列表
 
-**接口**: `GET /loading/loaders`
+**接口**: `GET /processing/loaders`
 
-**描述**: 获取系统中可用的所有加载器及其支持的格式
+**描述**: 获取系统中可用的所有加载器及其配置(包括支持格式、性能特征、能力标记和当前可用状态)。
 
 **响应**:
 ```json
@@ -378,59 +526,96 @@ curl -X POST \
   "success": true,
   "data": {
     "loaders": [
-      "pymupdf",
-      "pypdf",
-      "unstructured",
-      "docx",
-      "doc",
-      "text"
+      {
+        "name": "docling_serve",
+        "display_name": "Docling Serve (HTTP)",
+        "supported_formats": ["pdf", "docx", "xlsx", "pptx", "html", "md", "txt", "csv"],
+        "priority": 0,
+        "avg_speed": "medium",
+        "quality_level": "high",
+        "requires_installation": false,
+        "installation_command": "./start_docling.sh",
+        "supports_tables": true,
+        "supports_images": true,
+        "supports_formulas": true,
+        "supports_ocr": true,
+        "is_available": true,
+        "unavailable_reason": null
+      }
     ],
-    "supported_formats": [
-      "pdf",
-      "docx",
-      "doc",
-      "txt",
-      "md",
-      "markdown"
-    ],
-    "format_loader_map": {
-      "pdf": "pymupdf",
-      "docx": "docx",
-      "doc": "doc",
-      "txt": "text",
-      "md": "text",
-      "markdown": "text"
-    }
+    "total": 1
   }
 }
 ```
 
+> 实际返回的 `loaders` 数量和字段取决于 `LOADER_REGISTRY` 配置,上例仅为典型示例。
+
 ---
 
-### 5.2 获取加载器详细信息
+### 5.2 获取支持格式与解析策略
 
-**接口**: `GET /loading/loaders/{loader_type}`
+**接口**: `GET /processing/loaders/formats`
 
-**描述**: 获取指定加载器的详细信息
+**描述**: 获取所有支持的文件格式,以及每种格式对应的主加载器、降级链和大文件优先使用的快速加载器。
 
 **响应**:
 ```json
 {
   "success": true,
   "data": {
-    "name": "pymupdf",
-    "display_name": "PyMuPDF",
-    "description": "高性能PDF加载器,支持文本提取和元数据读取",
-    "supported_formats": ["pdf"],
-    "features": [
-      "文本提取",
-      "元数据提取",
-      "图片提取",
-      "页面信息"
+    "formats": [
+      "pdf",
+      "docx",
+      "xlsx",
+      "pptx",
+      "html",
+      "csv",
+      "json",
+      "txt",
+      "md",
+      "markdown",
+      "xml",
+      "msg",
+      "vtt",
+      "properties"
     ],
-    "performance": "excellent",
-    "recommended": true,
-    "dependencies": ["PyMuPDF>=1.23.8"]
+    "strategies": [
+      {
+        "format": "pdf",
+        "primary_loader": "docling_serve",
+        "fallback_loaders": ["pymupdf", "pypdf", "unstructured"],
+        "size_threshold_mb": 20.0,
+        "fast_loader": "pymupdf"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+> 实际返回会包含所有格式的策略,这里仅展示 `pdf` 的典型结构。 
+
+---
+
+### 5.3 获取推荐加载器
+
+**接口**: `GET /processing/loaders/recommend`
+
+**描述**: 根据文件格式和大小返回推荐的加载器,内部使用 `fallback_manager.get_recommended_loader` 结合策略与可用性做决策。
+
+**请求参数**:
+
+- `format` (string, required): 文件格式(如 `pdf`, `docx`)
+- `size_bytes` (int, optional): 文件大小(字节)
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "format": "pdf",
+    "size_bytes": 1048576,
+    "recommended_loader": "docling_serve"
   }
 }
 ```
@@ -469,22 +654,22 @@ curl -X POST \
 
 ```bash
 # 1. 上传文档
-curl -X POST http://localhost:8000/api/documents/upload \
+curl -X POST http://localhost:8000/api/v1/documents \
   -F "file=@document.pdf"
 # 返回: {"success":true,"data":{"id":"doc_123456",...}}
 
 # 2. 自动加载文档
-curl -X POST http://localhost:8000/api/loading/load \
+curl -X POST http://localhost:8000/api/v1/processing/load \
   -H "Content-Type: application/json" \
   -d '{"document_id":"doc_123456"}'
 # 返回: {"success":true,"data":{"id":"result_789",...}}
 
 # 3. 获取结果详情
-curl http://localhost:8000/api/processing/results/result_789
+curl http://localhost:8000/api/v1/processing/results/detail/result_789
 # 返回完整的加载结果数据
 
 # 4. 下载结果JSON
-curl http://localhost:8000/api/processing/results/result_789/download \
+curl http://localhost:8000/api/v1/processing/results/detail/result_789 \
   -o result.json
 ```
 
@@ -492,7 +677,7 @@ curl http://localhost:8000/api/processing/results/result_789/download \
 
 ```bash
 # 使用PyPDF加载器
-curl -X POST http://localhost:8000/api/loading/load \
+curl -X POST http://localhost:8000/api/v1/processing/load \
   -H "Content-Type: application/json" \
   -d '{
     "document_id": "doc_123456",
@@ -504,13 +689,13 @@ curl -X POST http://localhost:8000/api/loading/load \
 
 ```bash
 # 查询PDF格式的文档
-curl "http://localhost:8000/api/documents?format=pdf&page=1&page_size=10"
+curl "http://localhost:8000/api/v1/documents?format=pdf&page=1&page_size=10"
 
 # 搜索文件名包含"report"的文档
-curl "http://localhost:8000/api/documents?search=report"
+curl "http://localhost:8000/api/v1/documents?search=report"
 
 # 获取状态为ready的文档
-curl "http://localhost:8000/api/documents?status=ready"
+curl "http://localhost:8000/api/v1/documents?status=ready"
 ```
 
 ### 8.4 Python SDK示例
@@ -527,7 +712,7 @@ class LoadingClient:
         with open(file_path, 'rb') as f:
             files = {'file': f}
             response = requests.post(
-                f"{self.base_url}/api/documents/upload",
+                f"{self.base_url}/api/v1/documents",
                 files=files
             )
         return response.json()
@@ -539,7 +724,7 @@ class LoadingClient:
             payload["loader_type"] = loader_type
         
         response = requests.post(
-            f"{self.base_url}/api/loading/load",
+            f"{self.base_url}/api/v1/processing/load",
             json=payload
         )
         return response.json()
@@ -547,14 +732,14 @@ class LoadingClient:
     def get_result(self, result_id):
         """获取结果详情"""
         response = requests.get(
-            f"{self.base_url}/api/processing/results/{result_id}"
+            f"{self.base_url}/api/v1/processing/results/detail/{result_id}"
         )
         return response.json()
     
     def download_result(self, result_id, output_path):
         """下载结果JSON"""
         response = requests.get(
-            f"{self.base_url}/api/processing/results/{result_id}/download"
+            f"{self.base_url}/api/v1/processing/results/detail/{result_id}"
         )
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(response.text)
