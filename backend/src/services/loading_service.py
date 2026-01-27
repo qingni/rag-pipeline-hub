@@ -175,6 +175,42 @@ class LoadingService:
                 logger.error(f"Loading failed for {document_id}: {error_msg}")
                 raise ProcessingError(f"Loading failed: {error_msg}", error_details)
             
+            # 检查是否返回了异步模式标记
+            # 当 Docling 返回 async_mode=True 时，需要创建异步任务
+            if result_data.get("async_mode", False):
+                logger.info(f"Docling returned async_mode, creating async task for {document_id}")
+                
+                external_task_id = result_data.get("task_id")
+                
+                # 创建异步任务记录
+                loading_task = LoadingTask(
+                    document_id=document_id,
+                    external_task_id=external_task_id,
+                    loader_type=result_data.get("loader", "docling_serve"),
+                    status=LoadingTaskStatus.PENDING,
+                    started_at=datetime.utcnow()
+                )
+                db.add(loading_task)
+                
+                # 更新 processing_result 为异步模式
+                processing_result.status = "running"
+                processing_result.extra_metadata = {
+                    "async_mode": True,
+                    "task_id": loading_task.id,
+                    "external_task_id": external_task_id
+                }
+                
+                db.commit()
+                db.refresh(loading_task)
+                
+                # 返回包含任务信息的 processing_result
+                # 前端应该检测 async_mode 并开始轮询
+                processing_result.extra_metadata["task_id"] = loading_task.id
+                
+                logger.info(f"Async loading task created: {loading_task.id}")
+                return processing_result
+            
+            # 同步模式：直接处理结果
             # Extract statistics
             total_pages = result_data.get("total_pages", 0)
             total_chars = result_data.get("total_chars", 0)
@@ -380,14 +416,14 @@ class LoadingService:
         
         return False
     
-    def submit_async_load(
+    async def submit_async_load(
         self,
         db: Session,
         document_id: str,
         loader_type: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        提交异步加载任务
+        提交异步加载任务（完全异步，不阻塞事件循环）
         
         Args:
             db: 数据库会话
@@ -422,13 +458,17 @@ class LoadingService:
                 f"Async loading only supports docling_serve, got: {actual_loader}"
             )
         
-        # 检查 Docling Serve 是否可用
-        if not docling_serve_loader or not docling_serve_loader.is_available():
-            reason = docling_serve_loader.get_unavailable_reason() if docling_serve_loader else "Loader not initialized"
+        # 异步检查 Docling Serve 是否可用
+        if not docling_serve_loader:
+            raise ProcessingError("Docling Serve loader not initialized")
+        
+        is_available = await docling_serve_loader.is_available_async()
+        if not is_available:
+            reason = docling_serve_loader.get_unavailable_reason() or "Service unavailable"
             raise ProcessingError(f"Docling Serve is not available: {reason}")
         
-        # 提交异步任务到 Docling Serve
-        submit_result = docling_serve_loader.submit_async_convert(file_path)
+        # 异步提交任务到 Docling Serve（不阻塞事件循环）
+        submit_result = await docling_serve_loader.submit_async_convert_async(file_path)
         
         if not submit_result.get("success"):
             raise ProcessingError(
@@ -472,10 +512,9 @@ class LoadingService:
         task_id: str
     ) -> Dict[str, Any]:
         """
-        获取异步任务状态
+        获取异步任务状态（完全异步，不阻塞事件循环）
         
-        会同时查询 Docling Serve 的最新状态并更新本地记录。
-        使用异步 HTTP 客户端避免阻塞。
+        使用 Docling Serve 的异步轮询方法查询状态。
         
         Args:
             db: 数据库会话
@@ -489,8 +528,6 @@ class LoadingService:
                 "document_id": str
             }
         """
-        import httpx
-        
         # 查找本地任务
         task = db.query(LoadingTask).filter(LoadingTask.id == task_id).first()
         if not task:
@@ -507,101 +544,56 @@ class LoadingService:
                 "processing_time": task.processing_time
             }
         
-        # 使用异步 HTTP 客户端查询 Docling Serve 的最新状态
+        # 使用异步方法查询 Docling Serve 的最新状态
         if task.external_task_id and docling_serve_loader:
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    base_url = docling_serve_loader.base_url
-                    headers = {}
-                    if docling_serve_loader.api_key:
-                        headers["Authorization"] = f"Bearer {docling_serve_loader.api_key}"
+                # 调用异步轮询方法（不阻塞事件循环）
+                poll_result = await docling_serve_loader.poll_task_status_async(task.external_task_id)
+                
+                logger.info(f"Poll result for task {task.id}: {poll_result}")
+                
+                if poll_result.get("success"):
+                    new_status = poll_result.get("status")
+                    new_progress = poll_result.get("progress", 0)
                     
-                    response = await client.get(
-                        f"{base_url}/v1/status/poll/{task.external_task_id}",
-                        headers=headers
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        task_status = result.get("task_status") or result.get("status", "pending")
-                        progress = result.get("progress", 0)
-                        
-                        # 映射状态
-                        status_map = {
-                            "pending": "pending",
-                            "started": "started",
-                            "running": "started",
-                            "success": "success",
-                            "completed": "success",
-                            "failure": "failure",
-                            "failed": "failure",
-                            "error": "failure"
-                        }
-                        new_status = status_map.get(task_status.lower(), task_status)
-                        new_progress = progress
-                        
-                        # 如果任务成功但没有进度信息，设为 100%
-                        if new_status == "success" and new_progress == 0:
-                            new_progress = 100
-                        
-                        poll_result = {
-                            "success": True,
-                            "status": new_status,
-                            "progress": new_progress
-                        }
-                    else:
-                        poll_result = {
-                            "success": False,
-                            "error": f"HTTP {response.status_code}"
-                        }
-            except httpx.TimeoutException:
-                logger.warning(f"Timeout polling task status for {task.id}")
-                poll_result = {"success": False, "error": "Timeout"}
-            except Exception as e:
-                logger.warning(f"Error polling task status: {e}")
-                poll_result = {"success": False, "error": str(e)}
-            
-            logger.info(f"Poll result for task {task.id}: {poll_result}")
-            
-            if poll_result.get("success"):
-                new_status = poll_result.get("status")
-                new_progress = poll_result.get("progress", 0)
-                
-                # 对于 started 状态，Docling Serve 不提供实时进度
-                # 我们根据已等待时间模拟进度（10%-90%范围）
-                if new_status == LoadingTaskStatus.STARTED and new_progress == 0:
-                    # 根据已等待时间计算模拟进度
-                    start_time = task.started_at or task.created_at
-                    if start_time:
-                        elapsed = (datetime.utcnow() - start_time).total_seconds()
-                        # 每 5 秒增加约 5%，最高到 90%
-                        new_progress = min(10 + int(elapsed / 5) * 5, 90)
-                    else:
-                        new_progress = 10
-                
-                logger.info(f"Task {task.id}: new_status={new_status}, new_progress={new_progress}, current_status={task.status}, current_progress={task.progress}")
-                
-                # 更新本地状态
-                if new_status != task.status:
-                    task.status = new_status
-                    if new_status == LoadingTaskStatus.STARTED and not task.started_at:
-                        task.started_at = datetime.utcnow()
-                    elif new_status in (LoadingTaskStatus.SUCCESS, LoadingTaskStatus.FAILURE):
-                        task.completed_at = datetime.utcnow()
-                        # 计算处理时间：优先使用 started_at，否则使用 created_at
+                    # 对于 started 状态，Docling Serve 不提供实时进度
+                    # 我们根据已等待时间模拟进度（10%-90%范围）
+                    if new_status == LoadingTaskStatus.STARTED and new_progress == 0:
                         start_time = task.started_at or task.created_at
                         if start_time:
-                            task.processing_time = (task.completed_at - start_time).total_seconds()
-                
-                task.progress = new_progress
-                db.commit()
-                
-                # 如果任务成功，自动获取并保存结果
-                if new_status == LoadingTaskStatus.SUCCESS:
-                    self._save_async_task_result(db, task)
-            else:
-                # 轮询失败，记录错误但不改变状态
-                logger.warning(f"Failed to poll task status: {poll_result.get('error')}")
+                            elapsed = (datetime.utcnow() - start_time).total_seconds()
+                            # 每 5 秒增加约 5%，最高到 90%
+                            new_progress = min(10 + int(elapsed / 5) * 5, 90)
+                        else:
+                            new_progress = 10
+                    
+                    logger.info(f"Task {task.id}: new_status={new_status}, new_progress={new_progress}, current_status={task.status}, current_progress={task.progress}")
+                    
+                    # 更新本地状态
+                    if new_status != task.status:
+                        task.status = new_status
+                        if new_status == LoadingTaskStatus.STARTED and not task.started_at:
+                            task.started_at = datetime.utcnow()
+                        elif new_status in (LoadingTaskStatus.SUCCESS, LoadingTaskStatus.FAILURE):
+                            task.completed_at = datetime.utcnow()
+                            start_time = task.started_at or task.created_at
+                            if start_time:
+                                task.processing_time = (task.completed_at - start_time).total_seconds()
+                    
+                    task.progress = new_progress
+                    db.commit()
+                    
+                    # 如果任务成功，异步获取并保存结果
+                    if new_status == LoadingTaskStatus.SUCCESS:
+                        logger.info(f"[DEBUG] Task {task.id} status is SUCCESS, calling _save_async_task_result_async...")
+                        await self._save_async_task_result_async(db, task)
+                        logger.info(f"[DEBUG] _save_async_task_result_async completed for task {task.id}")
+                else:
+                    # 轮询失败，记录错误但不改变状态
+                    logger.warning(f"Failed to poll task status: {poll_result.get('error')}")
+                    
+            except Exception as e:
+                logger.warning(f"Error polling task status: {e}")
         
         return {
             "task_id": task.id,
@@ -612,31 +604,50 @@ class LoadingService:
             "processing_time": task.processing_time
         }
     
-    def _save_async_task_result(self, db: Session, task: LoadingTask) -> None:
+    async def _save_async_task_result_async(self, db: Session, task: LoadingTask) -> None:
         """
-        保存异步任务结果
+        异步保存任务结果（使用异步 HTTP 客户端）
         
-        从 Docling Serve 获取结果并保存到本地。
+        从 Docling Serve 异步获取结果并保存到本地。
         """
         if not task.external_task_id or not docling_serve_loader:
+            logger.warning(f"[DEBUG] _save_async_task_result_async skipped: external_task_id={task.external_task_id}, docling_serve_loader={docling_serve_loader is not None}")
             return
         
         try:
-            # 先获取文档信息（用于传递文件名和格式）
+            # 先获取文档信息
             document = db.query(Document).filter(Document.id == task.document_id).first()
             if not document:
+                logger.warning(f"[DEBUG] _save_async_task_result_async: document not found for task {task.id}")
                 return
             
-            # 获取结果（传入文件名和格式，以便正确提取格式特定的元数据）
-            result_data = docling_serve_loader.get_task_result(
+            logger.info(f"[DEBUG] Fetching result from Docling Serve: external_task_id={task.external_task_id}, filename={document.filename}")
+            
+            # 构建图片保存目录（基于文档存储路径）
+            figures_dir = None
+            if document.storage_path:
+                doc_path = Path(document.storage_path)
+                # 在文档同级目录创建 figures 子目录
+                figures_dir = doc_path.parent / "figures" / doc_path.stem
+                logger.info(f"[DEBUG] figures_dir for large images: {figures_dir}")
+            
+            # 异步获取结果
+            result_data = await docling_serve_loader.get_task_result_async(
                 task.external_task_id,
                 filename=document.filename,
-                file_format=document.format
+                file_format=document.format,
+                figures_dir=figures_dir
             )
             
+            logger.info(f"[DEBUG] get_task_result_async returned: success={result_data.get('success')}, keys={list(result_data.keys())}")
+            
             if not result_data.get("success"):
+                error_msg = result_data.get("error", "Failed to get result")
+                logger.error(f"[Async] 获取结果失败: task_id={task.id}, error={error_msg}")
                 task.status = LoadingTaskStatus.FAILURE
-                task.error_message = result_data.get("error", "Failed to get result")
+                task.error_message = error_msg
+                # 同时更新文档状态为错误
+                document.status = "error"
                 db.commit()
                 return
             
@@ -645,13 +656,16 @@ class LoadingService:
             result_data["async_mode"] = True
             
             # 保存结果到 JSON
+            logger.info(f"[DEBUG] Saving result to JSON for document: {document.filename}")
             result_path = json_storage.save_result(
                 document.filename,
                 "load",
                 result_data
             )
+            logger.info(f"[DEBUG] Result saved to: {result_path}")
             
             task.result_path = result_path
+            task.progress = 100  # 确保进度为 100%
             
             # 创建 ProcessingResult 记录
             processing_result = ProcessingResult(
@@ -684,6 +698,9 @@ class LoadingService:
             logger.error(f"Failed to save async task result: {e}", exc_info=True)
             task.status = LoadingTaskStatus.FAILURE
             task.error_message = str(e)
+            # 同时更新文档状态为错误
+            if document:
+                document.status = "error"
             db.commit()
     
     def get_async_task_result(

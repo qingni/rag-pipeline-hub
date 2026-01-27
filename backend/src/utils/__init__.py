@@ -30,6 +30,13 @@ from .logger import (
     setup_vector_index_logger,
     get_vector_index_logger
 )
+from .image_storage import (
+    ImageStorageConfig,
+    ImageStorageManager,
+    get_image_storage_manager,
+    process_image,
+    process_base64_image,
+)
 
 __all__ = [
     # Vector utilities
@@ -59,4 +66,11 @@ __all__ = [
     # Logging
     "setup_vector_index_logger",
     "get_vector_index_logger",
+    
+    # Image storage
+    "ImageStorageConfig",
+    "ImageStorageManager",
+    "get_image_storage_manager",
+    "process_image",
+    "process_base64_image",
 ]

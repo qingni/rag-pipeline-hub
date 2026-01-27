@@ -205,7 +205,11 @@
                 </div>
               </template>
               <div class="tab-content">
-                <DocumentPreview :document-id="selectedDocument.id" />
+                <DocumentPreview 
+                  ref="documentPreviewRef"
+                  :document-id="selectedDocument.id" 
+                  @retry="handleRetryLoad"
+                />
               </div>
             </t-tab-panel>
             <t-tab-panel 
@@ -249,7 +253,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useProcessingStore } from '../stores/processing'
 import { useDocumentStore } from '../stores/document'
 import healthService from '../services/healthService'
@@ -282,6 +286,9 @@ const error = ref(null)
 const loadResult = ref(null)
 const activeTab = ref('preview') // Tab 切换状态
 const showFallbackNotice = ref(true) // 降级通知显示状态
+
+// 文档预览组件引用
+const documentPreviewRef = ref(null)
 
 // 任务队列状态
 const taskQueued = ref(false)
@@ -322,10 +329,47 @@ onUnmounted(() => {
 })
 
 // 处理任务完成事件
-function handleTaskComplete(event) {
+async function handleTaskComplete(event) {
   console.log('[DocumentLoad] 任务完成事件:', event.detail)
+  
+  const { taskId, result } = event.detail
+  
   // 刷新文档列表
-  documentStore.fetchDocuments()
+  await documentStore.fetchDocuments()
+  
+  // 如果完成的任务是当前选中文档的任务，刷新预览和加载结果
+  if (selectedDocument.value && queuedTaskId.value === taskId) {
+    // 更新 selectedDocument 为最新数据
+    const updatedDoc = documentStore.documents.find(d => d.id === selectedDocument.value.id)
+    if (updatedDoc) {
+      selectedDocument.value = updatedDoc
+    }
+    
+    // 刷新预览组件
+    if (documentPreviewRef.value?.refresh) {
+      await documentPreviewRef.value.refresh()
+    }
+    
+    // 获取并设置加载结果
+    try {
+      const results = await processingStore.fetchResults(selectedDocument.value.id, 'load')
+      if (results && results.length > 0) {
+        const latestResult = results[0]
+        const fullResult = await processingStore.fetchResultById(latestResult.id)
+        if (fullResult) {
+          loadResult.value = fullResult
+          status.value = 'completed'
+          console.log('[DocumentLoad] 异步任务完成，已加载结果:', fullResult)
+        }
+      }
+    } catch (err) {
+      console.error('[DocumentLoad] 获取加载结果失败:', err)
+    }
+    
+    // 重置任务状态
+    taskQueued.value = false
+    queuedTaskId.value = null
+  }
 }
 
 const doclingStatusText = computed(() => {
@@ -512,6 +556,40 @@ function handleDeleteDocument(documentId) {
     taskQueued.value = false
     queuedTaskId.value = null
   }
+}
+
+// 重试加载文档
+async function handleRetryLoad(documentId) {
+  if (!documentId) return
+  
+  // 获取文档信息
+  let doc = selectedDocument.value
+  if (!doc || doc.id !== documentId) {
+    doc = documentStore.documents.find(d => d.id === documentId)
+    if (doc) {
+      selectedDocument.value = doc
+    }
+  }
+  
+  if (!doc) return
+  
+  // 重置状态
+  status.value = 'idle'
+  error.value = null
+  loadResult.value = null
+  taskQueued.value = false
+  queuedTaskId.value = null
+  
+  // 使用文档之前使用的加载器（provider 字段记录了上次使用的加载器）
+  // 在 watch 触发后重新设置，确保使用之前的加载器
+  await nextTick()
+  if (doc.provider) {
+    loaderType.value = doc.provider
+    console.log(`重试加载：使用之前的加载器 ${doc.provider}`)
+  }
+  
+  // 触发加载
+  await loadDocument()
 }
 
 async function loadDocument() {

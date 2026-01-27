@@ -239,6 +239,11 @@ async def preview_document(
     if not document:
         raise NotFoundError("Document", document_id)
     
+    # 调试日志：打印文档状态
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[Preview] Document {document_id}: status={document.status}, filename={document.filename}")
+    
     # 检查文档状态，只有已加载的文档才能预览
     if document.status == "uploaded":
         return success_response(
@@ -266,7 +271,7 @@ async def preview_document(
                 "preview_text": "",
                 "page_count": 0,
                 "status": "error",
-                "message": "文档加载失败，请重新上传或选择其他文档"
+                "message": "文档加载失败，请重试"
             }
         )
     

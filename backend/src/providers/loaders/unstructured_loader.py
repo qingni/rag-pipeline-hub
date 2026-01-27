@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
+from ...utils.image_storage import get_image_storage_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,12 +21,14 @@ def _extract_docx_images_with_position(file_path: str, figures_dir: Path, doc_id
     通过遍历段落和 run，检查每个 run 中是否有 <a:blip> 元素来定位图片位置，
     而不是简单地遍历 relationship 列表。
     
+    使用公共图片存储策略：大图保存文件，小图内联 base64。
+    
     Args:
         file_path: DOCX 文件路径
         figures_dir: 图片保存目录
         doc_id: 文档 ID
-        save_images: 是否保存图片文件
-        embed_base64: 是否嵌入 base64 数据
+        save_images: 是否保存图片文件（已废弃，由存储策略自动决定）
+        embed_base64: 是否嵌入 base64 数据（已废弃，由存储策略自动决定）
     
     Returns:
         Tuple[图片信息列表, 段落-图片索引映射 {段落索引: [图片索引列表]}]
@@ -32,6 +36,9 @@ def _extract_docx_images_with_position(file_path: str, figures_dir: Path, doc_id
     images = []
     # 记录每个段落包含哪些图片的索引
     paragraph_image_map: Dict[int, List[int]] = {}
+    
+    # 使用公共图片存储管理器
+    storage_manager = get_image_storage_manager()
     
     try:
         from docx import Document
@@ -92,16 +99,15 @@ def _extract_docx_images_with_position(file_path: str, figures_dir: Path, doc_id
                     except Exception:
                         pass
                     
-                    # 根据 content_type 确定扩展名
-                    ext_map = {
-                        'image/png': 'png',
-                        'image/jpeg': 'jpg',
-                        'image/gif': 'gif',
-                        'image/webp': 'webp',
-                        'image/bmp': 'bmp',
-                        'image/tiff': 'tiff',
-                    }
-                    ext = ext_map.get(content_type, 'png')
+                    # 使用公共存储策略处理图片
+                    storage_result = storage_manager.process_image(
+                        image_bytes=image_bytes,
+                        image_index=image_index,
+                        figures_dir=figures_dir,
+                        doc_id=doc_id,
+                        page_number=1,  # DOCX 不分页，统一设为 1
+                        mime_type=content_type,
+                    )
                     
                     image_info = {
                         "page_number": 1,  # DOCX 不分页，统一设为 1
@@ -110,41 +116,19 @@ def _extract_docx_images_with_position(file_path: str, figures_dir: Path, doc_id
                         "caption": None,
                         "alt_text": alt_text,
                         "bbox": None,
-                        "file_path": None,
-                        "base64_data": None,
-                        "mime_type": content_type,
-                        "width": None,
-                        "height": None,
+                        "file_path": storage_result["file_path"],
+                        "base64_data": storage_result["base64_data"],
+                        "thumbnail_base64": storage_result.get("thumbnail_base64"),
+                        "mime_type": storage_result["mime_type"],
+                        "width": storage_result["width"],
+                        "height": storage_result["height"],
+                        "original_size": storage_result["original_size"],
                         "context_before": context_before[:200] if context_before else None,
                         "context_after": context_after[:200] if context_after else None,
                         "image_type": "embedded",
-                        "ocr_text": None
+                        "ocr_text": None,
+                        "storage_type": storage_result.get("storage_type"),
                     }
-                    
-                    # 保存图片文件
-                    if save_images:
-                        doc_figures_dir = figures_dir / doc_id
-                        doc_figures_dir.mkdir(parents=True, exist_ok=True)
-                        filename = f"{doc_id}-1-{image_index}.{ext}"
-                        file_save_path = doc_figures_dir / filename
-                        
-                        with open(file_save_path, 'wb') as f:
-                            f.write(image_bytes)
-                        image_info["file_path"] = str(file_save_path)
-                        logger.debug(f"[python-docx] Saved image at paragraph {para_idx}: {file_save_path}")
-                    
-                    # 嵌入 base64
-                    if embed_base64:
-                        image_info["base64_data"] = base64.b64encode(image_bytes).decode('utf-8')
-                    
-                    # 获取图片尺寸
-                    try:
-                        from PIL import Image as PILImage
-                        import io
-                        img = PILImage.open(io.BytesIO(image_bytes))
-                        image_info["width"], image_info["height"] = img.size
-                    except Exception:
-                        pass
                     
                     images.append(image_info)
                     

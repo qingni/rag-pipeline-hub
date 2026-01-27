@@ -43,7 +43,9 @@ class FallbackManager:
         """Initialize fallback manager."""
         self._loaders: Dict[str, Any] = {}
         self._loader_availability: Dict[str, bool] = {}
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="loader")
+        # 增加线程池大小，避免多文件并行处理时阻塞
+        # 注意：此线程池仅用于同步 fallback 加载，异步加载应使用 async 方法
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="loader")
     
     def register_loader(self, name: str, loader: Any) -> None:
         """
@@ -365,6 +367,10 @@ class FallbackManager:
         """
         if not result.get("success", False):
             return False
+        
+        # 异步模式的结果也是有效的（需要后续处理）
+        if result.get("async_mode", False):
+            return True
         
         # Check for content
         full_text = result.get("full_text", "")

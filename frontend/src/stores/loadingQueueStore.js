@@ -136,8 +136,11 @@ export const useLoadingQueueStore = defineStore('loadingQueue', () => {
       // 检查是否有实际变化
       const hasChange = task.status !== updates.status || task.progress !== updates.progress
       
-      // 更新任务
+      // 更新任务，确保成功状态的进度为 100%
       const updatedTask = { ...task, ...updates }
+      if (updatedTask.status === TaskStatus.SUCCESS) {
+        updatedTask.progress = 100
+      }
       
       // 使用新 Map 强制触发响应式更新
       const newMap = new Map(tasks.value)

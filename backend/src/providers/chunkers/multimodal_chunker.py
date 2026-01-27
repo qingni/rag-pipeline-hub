@@ -596,6 +596,11 @@ class MultimodalChunker(BaseChunker):
         - 图片块的 content 使用可读的描述文本
         - metadata 包含完整的图片数据（file_path 用于展示，base64_data 用于嵌入）
         
+        业内最佳实践：按需加载
+        - 如果 base64_data 已存在，直接使用
+        - 如果只有 file_path，在需要时才加载（嵌入阶段）
+        - 优先使用缩略图用于预览
+        
         Args:
             image_info: 图片数据（来自加载结果的 images 数组）
             placeholder_text: 占位符中的描述文本
@@ -615,11 +620,24 @@ class MultimodalChunker(BaseChunker):
         # 提取图片属性
         file_path = image_info.get("file_path")
         base64_data = image_info.get("base64_data")
+        thumbnail_base64 = image_info.get("thumbnail_base64")
         mime_type = image_info.get("mime_type")
         width = image_info.get("width")
         height = image_info.get("height")
+        original_size = image_info.get("original_size")
         context_before = image_info.get("context_before")
         context_after = image_info.get("context_after")
+        
+        # 按需加载：如果没有 base64_data 但有 file_path，从文件加载
+        # 这里仅在需要时加载，避免内存占用过大
+        image_base64_for_embedding = base64_data
+        if not image_base64_for_embedding and file_path:
+            try:
+                with open(file_path, 'rb') as f:
+                    image_base64_for_embedding = base64.b64encode(f.read()).decode('utf-8')
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"按需加载图片失败 {file_path}: {e}")
         
         # 从文件路径推断格式
         img_format = None
@@ -637,11 +655,13 @@ class MultimodalChunker(BaseChunker):
             end_position=end_pos,
             # 核心图片数据（支持多模态处理）
             image_path=file_path,           # 用于前端展示
-            image_base64=base64_data,       # 用于多模态嵌入
+            image_base64=image_base64_for_embedding,  # 用于多模态嵌入
+            thumbnail_base64=thumbnail_base64,  # 用于快速预览
             alt_text=alt_text,
             caption=image_info.get("caption"),
             width=width,
             height=height,
+            original_size=original_size,
             format=img_format,
             mime_type=mime_type,
             # 图片上下文（提升检索相关性）

@@ -65,6 +65,11 @@ class ImageContent:
     
     支持多模态嵌入模型 (如 qwen3-vl-embedding-8b) 的图片数据结构。
     可以存储图片的多种表示形式：文件路径、Base64 数据、描述文本等。
+    
+    业内最佳实践：混合存储策略
+    - 大图(>50KB): 保存为文件，仅存储路径，按需加载
+    - 小图(<=50KB): 直接存储 base64
+    - 缩略图: 用于快速预览，固定较小体积
     """
     page_number: int
     image_index: int
@@ -82,12 +87,18 @@ class ImageContent:
     # 图片 Base64 编码 (用于直接传递给多模态模型)
     base64_data: Optional[str] = None
     
+    # 缩略图 Base64 编码 (用于前端快速预览，最大 200x200)
+    thumbnail_base64: Optional[str] = None
+    
     # 图片 MIME 类型 (image/png, image/jpeg 等)
     mime_type: Optional[str] = None
     
     # 图片尺寸
     width: Optional[int] = None
     height: Optional[int] = None
+    
+    # 原始图片字节大小
+    original_size: Optional[int] = None
     
     # 图片在文档中的上下文位置 (前后文本片段)
     context_before: Optional[str] = None  # 图片前的文本 (用于关联)
@@ -106,6 +117,27 @@ class ImageContent:
     def has_visual_data(self) -> bool:
         """检查是否有可用于多模态处理的视觉数据"""
         return bool(self.file_path or self.base64_data)
+    
+    def get_embedding_data(self) -> Optional[str]:
+        """
+        获取用于多模态嵌入的图片数据
+        
+        优先使用内联 base64，否则从文件按需加载
+        """
+        if self.base64_data:
+            return self.base64_data
+        if self.file_path:
+            try:
+                import base64
+                with open(self.file_path, 'rb') as f:
+                    return base64.b64encode(f.read()).decode('utf-8')
+            except Exception:
+                return None
+        return None
+    
+    def get_preview_data(self) -> Optional[str]:
+        """获取用于前端预览的数据（优先使用缩略图）"""
+        return self.thumbnail_base64 or self.base64_data
     
     def get_text_representation(self) -> str:
         """获取图片的纯文本表示 (用于传统文本嵌入)"""
@@ -285,9 +317,11 @@ class StandardDocumentResult:
                 # 多模态支持字段
                 file_path=i.get('file_path'),
                 base64_data=i.get('base64_data'),
+                thumbnail_base64=i.get('thumbnail_base64'),
                 mime_type=i.get('mime_type'),
                 width=i.get('width'),
                 height=i.get('height'),
+                original_size=i.get('original_size'),
                 context_before=i.get('context_before'),
                 context_after=i.get('context_after'),
                 image_type=i.get('image_type'),

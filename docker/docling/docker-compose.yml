@@ -16,8 +16,13 @@ services:
       - DOCLING_SERVE_MAX_SYNC_WAIT=600          # 同步等待超时: 10分钟
       - DOCLING_SERVE_MAX_DOCUMENT_TIMEOUT=1800  # 文档处理超时: 30分钟
       - UVICORN_TIMEOUT_KEEP_ALIVE=300           # HTTP 连接保持: 5分钟
+      # 结果保留配置 - 修复异步任务 404 问题
+      - DOCLING_SERVE_SINGLE_USE_RESULTS=false   # 禁用一次性结果，允许多次获取
+      - DOCLING_SERVE_RESULT_REMOVAL_DELAY=600   # 结果保留 10 分钟
       # 性能优化配置 - M3 Pro 36GB
-      - UVICORN_WORKERS=4                        # 多 worker 并行处理
+      # 注意：UVICORN_WORKERS 必须为 1，否则多 Worker 无法共享结果
+      - UVICORN_WORKERS=1                        # 单 Worker（多 Worker 会导致结果 404）
+      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=4      # 内部处理线程数
       - OMP_NUM_THREADS=4                        # OpenMP 线程数
       - MKL_NUM_THREADS=4                        # MKL 线程数
       - NUMEXPR_MAX_THREADS=4                    # NumExpr 线程数

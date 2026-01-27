@@ -3,6 +3,8 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import logging
 
+from ...utils.image_storage import get_image_storage_manager
+
 logger = logging.getLogger(__name__)
 
 # Check if BeautifulSoup is available
@@ -385,9 +387,20 @@ class HTMLLoader:
         
         return tables
     
-    def _extract_images(self, soup) -> list:
-        """Extract comprehensive image information from HTML."""
+    def _extract_images(self, soup, figures_dir: Optional[Path] = None) -> list:
+        """Extract comprehensive image information from HTML.
+        
+        使用公共图片存储策略处理 base64 内嵌图片。
+        
+        Args:
+            soup: BeautifulSoup 对象
+            figures_dir: 图片保存目录（用于大图存储）
+            
+        Returns:
+            图片信息列表
+        """
         images = []
+        storage_manager = get_image_storage_manager()
         
         for idx, img in enumerate(soup.find_all('img')):
             # 获取图片源URL（支持多种属性）
@@ -438,12 +451,38 @@ class HTMLLoader:
                 "context": context
             }
             
-            # 如果是base64图片，提取数据用于多模态嵌入
+            # 如果是base64图片，使用公共存储策略处理
             if is_base64 and src:
-                image_info["mime_type"] = self._extract_base64_mime(src)
+                mime_type = self._extract_base64_mime(src)
                 # 提取纯 base64 数据（去掉 data:image/xxx;base64, 前缀）
                 if ',' in src:
-                    image_info["base64_data"] = src.split(',', 1)[1]
+                    raw_base64_data = src.split(',', 1)[1]
+                    
+                    # 使用公共存储策略处理图片
+                    storage_result = storage_manager.process_base64_image(
+                        base64_data=raw_base64_data,
+                        image_index=idx,
+                        figures_dir=figures_dir,
+                        page_number=1,
+                        mime_type=mime_type,
+                    )
+                    
+                    # 合并存储结果
+                    image_info["mime_type"] = storage_result["mime_type"]
+                    image_info["original_size"] = storage_result["original_size"]
+                    image_info["file_path"] = storage_result["file_path"]
+                    image_info["base64_data"] = storage_result["base64_data"]
+                    image_info["thumbnail_base64"] = storage_result.get("thumbnail_base64")
+                    image_info["storage_type"] = storage_result.get("storage_type")
+                    
+                    # 更新尺寸（如果从图片数据中获取到）
+                    if storage_result["width"]:
+                        image_info["width"] = storage_result["width"]
+                    if storage_result["height"]:
+                        image_info["height"] = storage_result["height"]
+                else:
+                    image_info["mime_type"] = mime_type
+                
                 # 清理 src 字段，避免数据重复
                 image_info["src"] = None
             

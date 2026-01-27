@@ -20,6 +20,7 @@ import httpx
 
 from .base_loader import BaseLoader
 from ...models.loading_result import ExtractionQuality
+from ...utils.image_storage import get_image_storage_manager, ImageStorageManager
 
 logger = logging.getLogger(__name__)
 
@@ -132,34 +133,24 @@ class DoclingServeLoader(BaseLoader):
     
     def extract_text(self, file_path: str) -> Dict[str, Any]:
         """
-        解析文档（使用异步 API + 轮询）
+        解析文档（仅提交异步任务，不内部轮询）
         
-        内部使用异步端点 /v1/convert/file/async 提交任务，
-        然后轮询状态直到完成，最后获取结果。
+        重要变更：此方法不再内部轮询等待结果，而是提交任务后立即返回。
+        对于需要获取结果的场景，应使用异步加载流程：
+        1. submit_async_convert() 提交任务
+        2. poll_task_status_async() 异步轮询状态
+        3. get_task_result_async() 异步获取结果
         
-        优点：
-        1. 不会因单个大文件阻塞服务器
-        2. 可追踪处理进度
-        3. 超时控制更精确
+        此同步方法仅用于兼容旧的调用方式，但会标记为 async_mode=True，
+        让上层调用者知道需要通过异步流程完成处理。
         
         Args:
             file_path: 文件路径
         
         Returns:
-            Dict: 符合项目规范的解析结果
-                - success: bool
-                - loader: str
-                - full_text: str
-                - pages: List[Dict]
-                - total_pages: int
-                - total_chars: int
-                - metadata: Dict
-                - tables: List[Dict] (可选)
-                - images: List[Dict] (可选)
-                - error: str (失败时)
+            Dict: 包含 async_mode=True 和 task_id 的结果，
+                  上层应通过异步流程继续处理
         """
-        import time
-        
         path = Path(file_path)
         
         # 验证文件
@@ -178,7 +169,7 @@ class DoclingServeLoader(BaseLoader):
                 "error": f"不支持的文件格式: {path.suffix}"
             }
         
-        # 1. 提交异步任务
+        # 提交异步任务
         logger.info(f"[Docling] 提交异步任务: {path.name}")
         submit_result = self.submit_async_convert(file_path)
         
@@ -197,55 +188,20 @@ class DoclingServeLoader(BaseLoader):
                 "error": "未获取到任务 ID"
             }
         
-        # 2. 轮询等待完成
-        poll_interval = 1.0  # 初始轮询间隔（秒）
-        max_poll_interval = 5.0  # 最大轮询间隔
-        total_wait_time = 0
-        max_wait_time = self.timeout  # 使用配置的超时时间
+        # 返回异步任务信息，不再内部轮询
+        # 上层调用者应通过异步流程获取结果
+        logger.info(f"[Docling] 异步任务已提交: task_id={task_id}, file={path.name}")
         
-        logger.info(f"[Docling] 开始轮询任务状态: task_id={task_id}")
-        
-        while total_wait_time < max_wait_time:
-            time.sleep(poll_interval)
-            total_wait_time += poll_interval
-            
-            status_result = self.poll_task_status(task_id)
-            
-            if not status_result.get("success"):
-                # 轮询失败，继续尝试
-                logger.warning(f"[Docling] 轮询失败: {status_result.get('error')}")
-                continue
-            
-            status = status_result.get("status")
-            progress = status_result.get("progress", 0)
-            
-            if status == "success":
-                logger.info(f"[Docling] 任务完成: task_id={task_id}, 耗时={total_wait_time:.1f}s")
-                break
-            elif status == "failure":
-                error_msg = status_result.get("error", "任务处理失败")
-                logger.error(f"[Docling] 任务失败: {error_msg}")
-                return {
-                    "success": False,
-                    "loader": self.name,
-                    "error": error_msg
-                }
-            else:
-                # pending/started，继续等待
-                logger.debug(f"[Docling] 任务进行中: status={status}, progress={progress}%, 已等待={total_wait_time:.1f}s")
-                # 渐进式增加轮询间隔
-                poll_interval = min(poll_interval * 1.2, max_poll_interval)
-        else:
-            # 超时
-            logger.error(f"[Docling] 任务超时: task_id={task_id}, 等待={total_wait_time:.1f}s")
-            return {
-                "success": False,
-                "loader": self.name,
-                "error": f"任务超时（等待 {total_wait_time:.0f}s）"
-            }
-        
-        # 3. 获取结果
-        return self.get_task_result(task_id, path.name, file_format)
+        return {
+            "success": True,
+            "async_mode": True,  # 标记为异步模式，上层需要继续处理
+            "task_id": task_id,
+            "status": "pending",
+            "loader": self.name,
+            "file_path": file_path,
+            "file_format": file_format,
+            "filename": path.name
+        }
     
     def _extract_sheet_info(self, doc: Dict[str, Any], md_content: str) -> Tuple[List[str], int]:
         """
@@ -437,7 +393,8 @@ class DoclingServeLoader(BaseLoader):
         self,
         response: Dict[str, Any],
         filename: str,
-        file_format: str
+        file_format: str,
+        figures_dir: Optional[Path] = None
     ) -> Dict[str, Any]:
         """
         解析 Docling Serve 响应，转换为项目标准格式
@@ -451,23 +408,29 @@ class DoclingServeLoader(BaseLoader):
             Dict: 标准化的解析结果
         """
         try:
-            # 调试日志：打印响应结构的顶层 keys（仅对 Excel 文件）
-            if file_format in ('xlsx', 'xls'):
-                logger.info(f"[Excel Debug] Response top-level keys: {list(response.keys())}")
+            # 调试日志：打印响应结构的顶层 keys
+            logger.info(f"[DEBUG] _parse_response called: filename={filename}, format={file_format}, response_keys={list(response.keys())}")
             
             # 获取文档结果
             documents = response.get("document", [])
             if not documents:
                 documents = response.get("documents", [])
             
+            logger.info(f"[DEBUG] documents type={type(documents).__name__}, is_empty={not documents}")
+            
             if isinstance(documents, dict):
                 documents = [documents]
             
+            logger.info(f"[DEBUG] After conversion: documents count={len(documents)}, first doc keys={list(documents[0].keys()) if documents else 'N/A'}")
+            
             if not documents:
+                # 检查是否有错误详情
+                detail = response.get("detail", "")
+                logger.error(f"[Docling] 响应中没有文档内容: filename={filename}, detail={detail}, keys={list(response.keys())}")
                 return {
                     "success": False,
                     "loader": self.name,
-                    "error": "响应中没有文档内容"
+                    "error": f"响应中没有文档内容: {detail}" if detail else "响应中没有文档内容"
                 }
             
             # 调试日志：打印文档对象的 keys（仅对 Excel 文件）
@@ -569,21 +532,28 @@ class DoclingServeLoader(BaseLoader):
             
             # 组合完整文本
             full_text = '\n\n'.join(all_text_parts)
+            logger.info(f"[DEBUG] After text extraction: full_text length={len(full_text)}, pages={len(all_pages)}, tables={len(all_tables)}, images={len(all_images)}")
             
             # 从 Markdown 中提取图片信息（如果 Docling API 没有返回 figures）
             if not all_images:
-                all_images = self._extract_images_from_markdown(full_text)
+                logger.info(f"[DEBUG] Extracting images from markdown (text length={len(full_text)})...")
+                all_images = self._extract_images_from_markdown(full_text, figures_dir)
+                logger.info(f"[DEBUG] Image extraction done, found {len(all_images)} images")
                 if all_images:
                     logger.info(f"从 Markdown 中提取到 {len(all_images)} 张图片")
             
             # 关键：将内联 base64 图片转换为占位符格式
             # 目的：避免超长 base64 字符串干扰语义分块和消耗 token
             if all_images:
+                logger.info(f"[DEBUG] Converting inline images to placeholders...")
                 original_len = len(full_text)
                 full_text = self._convert_inline_images_to_placeholders(full_text, all_images)
                 reduced_chars = original_len - len(full_text)
+                logger.info(f"[DEBUG] Placeholder conversion done")
                 if reduced_chars > 0:
                     logger.info(f"[图片占位符转换] 减少 {reduced_chars} 字符 ({reduced_chars / original_len * 100:.1f}%)")
+            
+            logger.info(f"[DEBUG] Building result structure...")
             
             total_chars = len(full_text)
             
@@ -645,6 +615,7 @@ class DoclingServeLoader(BaseLoader):
             if structured_text:
                 result["structured_text"] = structured_text
             
+            logger.info(f"[DEBUG] _parse_response completed successfully: total_pages={result['total_pages']}, total_chars={result['total_chars']}")
             return result
             
         except Exception as e:
@@ -655,99 +626,166 @@ class DoclingServeLoader(BaseLoader):
                 "error": f"解析响应失败: {e}"
             }
     
-    def _extract_images_from_markdown(self, md_content: str) -> List[Dict[str, Any]]:
+    def _extract_images_from_markdown(
+        self, 
+        md_content: str,
+        figures_dir: Optional[Path] = None
+    ) -> List[Dict[str, Any]]:
         """
-        从 Markdown 内容中提取图片信息
+        从 Markdown 内容中提取图片信息（高性能优化版本）
         
-        Docling 生成的 Markdown 中图片格式为: ![alt](src)
-        对于无法获取的图片，Docling 会生成: <!-- 🖼️❌ Image not available ... -->
+        业内最佳实践：
+        1. 使用字符串查找替代正则（避免超长 base64 的正则性能问题）
+        2. 大图保存为文件，小图保留 base64（混合存储策略）
+        3. 生成缩略图用于预览
         
         Args:
             md_content: Markdown 文本内容
+            figures_dir: 图片保存目录（可选，用于大图存储）
         
         Returns:
             List[Dict]: 图片信息列表
         """
-        import re
         images = []
         
-        # 匹配 Markdown 图片语法: ![alt](src) 或 ![alt](src "title")
-        img_pattern = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)')
+        # 使用公共图片存储管理器
+        storage_manager = get_image_storage_manager()
         
-        for idx, match in enumerate(img_pattern.finditer(md_content)):
-            alt_text = match.group(1) or f'图片{idx + 1}'
-            src = match.group(2)
-            title = match.group(3)
+        # 使用字符串查找，避免正则性能问题
+        search_pos = 0
+        img_index = 0
+        
+        while True:
+            # 查找 ![
+            img_start = md_content.find('![', search_pos)
+            if img_start == -1:
+                break
             
-            # 获取图片上下文（前后各100字符）
-            start_pos = match.start()
-            end_pos = match.end()
+            # 查找 ](
+            bracket_pos = md_content.find('](', img_start)
+            if bracket_pos == -1 or bracket_pos > img_start + 500:  # alt 文本限制 500 字符
+                search_pos = img_start + 2
+                continue
             
-            context_before = md_content[max(0, start_pos - 100):start_pos].strip()
+            # 提取 alt 文本
+            alt_text = md_content[img_start + 2:bracket_pos]
+            
+            # 查找结束的 )，需要处理嵌套括号
+            paren_count = 1
+            end_pos = bracket_pos + 2
+            while end_pos < len(md_content) and paren_count > 0:
+                if md_content[end_pos] == '(':
+                    paren_count += 1
+                elif md_content[end_pos] == ')':
+                    paren_count -= 1
+                end_pos += 1
+            
+            if paren_count != 0:
+                search_pos = bracket_pos + 2
+                continue
+            
+            # 提取 src
+            src = md_content[bracket_pos + 2:end_pos - 1]
+            
+            # 判断是否为 base64 图片
+            is_base64 = src.startswith('data:image/')
+            
+            # 获取图片上下文（前后各 100 字符）
+            context_before = md_content[max(0, img_start - 100):img_start].strip()
             context_after = md_content[end_pos:min(len(md_content), end_pos + 100)].strip()
-            
-            # 清理上下文中的换行
             context_before = ' '.join(context_before.split())
             context_after = ' '.join(context_after.split())
             
-            # 检测图片类型
-            image_type = self._detect_image_mime_type(src)
-            
-            # 检查是否为 base64
-            is_base64 = src.startswith('data:') if src else False
-            
             image_info = {
                 "page_number": 1,
-                "image_index": len(images),
-                "src": src,
-                "alt_text": alt_text,
-                "title": title,
-                "caption": title or alt_text,
-                "mime_type": image_type,
+                "image_index": img_index,
+                "alt_text": alt_text or f'图片{img_index + 1}',
                 "is_base64": is_base64,
+                "extracted_from": "markdown",
                 "context_before": context_before if context_before else None,
-                "context_after": context_after if context_after else None
+                "context_after": context_after if context_after else None,
             }
             
-            # 如果是 base64，提取纯数据部分（去掉 data:image/xxx;base64, 前缀）
             if is_base64:
-                # 分离 data URL 的 header 和数据部分
-                if ',' in src:
-                    image_info["base64_data"] = src.split(',', 1)[1]
-                else:
-                    image_info["base64_data"] = src
+                # 解析 base64 数据
+                try:
+                    # 分离 mime type 和数据
+                    if ',' in src:
+                        header, raw_base64_data = src.split(',', 1)
+                    else:
+                        header, raw_base64_data = '', src
+                    
+                    mime_type = header.split(';')[0].replace('data:', '') if header else 'image/png'
+                    
+                    # 使用公共存储策略处理图片
+                    storage_result = storage_manager.process_base64_image(
+                        base64_data=raw_base64_data,
+                        image_index=img_index,
+                        figures_dir=figures_dir,
+                        page_number=1,
+                        mime_type=mime_type,
+                    )
+                    
+                    # 合并存储结果到 image_info
+                    image_info["mime_type"] = storage_result["mime_type"]
+                    image_info["original_size"] = storage_result["original_size"]
+                    image_info["file_path"] = storage_result["file_path"]
+                    image_info["base64_data"] = storage_result["base64_data"]
+                    image_info["thumbnail_base64"] = storage_result.get("thumbnail_base64")
+                    image_info["width"] = storage_result["width"]
+                    image_info["height"] = storage_result["height"]
+                    
+                    if storage_result.get("error"):
+                        image_info["error"] = storage_result["error"]
+                        
+                except Exception as e:
+                    logger.warning(f"处理 base64 图片失败: {e}")
+                    image_info["error"] = str(e)
+                    image_info["base64_data"] = None
+            else:
+                # 普通 URL 图片
+                image_info["src"] = src
+                image_info["file_path"] = None
+                image_info["base64_data"] = None
+                image_info["mime_type"] = self._detect_image_mime_type(src)
             
             images.append(image_info)
+            img_index += 1
+            search_pos = end_pos
         
-        # 同时匹配 Docling 的图片占位符注释: <!-- 🖼️❌ Image not available ... -->
-        # 这表示 Docling 检测到了图片但无法提取
-        placeholder_pattern = re.compile(
-            r'([^\n]*)\n*<!-- 🖼️❌ Image not available[^>]*-->',
-            re.MULTILINE
-        )
+        # 匹配 Docling 的图片占位符注释: <!-- 🖼️❌ Image not available ... -->
+        placeholder_search_pos = 0
+        placeholder_marker = '<!-- 🖼️❌ Image not available'
         
-        for match in placeholder_pattern.finditer(md_content):
+        while True:
+            marker_pos = md_content.find(placeholder_marker, placeholder_search_pos)
+            if marker_pos == -1:
+                break
+            
+            # 找到注释结束位置
+            end_marker = md_content.find('-->', marker_pos)
+            if end_marker == -1:
+                placeholder_search_pos = marker_pos + len(placeholder_marker)
+                continue
+            
+            end_pos = end_marker + 3
+            
             # 获取占位符前面的文本作为 alt_text
-            preceding_text = match.group(1).strip()
+            line_start = md_content.rfind('\n', 0, marker_pos)
+            line_start = line_start + 1 if line_start != -1 else 0
+            preceding_text = md_content[line_start:marker_pos].strip()
             
             # 获取上下文
-            start_pos = match.start()
-            end_pos = match.end()
-            
-            context_before = md_content[max(0, start_pos - 150):start_pos].strip()
+            context_before = md_content[max(0, line_start - 150):line_start].strip()
             context_after = md_content[end_pos:min(len(md_content), end_pos + 150)].strip()
-            
-            # 清理上下文
             context_before = ' '.join(context_before.split())
             context_after = ' '.join(context_after.split())
             
-            # 从上下文中提取更多信息
             image_info = {
                 "page_number": 1,
-                "image_index": len(images),
-                "src": None,  # Docling 无法获取图片URL
-                "alt_text": preceding_text if preceding_text else f'图片{len(images) + 1}',
-                "title": None,
+                "image_index": img_index,
+                "src": None,
+                "alt_text": preceding_text if preceding_text else f'图片{img_index + 1}',
                 "caption": preceding_text,
                 "mime_type": None,
                 "is_base64": False,
@@ -757,6 +795,11 @@ class DoclingServeLoader(BaseLoader):
             }
             
             images.append(image_info)
+            img_index += 1
+            placeholder_search_pos = end_pos
+        
+        if images:
+            logger.info(f"[图片提取] 共提取 {len(images)} 张图片")
         
         return images
     
@@ -766,7 +809,7 @@ class DoclingServeLoader(BaseLoader):
         images: List[Dict[str, Any]]
     ) -> str:
         """
-        将 Markdown 中的内联 base64 图片转换为占位符格式
+        将 Markdown 中的内联图片转换为占位符格式（高性能优化版本）
         
         目的：
         1. 避免超长 base64 字符串干扰语义分块
@@ -784,46 +827,86 @@ class DoclingServeLoader(BaseLoader):
         Returns:
             str: 转换后的文本（图片位置用占位符替代）
         """
-        import re
-        
         if not images:
             return md_content
         
         result = md_content
+        replacements = []  # (start, end, placeholder, alt_text)
         
-        # 匹配所有 Markdown 图片（包括 base64 和普通 URL）
-        # 使用非贪婪匹配来处理超长的 base64 字符串
-        img_pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
+        # 使用字符串查找替代正则，避免性能问题
+        search_pos = 0
+        img_idx = 0
         
-        # 找出所有匹配项并从后往前替换（避免位置偏移）
-        matches = list(img_pattern.finditer(md_content))
-        
-        for idx, match in enumerate(reversed(matches)):
-            img_idx = len(matches) - 1 - idx
-            alt_text = match.group(1) or f'图片{img_idx + 1}'
+        while True:
+            # 查找 ![
+            img_start = result.find('![', search_pos)
+            if img_start == -1:
+                break
             
-            # 构建占位符: [IMAGE_N: 描述]
-            placeholder = f"[IMAGE_{img_idx + 1}: {alt_text}]"
+            # 查找 ](
+            bracket_pos = result.find('](', img_start)
+            if bracket_pos == -1 or bracket_pos > img_start + 500:
+                search_pos = img_start + 2
+                continue
             
-            # 替换原始图片标签
-            result = result[:match.start()] + placeholder + result[match.end():]
-        
-        # 同时处理 Docling 的无效图片占位符: <!-- 🖼️❌ Image not available ... -->
-        placeholder_pattern = re.compile(
-            r'([^\n]*)\n*<!-- 🖼️❌ Image not available[^>]*-->',
-            re.MULTILINE
-        )
-        placeholder_matches = list(placeholder_pattern.finditer(result))
-        
-        # 占位符图片的索引从 Markdown 图片之后开始
-        start_idx = len(matches)
-        
-        for idx, match in enumerate(reversed(placeholder_matches)):
-            img_idx = start_idx + len(placeholder_matches) - 1 - idx
-            alt_text = match.group(1).strip() or f'图片{img_idx + 1}'
+            # 提取 alt 文本
+            alt_text = result[img_start + 2:bracket_pos]
             
-            placeholder = f"[IMAGE_{img_idx + 1}: {alt_text}]"
-            result = result[:match.start()] + placeholder + result[match.end():]
+            # 查找结束的 )，处理嵌套括号
+            paren_count = 1
+            end_pos = bracket_pos + 2
+            while end_pos < len(result) and paren_count > 0:
+                if result[end_pos] == '(':
+                    paren_count += 1
+                elif result[end_pos] == ')':
+                    paren_count -= 1
+                end_pos += 1
+            
+            if paren_count != 0:
+                search_pos = bracket_pos + 2
+                continue
+            
+            img_idx += 1
+            placeholder = f"[IMAGE_{img_idx}: {alt_text or '图片'}]"
+            replacements.append((img_start, end_pos, placeholder))
+            search_pos = end_pos
+        
+        # 处理 Docling 的无效图片占位符: <!-- 🖼️❌ Image not available ... -->
+        placeholder_marker = '<!-- 🖼️❌ Image not available'
+        placeholder_search_pos = 0
+        
+        while True:
+            marker_pos = result.find(placeholder_marker, placeholder_search_pos)
+            if marker_pos == -1:
+                break
+            
+            end_marker = result.find('-->', marker_pos)
+            if end_marker == -1:
+                placeholder_search_pos = marker_pos + len(placeholder_marker)
+                continue
+            
+            end_pos = end_marker + 3
+            
+            # 获取前面一行的文本作为 alt
+            line_start = result.rfind('\n', 0, marker_pos)
+            if line_start == -1:
+                line_start = 0
+            else:
+                line_start += 1
+            
+            preceding_text = result[line_start:marker_pos].strip()
+            
+            img_idx += 1
+            placeholder = f"[IMAGE_{img_idx}: {preceding_text or '图片'}]"
+            
+            # 替换整行（包括前面的文本）
+            replacements.append((line_start, end_pos, placeholder))
+            placeholder_search_pos = end_pos
+        
+        # 从后往前替换（避免位置偏移）
+        replacements.sort(key=lambda x: x[0], reverse=True)
+        for start, end, placeholder in replacements:
+            result = result[:start] + placeholder + result[end:]
         
         return result
 
@@ -967,12 +1050,210 @@ class DoclingServeLoader(BaseLoader):
     
     # ==================== 异步 API 方法 ====================
     
+    async def poll_task_status_async(self, task_id: str) -> Dict[str, Any]:
+        """
+        异步轮询任务状态（使用 httpx.AsyncClient，不阻塞事件循环）
+        
+        此方法是核心的异步实现，避免阻塞 FastAPI 事件循环。
+        
+        Args:
+            task_id: Docling Serve 返回的任务 ID
+        
+        Returns:
+            Dict: {
+                "success": bool,
+                "status": str,     # pending/started/success/failure
+                "progress": int,   # 0-100
+                "error": str       # 失败时的错误信息
+            }
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                headers = {}
+                if self.api_key:
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+                
+                response = await client.get(
+                    f"{self.base_url}/v1/status/poll/{task_id}",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    task_status = result.get("task_status") or result.get("status", "pending")
+                    progress = result.get("progress", 0)
+                    
+                    # 映射状态
+                    status_map = {
+                        "pending": "pending",
+                        "started": "started",
+                        "running": "started",
+                        "success": "success",
+                        "completed": "success",
+                        "failure": "failure",
+                        "failed": "failure",
+                        "error": "failure"
+                    }
+                    normalized_status = status_map.get(task_status.lower(), task_status)
+                    
+                    # 如果任务成功但没有进度信息，设为 100%
+                    if normalized_status == "success" and progress == 0:
+                        progress = 100
+                    
+                    return {
+                        "success": True,
+                        "status": normalized_status,
+                        "progress": progress,
+                        "raw_response": result
+                    }
+                elif response.status_code == 404:
+                    return {
+                        "success": False,
+                        "status": "failure",
+                        "error": f"任务不存在: {task_id}"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "status": "failure",
+                        "error": f"HTTP {response.status_code}: {response.text}"
+                    }
+                    
+        except httpx.TimeoutException:
+            logger.warning(f"[Docling] 异步轮询超时: task_id={task_id}")
+            return {
+                "success": False,
+                "error": "请求超时"
+            }
+        except Exception as e:
+            logger.error(f"[Docling] 异步轮询异常: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def get_task_result_async(
+        self,
+        task_id: str,
+        filename: Optional[str] = None,
+        file_format: Optional[str] = None,
+        max_retries: int = 5,
+        retry_delay: float = 1.0,
+        figures_dir: Optional[Path] = None
+    ) -> Dict[str, Any]:
+        """
+        异步获取任务结果（使用 httpx.AsyncClient，不阻塞事件循环）
+        
+        任务完成后调用此方法获取解析结果。包含重试机制以处理结果写入延迟。
+        
+        Args:
+            task_id: Docling Serve 返回的任务 ID
+            filename: 原始文件名（用于元数据）
+            file_format: 文件格式（如 xlsx、pdf 等）
+            max_retries: 最大重试次数（默认 5 次）
+            retry_delay: 重试间隔秒数（默认 1 秒）
+        
+        Returns:
+            Dict: 符合项目规范的解析结果
+        """
+        import asyncio
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"[DEBUG] get_task_result_async attempt {attempt + 1}/{max_retries} for task_id={task_id}")
+                timeout_config = httpx.Timeout(
+                    connect=10.0,
+                    read=float(self.timeout),
+                    write=float(self.timeout),
+                    pool=float(self.timeout)
+                )
+                async with httpx.AsyncClient(timeout=timeout_config) as client:
+                    headers = {}
+                    if self.api_key:
+                        headers["Authorization"] = f"Bearer {self.api_key}"
+                    
+                    response = await client.get(
+                        f"{self.base_url}/v1/result/{task_id}",
+                        headers=headers
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        logger.info(f"[DEBUG] Got response 200, result keys: {list(result.keys())[:10]}")
+                        
+                        # 检查是否真的有结果（处理竞态条件）
+                        if "detail" in result and "document" not in result:
+                            detail_msg = result.get("detail", "")
+                            if "not found" in detail_msg.lower() or "wait" in detail_msg.lower():
+                                # 结果还没准备好，重试
+                                if attempt < max_retries - 1:
+                                    logger.info(f"[Docling] 结果未就绪，等待重试 ({attempt + 1}/{max_retries}): {detail_msg}")
+                                    await asyncio.sleep(retry_delay)
+                                    continue
+                                else:
+                                    logger.warning(f"[Docling] 重试 {max_retries} 次后结果仍未就绪: {detail_msg}")
+                                    return {
+                                        "success": False,
+                                        "loader": self.name,
+                                        "error": f"结果获取超时: {detail_msg}"
+                                    }
+                        
+                        # 复用现有的响应解析逻辑
+                        actual_filename = filename or f"task_{task_id}"
+                        actual_format = file_format or "unknown"
+                        logger.info(f"[DEBUG] Calling _parse_response for {actual_filename}, format={actual_format}, figures_dir={figures_dir}")
+                        parse_result = self._parse_response(result, actual_filename, actual_format, figures_dir)
+                        logger.info(f"[DEBUG] _parse_response returned: success={parse_result.get('success')}, error={parse_result.get('error')}")
+                        return parse_result
+                    elif response.status_code == 404:
+                        # 404 也可能是暂时的，重试
+                        if attempt < max_retries - 1:
+                            logger.info(f"[Docling] 结果 404，等待重试 ({attempt + 1}/{max_retries})")
+                            await asyncio.sleep(retry_delay)
+                            continue
+                        return {
+                            "success": False,
+                            "loader": self.name,
+                            "error": f"任务结果不存在: {task_id}"
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "loader": self.name,
+                            "error": f"HTTP {response.status_code}: {response.text}"
+                        }
+                        
+            except httpx.TimeoutException:
+                logger.warning(f"[Docling] 获取结果超时: task_id={task_id}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+                return {
+                    "success": False,
+                    "loader": self.name,
+                    "error": "获取结果超时"
+                }
+            except Exception as e:
+                logger.error(f"[Docling] 获取结果异常: {e}", exc_info=True)
+                return {
+                    "success": False,
+                    "loader": self.name,
+                    "error": str(e)
+                }
+        
+        # 不应该到达这里，但作为安全措施
+        return {
+            "success": False,
+            "loader": self.name,
+            "error": f"获取结果失败，重试 {max_retries} 次"
+        }
+
     def submit_async_convert(self, file_path: str) -> Dict[str, Any]:
         """
-        提交异步转换任务
+        提交异步转换任务（同步版本，仅用于兼容）
         
-        使用 Docling Serve 的异步 API，立即返回 task_id，
-        后续通过 poll_task_status 查询状态。
+        注意：此同步方法会在 ThreadPoolExecutor 中调用，可能阻塞线程池。
+        推荐使用 submit_async_convert_async() 异步版本。
         
         Args:
             file_path: 文件路径
@@ -980,40 +1261,28 @@ class DoclingServeLoader(BaseLoader):
         Returns:
             Dict: {
                 "success": bool,
-                "task_id": str,  # Docling Serve 返回的任务 ID
-                "status": str,   # pending/started
-                "error": str     # 失败时的错误信息
+                "task_id": str,
+                "status": str,
+                "error": str
             }
         """
         path = Path(file_path)
         
-        # 验证文件
         if not path.exists():
-            return {
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }
+            return {"success": False, "error": f"文件不存在: {file_path}"}
         
         file_format = path.suffix.lstrip('.').lower()
         if file_format not in self.SUPPORTED_FORMATS:
-            return {
-                "success": False,
-                "error": f"不支持的文件格式: {path.suffix}"
-            }
+            return {"success": False, "error": f"不支持的文件格式: {path.suffix}"}
         
         try:
-            # 使用 multipart/form-data 上传文件
-            # 对 Excel 文件额外请求 JSON 格式以获取 Sheet 名称等元数据
             is_excel = file_format in ('xlsx', 'xls')
             
             with open(file_path, 'rb') as f:
                 files = {"files": (path.name, f, self._get_mime_type(file_format))}
-                
-                # 构建 data 字典
-                # 对于需要传递多个值的字段（如 to_formats），使用列表
                 data = {
                     "do_ocr": "true",
-                    "force_ocr": "false",  # 不强制 OCR，让 Docling 自动判断
+                    "force_ocr": "true",  # 强制 OCR，确保扫描件/图片PDF被正确识别
                     "ocr_engine": "rapidocr",
                     "ocr_lang": "ch_sim,en",
                     "table_mode": "accurate",
@@ -1023,12 +1292,8 @@ class DoclingServeLoader(BaseLoader):
                     "to_formats": ["md", "json"] if is_excel else ["md"],
                 }
                 
-                timeout_config = httpx.Timeout(
-                    connect=10.0,
-                    read=self.timeout,
-                    write=self.timeout,
-                    pool=self.timeout
-                )
+                # 使用较短的超时，只是提交任务
+                timeout_config = httpx.Timeout(connect=10.0, read=30.0, write=60.0, pool=10.0)
                 with httpx.Client(timeout=timeout_config) as client:
                     response = client.post(
                         f"{self.base_url}/v1/convert/file/async",
@@ -1041,28 +1306,90 @@ class DoclingServeLoader(BaseLoader):
                         result = response.json()
                         task_id = result.get("task_id") or result.get("id")
                         task_status = result.get("task_status") or result.get("status", "pending")
-                        
                         logger.info(f"异步任务已提交: task_id={task_id}, status={task_status}")
-                        
-                        return {
-                            "success": True,
-                            "task_id": task_id,
-                            "status": task_status
-                        }
+                        return {"success": True, "task_id": task_id, "status": task_status}
                     else:
                         error_msg = f"HTTP {response.status_code}: {response.text}"
                         logger.error(f"提交异步任务失败: {error_msg}")
-                        return {
-                            "success": False,
-                            "error": error_msg
-                        }
+                        return {"success": False, "error": error_msg}
                         
         except Exception as e:
             logger.error(f"提交异步任务异常: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
+            return {"success": False, "error": str(e)}
+    
+    async def submit_async_convert_async(self, file_path: str) -> Dict[str, Any]:
+        """
+        异步提交转换任务（推荐使用）
+        
+        使用异步 HTTP 客户端，不阻塞事件循环。
+        
+        Args:
+            file_path: 文件路径
+        
+        Returns:
+            Dict: {
+                "success": bool,
+                "task_id": str,
+                "status": str,
+                "error": str
             }
+        """
+        import aiofiles
+        
+        path = Path(file_path)
+        
+        if not path.exists():
+            return {"success": False, "error": f"文件不存在: {file_path}"}
+        
+        file_format = path.suffix.lstrip('.').lower()
+        if file_format not in self.SUPPORTED_FORMATS:
+            return {"success": False, "error": f"不支持的文件格式: {path.suffix}"}
+        
+        try:
+            is_excel = file_format in ('xlsx', 'xls')
+            
+            # 异步读取文件
+            async with aiofiles.open(file_path, 'rb') as f:
+                file_content = await f.read()
+            
+            # 构建 multipart 数据
+            files = {"files": (path.name, file_content, self._get_mime_type(file_format))}
+            data = {
+                "do_ocr": "true",
+                "force_ocr": "true",  # 强制 OCR，确保扫描件/图片PDF被正确识别
+                "ocr_engine": "rapidocr",
+                "ocr_lang": "ch_sim,en",
+                "table_mode": "accurate",
+                "include_images": "true",
+                "images_scale": "2.0",
+                "image_export_mode": "embedded",
+                "to_formats": ["md", "json"] if is_excel else ["md"],
+            }
+            
+            # 使用异步 HTTP 客户端
+            timeout_config = httpx.Timeout(connect=10.0, read=30.0, write=60.0, pool=10.0)
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/convert/file/async",
+                    files=files,
+                    data=data,
+                    headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+                )
+                
+                if response.status_code in (200, 202):
+                    result = response.json()
+                    task_id = result.get("task_id") or result.get("id")
+                    task_status = result.get("task_status") or result.get("status", "pending")
+                    logger.info(f"[Async] 异步任务已提交: task_id={task_id}, status={task_status}")
+                    return {"success": True, "task_id": task_id, "status": task_status}
+                else:
+                    error_msg = f"HTTP {response.status_code}: {response.text}"
+                    logger.error(f"[Async] 提交异步任务失败: {error_msg}")
+                    return {"success": False, "error": error_msg}
+                    
+        except Exception as e:
+            logger.error(f"[Async] 提交异步任务异常: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
     
     def poll_task_status(self, task_id: str) -> Dict[str, Any]:
         """
@@ -1147,7 +1474,8 @@ class DoclingServeLoader(BaseLoader):
         self,
         task_id: str,
         filename: Optional[str] = None,
-        file_format: Optional[str] = None
+        file_format: Optional[str] = None,
+        figures_dir: Optional[Path] = None
     ) -> Dict[str, Any]:
         """
         获取异步任务结果
@@ -1158,6 +1486,7 @@ class DoclingServeLoader(BaseLoader):
             task_id: Docling Serve 返回的任务 ID
             filename: 原始文件名（用于元数据）
             file_format: 文件格式（如 xlsx、pdf 等，用于格式特定的元数据提取）
+            figures_dir: 图片保存目录（可选，用于大图存储）
         
         Returns:
             Dict: 符合项目规范的解析结果（与 extract_text 返回格式一致）
@@ -1180,7 +1509,7 @@ class DoclingServeLoader(BaseLoader):
                     # 复用现有的响应解析逻辑
                     actual_filename = filename or f"task_{task_id}"
                     actual_format = file_format or "unknown"
-                    return self._parse_response(result, actual_filename, actual_format)
+                    return self._parse_response(result, actual_filename, actual_format, figures_dir)
                 elif response.status_code == 404:
                     return {
                         "success": False,

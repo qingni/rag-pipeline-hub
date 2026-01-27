@@ -19,8 +19,21 @@
     
     <!-- 文档加载失败 -->
     <div v-else-if="previewStatus === 'error'" class="status-card error">
-      <t-icon name="error-circle" size="48px" class="status-icon" />
-      <p class="status-message">{{ statusMessage }}</p>
+      <div class="error-content">
+        <t-icon name="close-circle-filled" size="32px" class="error-icon" />
+        <span class="error-text">{{ statusMessage || '加载失败' }}</span>
+        <t-button 
+          theme="default" 
+          variant="text"
+          size="small"
+          class="retry-btn"
+          :loading="retrying"
+          @click="handleRetry"
+        >
+          <t-icon name="refresh" size="14px" />
+          重试
+        </t-button>
+      </div>
     </div>
     
     <!-- 正常预览 -->
@@ -89,9 +102,12 @@ const props = defineProps({
   }
 })
 
+const emit = defineEmits(['retry'])
+
 const documentStore = useDocumentStore()
 
 const loading = ref(false)
+const retrying = ref(false)
 const previewText = ref('')
 const pageCount = ref(0)
 const previewStatus = ref('')
@@ -174,6 +190,28 @@ async function loadPreview() {
     loading.value = false
   }
 }
+
+// 重试加载文档
+async function handleRetry() {
+  if (!props.documentId) return
+  
+  retrying.value = true
+  
+  try {
+    // 触发重试事件，让父组件重新加载文档
+    emit('retry', props.documentId)
+  } finally {
+    // 延迟关闭加载状态，让父组件有时间处理
+    setTimeout(() => {
+      retrying.value = false
+    }, 1000)
+  }
+}
+
+// 暴露刷新方法给父组件
+defineExpose({
+  refresh: loadPreview
+})
 </script>
 
 <style scoped>
@@ -286,10 +324,32 @@ async function loadPreview() {
 
 .status-card.error {
   background-color: #fef2f2;
+  padding: 24px;
 }
 
-.status-card.error .status-icon {
-  color: #ef4444;
+.error-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.error-icon {
+  color: #f87171;
+  flex-shrink: 0;
+}
+
+.error-text {
+  color: #dc2626;
+  font-size: 14px;
+}
+
+.retry-btn {
+  color: #6b7280;
+  margin-left: 4px;
+}
+
+.retry-btn:hover {
+  color: #3b82f6;
 }
 
 .status-icon {
@@ -315,4 +375,5 @@ async function loadPreview() {
   text-align: center;
   margin: 0;
 }
+
 </style>

@@ -132,7 +132,7 @@ async def load_document_async(
     """
     validate_document_id(request.document_id)
     
-    result = loading_service.submit_async_load(
+    result = await loading_service.submit_async_load(
         db=db,
         document_id=request.document_id,
         loader_type=request.loader_type
