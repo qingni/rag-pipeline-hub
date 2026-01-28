@@ -79,23 +79,52 @@ class JSONLoader:
             }
     
     def _extract_text_content(self, data: Any, prefix: str = "") -> str:
-        """Recursively extract text content from JSON structure."""
+        """
+        Recursively extract text content from JSON structure with full path preservation.
+        
+        Args:
+            data: JSON data (dict, list, or primitive)
+            prefix: Current path prefix (e.g., "mainCharacter.abilities")
+            
+        Returns:
+            Formatted text with hierarchical paths
+        """
         text_parts = []
         
         if isinstance(data, dict):
             for key, value in data.items():
+                current_path = f"{prefix}{key}" if prefix else key
+                
                 if isinstance(value, str):
-                    text_parts.append(f"{key}: {value}")
+                    text_parts.append(f"{current_path}: {value}")
+                elif isinstance(value, (int, float)):
+                    text_parts.append(f"{current_path}: {value}")
+                elif isinstance(value, bool):
+                    text_parts.append(f"{current_path}: {str(value).lower()}")
+                elif value is None:
+                    text_parts.append(f"{current_path}: null")
                 elif isinstance(value, (dict, list)):
-                    nested = self._extract_text_content(value, f"{prefix}{key}.")
+                    nested = self._extract_text_content(value, f"{current_path}.")
                     if nested:
                         text_parts.append(nested)
+                        
         elif isinstance(data, list):
             for i, item in enumerate(data):
+                current_path = f"{prefix}[{i}]" if prefix else f"[{i}]"
+                # Remove trailing dot from prefix for array indexing
+                if prefix and prefix.endswith('.'):
+                    current_path = f"{prefix[:-1]}[{i}]"
+                
                 if isinstance(item, str):
-                    text_parts.append(item)
+                    text_parts.append(f"{current_path}: {item}")
+                elif isinstance(item, (int, float)):
+                    text_parts.append(f"{current_path}: {item}")
+                elif isinstance(item, bool):
+                    text_parts.append(f"{current_path}: {str(item).lower()}")
+                elif item is None:
+                    text_parts.append(f"{current_path}: null")
                 elif isinstance(item, (dict, list)):
-                    nested = self._extract_text_content(item, f"{prefix}[{i}].")
+                    nested = self._extract_text_content(item, f"{current_path}.")
                     if nested:
                         text_parts.append(nested)
         

@@ -97,3 +97,76 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+
+# ============================================================================
+# Smart chunking parameters - re-export from smart_params module
+# ============================================================================
+
+from .smart_params import (
+    # Enums
+    DocumentLength,
+    DocumentCategory,
+    
+    # Configuration tables
+    FORMAT_BASE_PARAMS,
+    LENGTH_ADJUSTMENTS,
+    EMBEDDING_MODEL_PARAMS,
+    HYBRID_STRATEGY_PARAMS,
+    MULTIMODAL_STRATEGY_PARAMS,
+    PARENT_CHILD_STRATEGY_PARAMS,
+    HEADING_STRATEGY_PARAMS,
+    PARAGRAPH_STRATEGY_PARAMS,
+    
+    # Functions
+    get_document_length_category,
+    get_format_category,
+    get_base_text_params,
+    get_adaptive_text_params,
+    get_semantic_params,
+    get_hybrid_params,
+    get_multimodal_params,
+    get_parent_child_params,
+    get_heading_params,
+    get_paragraph_params,
+    get_character_params,
+    get_smart_params,
+    get_all_format_params,
+    get_all_embedding_params,
+)
+
+__all__ = [
+    # Settings
+    "Settings",
+    "settings",
+    
+    # Enums
+    "DocumentLength",
+    "DocumentCategory",
+    
+    # Configuration tables
+    "FORMAT_BASE_PARAMS",
+    "LENGTH_ADJUSTMENTS",
+    "EMBEDDING_MODEL_PARAMS",
+    "HYBRID_STRATEGY_PARAMS",
+    "MULTIMODAL_STRATEGY_PARAMS",
+    "PARENT_CHILD_STRATEGY_PARAMS",
+    "HEADING_STRATEGY_PARAMS",
+    "PARAGRAPH_STRATEGY_PARAMS",
+    
+    # Functions
+    "get_document_length_category",
+    "get_format_category",
+    "get_base_text_params",
+    "get_adaptive_text_params",
+    "get_semantic_params",
+    "get_hybrid_params",
+    "get_multimodal_params",
+    "get_parent_child_params",
+    "get_heading_params",
+    "get_paragraph_params",
+    "get_character_params",
+    "get_smart_params",
+    "get_all_format_params",
+    "get_all_embedding_params",
+]

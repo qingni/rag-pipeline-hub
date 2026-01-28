@@ -226,18 +226,8 @@
               >
                 提取图片（独立分块）
               </t-checkbox>
-              <!-- Image base64 sub-option with indent -->
-              <div v-if="parameters.include_images" class="sub-option">
-                <t-checkbox
-                  v-model="parameters.extract_image_base64"
-                  @change="handleParamChange"
-                >
-                  嵌入图片数据
-                </t-checkbox>
-                <div class="sub-option-tips">
-                  勾选后图片以 Base64 编码嵌入分块，可用于多模态向量化；
-                  不勾选则仅保留图片路径引用
-                </div>
+              <div v-if="parameters.include_images" class="sub-option-tips" style="padding-left: 24px;">
+                当前仅保存图片路径；向量化时若选用多模态模型，将自动加载图片内容
               </div>
               <t-checkbox
                 v-model="parameters.include_code"
@@ -526,22 +516,49 @@ const embeddingModelOptions = [
   { label: '混元 Embedding（1024维）', value: 'hunyuan-embedding' }
 ]
 
-// Get embedding model description tips
+// Get embedding model description tips with smart params
 const getEmbeddingModelTips = (model) => {
   const tips = {
-    'bge-m3': '多语言支持，速度快，适合大多数场景',
-    'qwen3-embedding-8b': '超长文本支持（32K），高维向量（4096维），适合高精度场景',
-    'hunyuan-embedding': '腾讯混元提供的 Embedding 模型'
+    'bge-m3': '多语言支持，速度快，适合大多数场景。推荐阈值: 0.55',
+    'qwen3-embedding-8b': '超长文本支持（32K），高维向量（4096维），适合高精度场景。推荐阈值: 0.45',
+    'hunyuan-embedding': '腾讯混元提供的 Embedding 模型。推荐阈值: 0.55'
   }
   return tips[model] || '选择 Embedding 模型'
 }
 
-// Default parameters for parent-child strategy
-const parentChildDefaults = {
-  parent_chunk_size: 2000,
-  child_chunk_size: 500,
-  child_overlap: 50,
-  parent_overlap: 200
+// Smart default parameters based on embedding model
+const getEmbeddingModelDefaults = (model) => {
+  const defaults = {
+    'bge-m3': { similarity_threshold: 0.55, min_chunk_size: 200, max_chunk_size: 1000 },
+    'qwen3-embedding-8b': { similarity_threshold: 0.45, min_chunk_size: 300, max_chunk_size: 1500 },
+    'hunyuan-embedding': { similarity_threshold: 0.55, min_chunk_size: 200, max_chunk_size: 1000 }
+  }
+  return defaults[model] || defaults['bge-m3']
+}
+
+// Default parameters for parent-child strategy (smart based on document length)
+const getParentChildDefaults = (charCount = 10000) => {
+  if (charCount < 2000) {
+    return {
+      parent_chunk_size: 1200,
+      child_chunk_size: 300,
+      child_overlap: 30,
+      parent_overlap: 100
+    }
+  } else if (charCount > 50000) {
+    return {
+      parent_chunk_size: 2500,
+      child_chunk_size: 500,
+      child_overlap: 75,
+      parent_overlap: 300
+    }
+  }
+  return {
+    parent_chunk_size: 2000,
+    child_chunk_size: 400,
+    child_overlap: 50,
+    parent_overlap: 200
+  }
 }
 
 // Default parameters for multimodal strategy
@@ -553,60 +570,59 @@ const multimodalDefaults = {
   text_chunk_size: 500,
   text_overlap: 50,
   min_table_rows: 2,
-  min_code_lines: 3,
-  extract_image_base64: false
+  min_code_lines: 3
 }
 
-// Default parameters for hybrid strategy
-const hybridDefaults = {
-  text_strategy: 'semantic',
-  code_strategy: 'lines',
-  table_strategy: 'independent',
-  text_chunk_size: 500,
-  text_overlap: 50,
-  code_chunk_lines: 50,
-  code_overlap_lines: 5,
-  similarity_threshold: 0.5,
-  use_embedding: true,
-  embedding_model: 'bge-m3'  // Default to bge-m3 for speed
+// Default parameters for hybrid strategy (smart based on code ratio)
+const getHybridDefaults = (codeBlockRatio = 0) => {
+  let codeChunkLines = 50
+  let codeOverlapLines = 8
+  
+  if (codeBlockRatio > 0.4) {
+    codeChunkLines = 80
+    codeOverlapLines = 10
+  } else if (codeBlockRatio > 0.2) {
+    codeChunkLines = 50
+    codeOverlapLines = 8
+  }
+  
+  return {
+    text_strategy: 'semantic',
+    code_strategy: 'lines',
+    table_strategy: 'independent',
+    text_chunk_size: 600,
+    text_overlap: 100,
+    code_chunk_lines: codeChunkLines,
+    code_overlap_lines: codeOverlapLines,
+    similarity_threshold: 0.55,
+    use_embedding: true,
+    embedding_model: 'bge-m3'
+  }
 }
 
-// Default parameters for semantic strategy
-const semanticDefaults = {
-  similarity_threshold: 0.3,
-  min_chunk_size: 300,
-  max_chunk_size: 1200,
-  use_embedding: true,
-  embedding_model: 'bge-m3'  // Default to bge-m3 for speed
+// Default parameters for semantic strategy (smart based on embedding model)
+const getSemanticDefaults = (embeddingModel = 'bge-m3') => {
+  const modelDefaults = getEmbeddingModelDefaults(embeddingModel)
+  return {
+    similarity_threshold: modelDefaults.similarity_threshold,
+    min_chunk_size: modelDefaults.min_chunk_size,
+    max_chunk_size: modelDefaults.max_chunk_size,
+    use_embedding: true,
+    embedding_model: embeddingModel
+  }
 }
 
-// Watch for strategy changes
-watch(
-  () => chunkingStore.selectedStrategy,
-  (strategy) => {
-    if (strategy) {
-      if (strategy.type === 'parent_child') {
-        parameters.value = { ...parentChildDefaults, ...strategy.default_parameters }
-      } else if (strategy.type === 'multimodal') {
-        parameters.value = { ...multimodalDefaults, ...strategy.default_parameters }
-      } else if (strategy.type === 'hybrid') {
-        parameters.value = { ...hybridDefaults, ...strategy.default_parameters }
-      } else if (strategy.type === 'semantic') {
-        parameters.value = { ...semanticDefaults, ...strategy.default_parameters }
-      } else {
-        parameters.value = { ...strategy.default_parameters }
-      }
-      estimateChunkCount()
-    }
-  },
-  { immediate: true }
-)
-
-const handleParamChange = () => {
-  chunkingStore.updateParameters(parameters.value)
-  estimateChunkCount()
+// Default parameters for paragraph strategy (smart based on document length)
+const getParagraphDefaults = (charCount = 10000) => {
+  if (charCount < 2000) {
+    return { min_chunk_size: 100, max_chunk_size: 800 }
+  } else if (charCount > 50000) {
+    return { min_chunk_size: 200, max_chunk_size: 2000 }
+  }
+  return { min_chunk_size: 150, max_chunk_size: 1500 }
 }
 
+// 预估分块数量
 const estimateChunkCount = () => {
   // Simple estimation based on document size and parameters
   const doc = chunkingStore.selectedDocument
@@ -675,6 +691,81 @@ const estimateChunkCount = () => {
     estimatedChunks.value = Math.ceil(estimatedTextLength / 800)
   }
 }
+
+// 参数变更处理
+const handleParamChange = () => {
+  chunkingStore.updateParameters(parameters.value)
+  estimateChunkCount()
+}
+
+// Watch for strategy changes
+watch(
+  () => chunkingStore.selectedStrategy,
+  (strategy) => {
+    if (strategy) {
+      // 获取文档特征用于智能参数计算
+      const features = chunkingStore.documentFeatures || {}
+      const charCount = features.total_char_count || 10000
+      const codeBlockRatio = features.code_block_ratio || 0
+      
+      // 优先使用 store 中已有的策略参数（可能来自智能推荐）
+      // 如果没有则使用策略默认参数
+      const storeParams = chunkingStore.strategyParameters || {}
+      const hasStoreParams = Object.keys(storeParams).length > 0
+      
+      if (strategy.type === 'parent_child') {
+        // 使用智能默认参数
+        const smartDefaults = getParentChildDefaults(charCount)
+        parameters.value = hasStoreParams 
+          ? { ...smartDefaults, ...storeParams }
+          : { ...smartDefaults, ...strategy.default_parameters }
+      } else if (strategy.type === 'multimodal') {
+        parameters.value = hasStoreParams
+          ? { ...multimodalDefaults, ...storeParams }
+          : { ...multimodalDefaults, ...strategy.default_parameters }
+      } else if (strategy.type === 'hybrid') {
+        // 使用智能默认参数
+        const smartDefaults = getHybridDefaults(codeBlockRatio)
+        parameters.value = hasStoreParams
+          ? { ...smartDefaults, ...storeParams }
+          : { ...smartDefaults, ...strategy.default_parameters }
+      } else if (strategy.type === 'semantic') {
+        // 使用智能默认参数
+        const embeddingModel = storeParams.embedding_model || strategy.default_parameters?.embedding_model || 'bge-m3'
+        const smartDefaults = getSemanticDefaults(embeddingModel)
+        parameters.value = hasStoreParams
+          ? { ...smartDefaults, ...storeParams }
+          : { ...smartDefaults, ...strategy.default_parameters }
+      } else if (strategy.type === 'paragraph') {
+        // 使用智能默认参数
+        const smartDefaults = getParagraphDefaults(charCount)
+        parameters.value = hasStoreParams
+          ? { ...smartDefaults, ...storeParams }
+          : { ...smartDefaults, ...strategy.default_parameters }
+      } else {
+        parameters.value = hasStoreParams
+          ? { ...storeParams }
+          : { ...strategy.default_parameters }
+      }
+      estimateChunkCount()
+    }
+  },
+  { immediate: true }
+)
+
+// Watch for embedding model changes in semantic/hybrid strategies
+watch(
+  () => parameters.value.embedding_model,
+  (newModel) => {
+    if (newModel && (strategyType.value === 'semantic' || 
+        (strategyType.value === 'hybrid' && parameters.value.text_strategy === 'semantic'))) {
+      // 自动更新相似度阈值
+      const modelDefaults = getEmbeddingModelDefaults(newModel)
+      parameters.value.similarity_threshold = modelDefaults.similarity_threshold
+      handleParamChange()
+    }
+  }
+)
 </script>
 
 <style scoped>
@@ -706,16 +797,10 @@ const estimateChunkCount = () => {
   padding: 12px 0;
 }
 
-.sub-option {
-  padding-left: 24px;
-  margin-top: 4px;
-}
-
 .sub-option-tips {
   font-size: 12px;
   color: var(--td-text-color-placeholder);
   line-height: 1.5;
   margin-top: 4px;
-  padding-left: 24px;
 }
 </style>

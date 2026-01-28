@@ -1,4 +1,8 @@
-"""Chunking recommendation service for intelligent strategy selection."""
+"""Chunking recommendation service for intelligent strategy selection.
+
+使用智能参数配置模块，根据文档类型、长度、Embedding 模型等特征
+动态推荐最优的分块参数。
+"""
 import time
 from typing import Dict, Any, List, Optional
 from ..models.document_features import DocumentFeatures
@@ -10,12 +14,36 @@ from ..models.chunking_recommendation import (
 from ..models.chunking_task import StrategyType
 from ..utils.document_analyzer import analyze_document, get_document_analyzer
 
+# 导入智能参数配置模块
+from ..config.smart_params import (
+    FORMAT_BASE_PARAMS,
+    EMBEDDING_MODEL_PARAMS,
+    get_base_text_params,
+    get_adaptive_text_params,
+    get_semantic_params,
+    get_hybrid_params,
+    get_multimodal_params,
+    get_parent_child_params,
+    get_heading_params,
+    get_paragraph_params,
+    get_character_params,
+    get_smart_params,
+    get_document_length_category,
+    DocumentLength
+)
+
 
 class ChunkingRecommendService:
     """Service for recommending optimal chunking strategies.
     
     Uses a rule-based engine to analyze document features and
     recommend the most suitable chunking strategies.
+    
+    现在使用智能参数配置模块 (smart_params.py) 提供：
+    - 基于文档格式的基础参数
+    - 基于文档长度的自适应调整
+    - 基于 Embedding 模型的语义分块参数
+    - 各策略的专用参数配置
     """
     
     # Default chunk size estimates for each strategy
@@ -29,19 +57,83 @@ class ChunkingRecommendService:
         StrategyType.MULTIMODAL: 1000
     }
     
-    # Default parameters for each strategy
-    DEFAULT_PARAMS = {
-        StrategyType.CHARACTER: {"chunk_size": 500, "overlap": 50},
-        StrategyType.PARAGRAPH: {"min_chunk_size": 200, "max_chunk_size": 1500},
-        StrategyType.HEADING: {"min_heading_level": 1, "max_heading_level": 3},
-        StrategyType.SEMANTIC: {"similarity_threshold": 0.3, "min_chunk_size": 300, "max_chunk_size": 1200},
-        StrategyType.PARENT_CHILD: {"parent_size": 2000, "child_size": 400, "child_overlap": 50},
-        StrategyType.HYBRID: {},
-        StrategyType.MULTIMODAL: {"include_tables": True, "include_images": True, "text_strategy": "semantic"}
-    }
-    
     def __init__(self):
         self.analyzer = get_document_analyzer()
+    
+    def get_format_params(self, document_format: str) -> Dict[str, Any]:
+        """
+        根据文档格式获取推荐的分块参数（使用智能参数模块）。
+        
+        Args:
+            document_format: 文档格式（如 'pdf', 'csv', 'docx'）
+            
+        Returns:
+            包含 chunk_size 和 overlap 的字典
+        """
+        return get_base_text_params(document_format)
+    
+    def get_adaptive_params(self, document_format: str, char_count: int) -> Dict[str, Any]:
+        """
+        根据文档格式和长度自适应调整参数（使用智能参数模块）。
+        
+        短文档用小块，长文档用大块。
+        
+        Args:
+            document_format: 文档格式
+            char_count: 文档字符数
+            
+        Returns:
+            自适应调整后的分块参数
+        """
+        return get_adaptive_text_params(document_format, char_count)
+    
+    def get_format_params_with_description(self, document_format: str) -> Dict[str, Any]:
+        """
+        获取格式参数及其描述说明。
+        
+        Args:
+            document_format: 文档格式
+            
+        Returns:
+            包含 chunk_size, overlap 和 description 的完整配置
+        """
+        fmt = document_format.lower() if document_format else "default"
+        config = FORMAT_BASE_PARAMS.get(fmt, FORMAT_BASE_PARAMS["default"])
+        return {
+            "chunk_size": config["chunk_size"],
+            "overlap": config["overlap"],
+            "description": config.get("description", "")
+        }
+    
+    def get_smart_strategy_params(
+        self, 
+        strategy_type: str,
+        features: DocumentFeatures,
+        embedding_model: str = "bge-m3"
+    ) -> Dict[str, Any]:
+        """
+        获取策略的智能参数配置。
+        
+        根据策略类型、文档特征和 Embedding 模型，返回最优参数。
+        
+        Args:
+            strategy_type: 策略类型
+            features: 文档特征
+            embedding_model: Embedding 模型名称
+            
+        Returns:
+            策略对应的智能参数配置
+        """
+        return get_smart_params(
+            strategy_type=strategy_type,
+            doc_format=features.document_format or "default",
+            char_count=features.total_char_count,
+            embedding_model=embedding_model,
+            code_block_ratio=features.code_block_ratio,
+            table_count=features.table_count,
+            image_count=features.image_count,
+            heading_count=features.heading_count
+        )
     
     def analyze_document(
         self, 
@@ -185,24 +277,43 @@ class ChunkingRecommendService:
         return recommendations
     
     def _create_heading_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
-        """Create recommendation for heading-based chunking."""
+        """Create recommendation for heading-based chunking with smart params."""
         heading_summary = features.get_heading_summary()
+        
+        # 使用智能参数
+        smart_params = get_heading_params(
+            features.document_format or "default",
+            features.heading_count
+        )
         
         return ChunkingRecommendation(
             strategy=StrategyType.HEADING,
             strategy_name=get_strategy_display_name(StrategyType.HEADING),
-            reason=f"检测到清晰的标题层级结构（{heading_summary}）",
+            reason=f"检测到清晰的标题层级结构（{heading_summary}），{smart_params.get('description', '')}",
             confidence=0.9 if features.heading_count > 10 else 0.8,
             estimated_chunks=self._estimate_chunks(features, StrategyType.HEADING),
             estimated_avg_chunk_size=self.DEFAULT_CHUNK_SIZES[StrategyType.HEADING],
-            suggested_params=self.DEFAULT_PARAMS[StrategyType.HEADING],
+            suggested_params={
+                "min_heading_level": smart_params["min_heading_level"],
+                "max_heading_level": smart_params["max_heading_level"]
+            },
             pros=["保持章节完整性", "语义边界清晰", "适合检索问答"],
             cons=["块大小不均匀", "依赖文档结构质量"]
         )
     
     def _create_multimodal_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
-        """Create recommendation for multimodal chunking."""
+        """Create recommendation for multimodal chunking with smart params."""
         multimodal_summary = features.get_multimodal_summary()
+        fmt = features.document_format or "default"
+        
+        # 使用智能参数
+        smart_params = get_multimodal_params(
+            doc_format=fmt,
+            char_count=features.total_char_count,
+            has_tables=features.table_count > 0,
+            has_images=features.image_count > 0,
+            has_code=features.code_block_ratio > 0
+        )
         
         # 根据多模态内容数量生成不同的推荐理由
         if features.image_count >= 3 or features.table_count >= 3:
@@ -214,49 +325,77 @@ class ChunkingRecommendService:
         else:
             reason = f"文档包含表格内容（{multimodal_summary}），表格是结构化数据单元，应独立分块"
         
+        # 添加参数调整说明
+        if smart_params.get("length_adjustment"):
+            reason += f"（{smart_params['length_adjustment']}）"
+        
         return ChunkingRecommendation(
             strategy=StrategyType.MULTIMODAL,
             strategy_name=get_strategy_display_name(StrategyType.MULTIMODAL),
             reason=reason,
-            confidence=0.85,  # 初始置信度，会在 _apply_rules 中根据数量调整
+            confidence=0.85,
             estimated_chunks=self._estimate_chunks(features, StrategyType.MULTIMODAL),
-            estimated_avg_chunk_size=self.DEFAULT_CHUNK_SIZES[StrategyType.MULTIMODAL],
-            suggested_params=self.DEFAULT_PARAMS[StrategyType.MULTIMODAL],
-            pros=["图片/表格独立检索", "支持多模态向量化", "内容类型区分清晰"],
+            estimated_avg_chunk_size=smart_params["text_chunk_size"],
+            suggested_params=smart_params,
+            pros=["图片/表格独立检索", "支持多模态向量化", "内容类型区分清晰", f"文本分块针对 {fmt.upper()} 格式优化"],
             cons=["需要多模态 Embedding 模型", "处理复杂度较高"]
         )
     
     def _create_hybrid_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
-        """Create recommendation for hybrid chunking."""
+        """Create recommendation for hybrid chunking with smart params."""
+        fmt = features.document_format or "default"
+        
+        # 使用智能参数
+        smart_params = get_hybrid_params(
+            doc_format=fmt,
+            char_count=features.total_char_count,
+            code_block_ratio=features.code_block_ratio,
+            embedding_model="bge-m3"
+        )
+        
+        reason = f"检测到技术文档特征（代码占比 {features.code_block_ratio:.1%}），建议混合策略"
+        if smart_params.get("length_adjustment"):
+            reason += f"（{smart_params['length_adjustment']}）"
+        
         return ChunkingRecommendation(
             strategy=StrategyType.HYBRID,
             strategy_name=get_strategy_display_name(StrategyType.HYBRID),
-            reason=f"检测到技术文档特征（代码占比 {features.code_block_ratio:.1%}），建议混合策略",
+            reason=reason,
             confidence=0.82,
             estimated_chunks=self._estimate_chunks(features, StrategyType.HYBRID),
-            estimated_avg_chunk_size=self.DEFAULT_CHUNK_SIZES[StrategyType.HYBRID],
-            suggested_params={
-                "text": {"strategy": "semantic", "params": {"similarity_threshold": 0.3}},
-                "code": {"strategy": "line", "params": {"lines_per_chunk": 50}},
-                "table": {"strategy": "independent"},
-                "image": {"strategy": "independent"}
-            },
-            pros=["各类内容针对性处理", "代码保持完整性", "文本语义分块"],
+            estimated_avg_chunk_size=smart_params["text_chunk_size"],
+            suggested_params=smart_params,
+            pros=["各类内容针对性处理", "代码保持完整性", "文本语义分块", f"代码块 {smart_params['code_chunk_lines']} 行/块"],
             cons=["配置复杂度高", "需要理解各策略参数"]
         )
     
     def _create_semantic_recommendation(
         self, 
         features: DocumentFeatures,
-        baseline: bool = False
+        baseline: bool = False,
+        embedding_model: str = "bge-m3"
     ) -> ChunkingRecommendation:
-        """Create recommendation for semantic chunking."""
+        """Create recommendation for semantic chunking with smart params."""
+        # 使用智能参数，结合 Embedding 模型
+        smart_params = get_semantic_params(
+            embedding_model=embedding_model,
+            doc_format=features.document_format,
+            char_count=features.total_char_count
+        )
+        
         if baseline:
             reason = "语义分块是通用策略，适合大多数文档类型"
             confidence = 0.7
         else:
-            reason = "检测到连续叙事文本，无明显标题结构，语义分块可识别自然边界"
+            reason = f"检测到连续叙事文本，无明显标题结构，语义分块可识别自然边界"
+            if smart_params.get("length_adjustment"):
+                reason += f"（{smart_params['length_adjustment']}）"
             confidence = 0.85
+        
+        # 添加模型说明
+        model_desc = smart_params.get("model_description", "")
+        if model_desc:
+            reason += f"。推荐模型：{model_desc}"
         
         return ChunkingRecommendation(
             strategy=StrategyType.SEMANTIC,
@@ -264,50 +403,86 @@ class ChunkingRecommendService:
             reason=reason,
             confidence=confidence,
             estimated_chunks=self._estimate_chunks(features, StrategyType.SEMANTIC),
-            estimated_avg_chunk_size=self.DEFAULT_CHUNK_SIZES[StrategyType.SEMANTIC],
-            suggested_params=self.DEFAULT_PARAMS[StrategyType.SEMANTIC],
-            pros=["自动识别语义边界", "块大小相对均匀", "无需依赖文档结构"],
+            estimated_avg_chunk_size=(smart_params["min_chunk_size"] + smart_params["max_chunk_size"]) // 2,
+            suggested_params=smart_params,
+            pros=["自动识别语义边界", "块大小相对均匀", "无需依赖文档结构", f"阈值 {smart_params['similarity_threshold']} 针对 {embedding_model} 优化"],
             cons=["依赖 Embedding 模型质量", "处理速度较慢"]
         )
     
     def _create_parent_child_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
-        """Create recommendation for parent-child chunking."""
+        """Create recommendation for parent-child chunking with smart params."""
+        # 使用智能参数
+        smart_params = get_parent_child_params(
+            char_count=features.total_char_count,
+            doc_format=features.document_format
+        )
+        
+        reason = f"文档较长（{features.total_char_count}字符），父子分块可兼顾检索精度和上下文完整性"
+        if smart_params.get("adjustment_reason"):
+            reason += f"（{smart_params['adjustment_reason']}）"
+        
         return ChunkingRecommendation(
             strategy=StrategyType.PARENT_CHILD,
             strategy_name=get_strategy_display_name(StrategyType.PARENT_CHILD),
-            reason=f"文档较长（{features.total_char_count}字符），父子分块可兼顾检索精度和上下文完整性",
+            reason=reason,
             confidence=0.8,
             estimated_chunks=self._estimate_chunks(features, StrategyType.PARENT_CHILD),
-            estimated_avg_chunk_size=self.DEFAULT_CHUNK_SIZES[StrategyType.PARENT_CHILD],
-            suggested_params=self.DEFAULT_PARAMS[StrategyType.PARENT_CHILD],
-            pros=["小块精确检索", "大块完整上下文", "提升生成质量"],
+            estimated_avg_chunk_size=smart_params["child_chunk_size"],
+            suggested_params=smart_params,
+            pros=["小块精确检索", "大块完整上下文", "提升生成质量", f"父块 {smart_params['parent_chunk_size']} / 子块 {smart_params['child_chunk_size']}"],
             cons=["存储量增加", "检索逻辑复杂"]
         )
     
     def _create_character_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
-        """Create recommendation for character-based chunking."""
+        """Create recommendation for character-based chunking with smart params."""
+        fmt = features.document_format or "default"
+        
+        # 使用智能参数
+        smart_params = get_character_params(fmt, features.total_char_count)
+        
+        # 构建推荐理由
+        if fmt != "default":
+            reason = f"文档格式为 {fmt.upper()}，推荐 chunk_size={smart_params['chunk_size']}, overlap={smart_params['overlap']}"
+            if smart_params.get("base_description"):
+                reason += f"（{smart_params['base_description']}）"
+        else:
+            reason = "文档结构简单，固定字数分块即可满足需求"
+        
+        if smart_params.get("adjustment_reason"):
+            reason += f"。{smart_params['adjustment_reason']}"
+        
         return ChunkingRecommendation(
             strategy=StrategyType.CHARACTER,
             strategy_name=get_strategy_display_name(StrategyType.CHARACTER),
-            reason="文档结构简单，固定字数分块即可满足需求",
+            reason=reason,
             confidence=0.6,
-            estimated_chunks=self._estimate_chunks(features, StrategyType.CHARACTER),
-            estimated_avg_chunk_size=self.DEFAULT_CHUNK_SIZES[StrategyType.CHARACTER],
-            suggested_params=self.DEFAULT_PARAMS[StrategyType.CHARACTER],
-            pros=["实现简单", "处理速度快", "块大小可控"],
+            estimated_chunks=max(1, features.total_char_count // smart_params["chunk_size"]) if features.total_char_count > 0 else 0,
+            estimated_avg_chunk_size=smart_params["chunk_size"],
+            suggested_params={
+                "chunk_size": smart_params["chunk_size"],
+                "overlap": smart_params["overlap"]
+            },
+            pros=["实现简单", "处理速度快", "块大小可控", f"针对 {fmt.upper()} 格式优化"],
             cons=["可能截断语义", "不考虑内容结构"]
         )
     
     def _create_paragraph_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
-        """Create recommendation for paragraph-based chunking."""
+        """Create recommendation for paragraph-based chunking with smart params."""
+        # 使用智能参数
+        smart_params = get_paragraph_params(features.total_char_count)
+        
+        reason = "文档内容按段落/行组织，段落分块可保持每条记录的完整性"
+        if smart_params.get("adjustment_reason"):
+            reason += f"（{smart_params['adjustment_reason']}）"
+        
         return ChunkingRecommendation(
             strategy=StrategyType.PARAGRAPH,
             strategy_name=get_strategy_display_name(StrategyType.PARAGRAPH),
-            reason="文档内容按段落/行组织，段落分块可保持每条记录的完整性",
+            reason=reason,
             confidence=0.85,
             estimated_chunks=self._estimate_chunks(features, StrategyType.PARAGRAPH),
-            estimated_avg_chunk_size=self.DEFAULT_CHUNK_SIZES[StrategyType.PARAGRAPH],
-            suggested_params=self.DEFAULT_PARAMS[StrategyType.PARAGRAPH],
+            estimated_avg_chunk_size=(smart_params["min_chunk_size"] + smart_params["max_chunk_size"]) // 2,
+            suggested_params=smart_params,
             pros=["保持记录完整", "处理速度快", "适合结构化数据"],
             cons=["块大小不均匀", "可能产生很小的块"]
         )

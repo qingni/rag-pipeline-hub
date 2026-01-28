@@ -63,9 +63,27 @@ class HeadingChunker(BaseChunker):
         
         chunks = []
         chunk_index = 0
+        heading_stack = []  # 用于追踪标题层级: [(heading_text, level), ...]
         
         for i, heading in enumerate(headings):
             start_pos, _, heading_text, level = heading
+            
+            # 更新标题栈 - 维护当前的标题层级路径
+            # 弹出所有级别 >= 当前级别的标题（同级或下级）
+            while heading_stack and heading_stack[-1][1] >= level:
+                heading_stack.pop()
+            
+            # 构建完整的标题路径（不包含当前标题）
+            heading_path = [h[0] for h in heading_stack]
+            
+            # 获取直接父标题
+            parent_heading = heading_stack[-1][0] if heading_stack else None
+            
+            # 将当前标题加入栈
+            heading_stack.append((heading_text, level))
+            
+            # 完整路径包含当前标题
+            full_heading_path = heading_path + [heading_text]
             
             # Find content end (next heading or end of text)
             if i < len(headings) - 1:
@@ -85,6 +103,8 @@ class HeadingChunker(BaseChunker):
                     strategy="heading",
                     heading_text=heading_text,
                     heading_level=level,
+                    heading_path=full_heading_path,    # 完整标题路径
+                    parent_heading=parent_heading,      # 直接父标题
                     min_level=min_level,
                     max_level=max_level
                 )

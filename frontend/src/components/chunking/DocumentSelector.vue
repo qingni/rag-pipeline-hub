@@ -75,15 +75,15 @@
               <t-radio
                 :value="doc.id"
                 :checked="selectedDocId === doc.id"
-                @click.stop.prevent="() => {}"
+                @click="handleRadioClick"
               >
                 <div class="doc-item">
                   <div class="doc-header">
                     <div class="doc-name" :title="doc.filename">{{ doc.filename }}</div>
                   </div>
                   <div class="doc-meta">
-                    <t-tag size="small" theme="primary" variant="light">
-                      {{ doc.format?.toUpperCase() || 'N/A' }}
+                    <t-tag size="small" theme="primary" variant="light" :title="'加载器: ' + getDisplayProvider(doc)">
+                      {{ getDisplayProvider(doc) }}
                     </t-tag>
                     <span class="doc-size">{{ formatSize(doc.size_bytes) }}</span>
                     <span class="doc-time">{{ formatTime(doc.upload_time) }}</span>
@@ -204,6 +204,13 @@ const handleSelect = (docId) => {
   }
 }
 
+const handleRadioClick = (e) => {
+  // 阻止事件冒泡，避免触发外层的 click 事件
+  if (e && typeof e.stopPropagation === 'function') {
+    e.stopPropagation()
+  }
+}
+
 const handlePageChange = async (pageInfo) => {
   currentPage.value = pageInfo.current
   await loadDocuments()
@@ -241,6 +248,12 @@ const formatTime = (time) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+const getDisplayProvider = (doc) => {
+  const provider = doc.provider || doc.format?.toUpperCase() || 'N/A'
+  // 统一显示 docling_serve 为 docling
+  return provider === 'docling_serve' ? 'docling' : provider
 }
 
 // 初始化：加载文档并恢复选中状态

@@ -119,6 +119,7 @@ async def get_parsed_documents(
                 "size_bytes": doc.size_bytes,
                 "upload_time": doc.upload_time.isoformat() if doc.upload_time else None,
                 "processing_type": "loaded",
+                "provider": loading_result.provider,  # 添加加载器名称
                 "processing_result": {
                     "id": loading_result.id,
                     "result_path": loading_result.result_path,
@@ -171,6 +172,216 @@ async def get_chunking_strategies(
         })
     
     return success_response(data={"strategies": items})
+
+
+# NEW: GET /api/chunking/format-params - Get format-aware chunking parameters
+@router.get("/format-params")
+async def get_format_chunking_params(
+    document_format: Optional[str] = Query(None, description="Document format (e.g., 'pdf', 'csv', 'docx')"),
+    char_count: Optional[int] = Query(None, ge=0, description="Document character count for adaptive params")
+):
+    """
+    获取基于文档格式的推荐分块参数。
+    
+    Args:
+        document_format: 文档格式（如 'pdf', 'csv', 'docx'），不提供则返回所有格式配置
+        char_count: 文档字符数，提供后会返回自适应调整的参数
+        
+    Returns:
+        推荐的分块参数配置
+    """
+    from ..config.smart_params import (
+        FORMAT_BASE_PARAMS,
+        get_base_text_params,
+        get_adaptive_text_params,
+        get_all_format_params
+    )
+    
+    # 如果没有指定格式，返回所有格式的配置
+    if not document_format:
+        # 构建格式参数摘要
+        format_summary = get_all_format_params()
+        
+        # 添加重叠比例
+        for fmt, config in format_summary.items():
+            chunk_size = config.get("chunk_size", 500)
+            overlap = config.get("overlap", 0)
+            config["overlap_ratio"] = f"{overlap / chunk_size * 100:.1f}%" if chunk_size > 0 else "0%"
+        
+        return success_response(
+            data={
+                "formats": format_summary,
+                "categories": {
+                    "structured_data": ["csv", "xlsx", "xls", "json"],
+                    "long_documents": ["pdf", "docx", "doc"],
+                    "plain_text": ["txt", "md"],
+                    "web_content": ["html", "htm"],
+                    "presentations": ["pptx", "ppt"],
+                    "ebooks": ["epub"]
+                }
+            },
+            message="所有文档格式的推荐分块参数"
+        )
+    
+    # 获取指定格式的参数
+    fmt = document_format.lower()
+    base_params = get_base_text_params(fmt)
+    
+    result = {
+        "format": fmt,
+        "base_params": {
+            "chunk_size": base_params["chunk_size"],
+            "overlap": base_params["overlap"],
+            "overlap_ratio": f"{base_params['overlap'] / base_params['chunk_size'] * 100:.1f}%" if base_params["chunk_size"] > 0 else "0%",
+            "description": base_params.get("description", "")
+        }
+    }
+    
+    # 如果提供了字符数，计算自适应参数
+    if char_count is not None:
+        adaptive_params = get_adaptive_text_params(fmt, char_count)
+        result["adaptive_params"] = {
+            "chunk_size": adaptive_params["chunk_size"],
+            "overlap": adaptive_params["overlap"],
+            "overlap_ratio": f"{adaptive_params['overlap'] / adaptive_params['chunk_size'] * 100:.1f}%" if adaptive_params["chunk_size"] > 0 else "0%",
+            "char_count": char_count,
+            "length_category": adaptive_params.get("length_category", "medium"),
+            "adjustment_note": adaptive_params.get("adjustment_reason", "")
+        }
+    
+    return success_response(
+        data=result,
+        message=f"文档格式 {fmt.upper()} 的推荐分块参数"
+    )
+
+
+# NEW: GET /api/chunking/smart-params - Get smart parameters for a specific strategy
+@router.get("/smart-params")
+async def get_smart_chunking_params(
+    strategy_type: str = Query(..., description="Strategy type (character, paragraph, heading, semantic, parent_child, hybrid, multimodal)"),
+    document_format: str = Query("default", description="Document format (e.g., 'pdf', 'csv', 'docx')"),
+    char_count: int = Query(10000, ge=0, description="Document character count"),
+    embedding_model: str = Query("bge-m3", description="Embedding model for semantic strategies"),
+    code_block_ratio: float = Query(0.0, ge=0, le=1, description="Code block ratio (0-1)"),
+    table_count: int = Query(0, ge=0, description="Number of tables in document"),
+    image_count: int = Query(0, ge=0, description="Number of images in document"),
+    heading_count: int = Query(0, ge=0, description="Number of headings in document")
+):
+    """
+    获取指定策略的智能参数配置。
+    
+    根据策略类型和文档特征，返回基于业界最佳实践的最优参数配置。
+    
+    Args:
+        strategy_type: 策略类型
+        document_format: 文档格式
+        char_count: 文档字符数
+        embedding_model: Embedding 模型（用于语义相关策略）
+        code_block_ratio: 代码块占比
+        table_count: 表格数量
+        image_count: 图片数量
+        heading_count: 标题数量
+        
+    Returns:
+        策略对应的智能参数配置
+    """
+    from ..config.smart_params import get_smart_params, get_document_length_category
+    
+    # 验证策略类型
+    valid_strategies = ["character", "paragraph", "heading", "semantic", "parent_child", "hybrid", "multimodal"]
+    if strategy_type.lower() not in valid_strategies:
+        raise ValidationError(f"Invalid strategy type: {strategy_type}. Must be one of: {', '.join(valid_strategies)}")
+    
+    # 获取智能参数
+    smart_params = get_smart_params(
+        strategy_type=strategy_type.lower(),
+        doc_format=document_format,
+        char_count=char_count,
+        embedding_model=embedding_model,
+        code_block_ratio=code_block_ratio,
+        table_count=table_count,
+        image_count=image_count,
+        heading_count=heading_count
+    )
+    
+    # 添加文档长度分类信息
+    length_category = get_document_length_category(char_count)
+    
+    return success_response(
+        data={
+            "strategy_type": strategy_type.lower(),
+            "document_context": {
+                "format": document_format,
+                "char_count": char_count,
+                "length_category": length_category.value,
+                "embedding_model": embedding_model,
+                "code_block_ratio": code_block_ratio,
+                "table_count": table_count,
+                "image_count": image_count,
+                "heading_count": heading_count
+            },
+            "recommended_params": smart_params
+        },
+        message=f"策略 {strategy_type} 的智能参数配置"
+    )
+
+
+# NEW: GET /api/chunking/embedding-params - Get embedding model specific parameters
+@router.get("/embedding-params")
+async def get_embedding_model_params(
+    embedding_model: Optional[str] = Query(None, description="Embedding model name (bge-m3, qwen3-embedding-8b, hunyuan-embedding)")
+):
+    """
+    获取 Embedding 模型特定的语义分块参数。
+    
+    不同的 Embedding 模型有不同的最优相似度阈值和块大小范围。
+    
+    Args:
+        embedding_model: Embedding 模型名称，不提供则返回所有模型配置
+        
+    Returns:
+        Embedding 模型的语义分块参数配置
+    """
+    from ..config.smart_params import EMBEDDING_MODEL_PARAMS, get_semantic_params
+    
+    if not embedding_model:
+        # 返回所有模型配置
+        return success_response(
+            data={
+                "models": EMBEDDING_MODEL_PARAMS,
+                "recommended": "bge-m3",
+                "recommendation_reason": "BGE-M3 在速度和精度之间取得良好平衡，适合大多数场景"
+            },
+            message="所有 Embedding 模型的语义分块参数配置"
+        )
+    
+    # 获取指定模型的参数
+    model_name = embedding_model.lower()
+    if model_name not in EMBEDDING_MODEL_PARAMS:
+        available_models = list(EMBEDDING_MODEL_PARAMS.keys())
+        raise ValidationError(f"Unknown embedding model: {embedding_model}. Available: {', '.join(available_models)}")
+    
+    params = get_semantic_params(model_name)
+    
+    return success_response(
+        data={
+            "model": model_name,
+            "params": params,
+            "usage_tips": _get_embedding_usage_tips(model_name)
+        },
+        message=f"Embedding 模型 {model_name} 的语义分块参数配置"
+    )
+
+
+def _get_embedding_usage_tips(model_name: str) -> str:
+    """获取 Embedding 模型使用建议"""
+    tips = {
+        "bge-m3": "推荐用于大多数场景，速度快，1024维向量。适合中等长度文档。",
+        "qwen3-embedding-8b": "适合需要高精度的场景，4096维向量，支持32K上下文。适合超长文档和复杂语义。",
+        "hunyuan-embedding": "腾讯混元提供，1024维向量。适合中文文档处理。",
+        "default": "默认配置，适用于未知模型。"
+    }
+    return tips.get(model_name, tips["default"])
 
 
 # T028: POST /api/chunking/chunk - Create chunking task

@@ -291,11 +291,6 @@ class ChunkingParameterValidator:
         if not isinstance(min_code_lines, int) or min_code_lines < 1:
             raise ValueError("min_code_lines must be a positive integer")
         
-        # Image processing
-        extract_image_base64 = params.get('extract_image_base64', False)
-        if not isinstance(extract_image_base64, bool):
-            raise ValueError("extract_image_base64 must be a boolean")
-        
         return {
             'include_tables': include_tables,
             'include_images': include_images,
@@ -304,8 +299,7 @@ class ChunkingParameterValidator:
             'text_chunk_size': text_chunk_size,
             'text_overlap': text_overlap,
             'min_table_rows': min_table_rows,
-            'min_code_lines': min_code_lines,
-            'extract_image_base64': extract_image_base64
+            'min_code_lines': min_code_lines
         }
     
     @staticmethod

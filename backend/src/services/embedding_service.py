@@ -533,13 +533,88 @@ class EmbeddingService:
     def _hash_text(text: str) -> str:
         return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+    def _is_multimodal_model(self) -> bool:
+        """Check if current model supports multimodal inputs."""
+        return self.model in MULTIMODAL_EMBEDDING_MODELS
+
+    def _load_image_base64(self, image_path: str) -> Optional[str]:
+        """
+        Load image from file path and convert to base64.
+        
+        This is called during embedding phase for image chunks when using
+        multimodal models. The image data is loaded on-demand rather than
+        being stored in the chunking result.
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            Base64 encoded image string, or None if loading failed
+        """
+        import base64
+        import os
+        
+        if not image_path or not os.path.exists(image_path):
+            embedding_logger.logger.warning(f"Image file not found: {image_path}")
+            return None
+        
+        try:
+            with open(image_path, 'rb') as f:
+                return base64.b64encode(f.read()).decode('utf-8')
+        except Exception as e:
+            embedding_logger.logger.warning(f"Failed to load image {image_path}: {e}")
+            return None
+
+    def _prepare_chunk_for_embedding(
+        self, 
+        chunk, 
+        is_multimodal: bool
+    ) -> Tuple[Optional[str], str, Optional[str]]:
+        """
+        Prepare a chunk for embedding, handling both text and image chunks.
+        
+        For multimodal models with image chunks:
+        - Load image base64 from file_path on demand
+        - Return both content and image_base64 for multimodal embedding
+        
+        Args:
+            chunk: Chunk object from database
+            is_multimodal: Whether using a multimodal embedding model
+            
+        Returns:
+            Tuple of (text_content, chunk_type, image_base64)
+        """
+        chunk_type = chunk.chunk_type or 'text'
+        text_content = chunk.content
+        image_base64 = None
+        
+        if is_multimodal and chunk_type == 'image':
+            # For multimodal models, load image data on demand
+            metadata = chunk.metadata or {}
+            image_path = metadata.get('image_path')
+            
+            if image_path:
+                image_base64 = self._load_image_base64(image_path)
+                if image_base64:
+                    embedding_logger.logger.info(
+                        f"Loaded image for multimodal embedding: {image_path}"
+                    )
+        
+        return text_content, chunk_type, image_base64
+
     def embed_chunking_result(
         self,
         result_id: str,
         db_session,
         request_id: Optional[str] = None
     ) -> BatchEmbeddingResult:
-        """从分块结果ID获取所有chunks并进行向量化。"""
+        """
+        从分块结果ID获取所有chunks并进行向量化。
+        
+        改进：支持多模态模型处理图片块
+        - 文本模型：跳过图片块或使用描述文本
+        - 多模态模型：从 image_path 按需加载图片数据进行向量化
+        """
         from ..models.chunking_result import ChunkingResult, ResultStatus
         from ..models.chunk import Chunk
         
@@ -560,11 +635,30 @@ class EmbeddingService:
         if not chunks:
             raise ValueError(f"No chunks found for result {result_id}")
         
-        # 提取chunk文本
-        texts = [chunk.content for chunk in chunks]
+        is_multimodal = self._is_multimodal_model()
+        
+        # 准备向量化数据
+        embedding_inputs = []
+        for chunk in chunks:
+            text_content, chunk_type, image_base64 = self._prepare_chunk_for_embedding(
+                chunk, is_multimodal
+            )
+            
+            if chunk_type == 'image':
+                if is_multimodal and image_base64:
+                    # 多模态模型：使用图片数据
+                    # TODO: 当 API 支持图片输入时，传递 image_base64
+                    # 目前先使用图片描述文本作为占位
+                    embedding_inputs.append(text_content)
+                elif not is_multimodal:
+                    # 文本模型：使用图片描述文本
+                    embedding_inputs.append(text_content)
+            else:
+                # 文本块：直接使用内容
+                embedding_inputs.append(text_content)
         
         # 调用批量嵌入
-        return self.embed_documents(texts, request_id=request_id)
+        return self.embed_documents(embedding_inputs, request_id=request_id)
 
     def embed_document_latest_chunks(
         self,
@@ -573,7 +667,13 @@ class EmbeddingService:
         strategy_type: Optional[str] = None,
         request_id: Optional[str] = None
     ) -> BatchEmbeddingResult:
-        """从文档ID获取最新的分块结果并进行向量化。"""
+        """
+        从文档ID获取最新的分块结果并进行向量化。
+        
+        改进：支持多模态模型处理图片块
+        - 文本模型：跳过图片块或使用描述文本
+        - 多模态模型：从 image_path 按需加载图片数据进行向量化
+        """
         from ..models.chunking_result import ChunkingResult, ResultStatus
         from ..models.chunking_task import ChunkingTask, StrategyType
         from ..models.chunk import Chunk
@@ -613,11 +713,30 @@ class EmbeddingService:
         if not chunks:
             raise ValueError(f"No chunks found for result {chunking_result.result_id}")
         
-        # 提取chunk文本
-        texts = [chunk.content for chunk in chunks]
+        is_multimodal = self._is_multimodal_model()
+        
+        # 准备向量化数据
+        embedding_inputs = []
+        for chunk in chunks:
+            text_content, chunk_type, image_base64 = self._prepare_chunk_for_embedding(
+                chunk, is_multimodal
+            )
+            
+            if chunk_type == 'image':
+                if is_multimodal and image_base64:
+                    # 多模态模型：使用图片数据
+                    # TODO: 当 API 支持图片输入时，传递 image_base64
+                    # 目前先使用图片描述文本作为占位
+                    embedding_inputs.append(text_content)
+                elif not is_multimodal:
+                    # 文本模型：使用图片描述文本
+                    embedding_inputs.append(text_content)
+            else:
+                # 文本块：直接使用内容
+                embedding_inputs.append(text_content)
         
         # 调用批量嵌入
-        return self.embed_documents(texts, request_id=request_id)
+        return self.embed_documents(embedding_inputs, request_id=request_id)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke test

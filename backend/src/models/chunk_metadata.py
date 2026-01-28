@@ -65,11 +65,16 @@ class ImageChunkMetadata(BaseChunkMetadata):
     bbox: Optional[List[float]] = None  # [x1, y1, x2, y2]
     image_path: Optional[str] = None
     image_base64: Optional[str] = None  # Base64 encoded image for vector embedding
+    thumbnail_base64: Optional[str] = None  # Thumbnail for quick preview
     caption: Optional[str] = None
     alt_text: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    original_size: Optional[int] = None  # Original file size in bytes
     format: Optional[str] = None  # png, jpg, etc.
+    mime_type: Optional[str] = None  # MIME type like image/png
+    context_before: Optional[str] = None  # Text context before image
+    context_after: Optional[str] = None  # Text context after image
 
 
 @dataclass
@@ -225,11 +230,16 @@ IMAGE_CHUNK_SCHEMA = {
         "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
         "image_path": {"type": "string"},
         "image_base64": {"type": "string"},
+        "thumbnail_base64": {"type": "string"},
         "caption": {"type": "string"},
         "alt_text": {"type": "string"},
         "width": {"type": "integer"},
         "height": {"type": "integer"},
-        "format": {"type": "string"}
+        "original_size": {"type": "integer"},
+        "format": {"type": "string"},
+        "mime_type": {"type": "string"},
+        "context_before": {"type": "string"},
+        "context_after": {"type": "string"}
     },
     "required": ["chunk_id", "chunk_index"]
 }

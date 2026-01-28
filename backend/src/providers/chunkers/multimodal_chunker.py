@@ -67,7 +67,6 @@ class MultimodalChunker(BaseChunker):
             text_overlap: Overlap for text chunks (default: 50)
             min_table_rows: Minimum rows for table extraction (default: 2)
             min_code_lines: Minimum lines for code extraction (default: 3)
-            extract_image_base64: Whether to convert images to base64 (default: False)
             image_base_path: Base path for resolving relative image paths
         """
         super().__init__(**params)
@@ -97,7 +96,6 @@ class MultimodalChunker(BaseChunker):
         self.min_code_lines = self.params.get('min_code_lines', 3)
         
         # Image processing
-        self.extract_image_base64 = self.params.get('extract_image_base64', False)
         self.image_base_path = self.params.get('image_base_path', None)
     
     def chunk(self, text: str, metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
@@ -368,6 +366,29 @@ class MultimodalChunker(BaseChunker):
         
         return chunks, regions
     
+    def _parse_table_headers(self, header_row: str) -> List[str]:
+        """
+        Parse headers from a Markdown table header row.
+        
+        Args:
+            header_row: The first row of a Markdown table (e.g., "| Col1 | Col2 |")
+            
+        Returns:
+            List of header strings
+        """
+        if not header_row:
+            return []
+        
+        # Remove leading/trailing pipes and split by pipe
+        headers = []
+        parts = header_row.strip().strip('|').split('|')
+        for part in parts:
+            header = part.strip()
+            if header:
+                headers.append(header)
+        
+        return headers
+    
     def _extract_code_from_page(
         self,
         text: str,
@@ -594,12 +615,12 @@ class MultimodalChunker(BaseChunker):
         
         这是占位符+结构化元数据方案的核心方法：
         - 图片块的 content 使用可读的描述文本
-        - metadata 包含完整的图片数据（file_path 用于展示，base64_data 用于嵌入）
+        - metadata 包含图片路径和缩略图（file_path 用于展示和后续向量化）
         
-        业内最佳实践：按需加载
-        - 如果 base64_data 已存在，直接使用
-        - 如果只有 file_path，在需要时才加载（嵌入阶段）
-        - 优先使用缩略图用于预览
+        改进设计（延迟加载）：
+        - 分块阶段只保存 file_path 和 thumbnail_base64
+        - 完整的 base64_data 在向量化阶段按需加载（仅多模态模型需要）
+        - 减少分块结果的存储空间
         
         Args:
             image_info: 图片数据（来自加载结果的 images 数组）
@@ -617,9 +638,8 @@ class MultimodalChunker(BaseChunker):
         alt_text = image_info.get("alt_text") or image_info.get("caption") or placeholder_text
         content = f"[Image: {alt_text}]" if alt_text else "[Image]"
         
-        # 提取图片属性
+        # 提取图片属性（不在分块阶段加载完整 base64）
         file_path = image_info.get("file_path")
-        base64_data = image_info.get("base64_data")
         thumbnail_base64 = image_info.get("thumbnail_base64")
         mime_type = image_info.get("mime_type")
         width = image_info.get("width")
@@ -627,17 +647,6 @@ class MultimodalChunker(BaseChunker):
         original_size = image_info.get("original_size")
         context_before = image_info.get("context_before")
         context_after = image_info.get("context_after")
-        
-        # 按需加载：如果没有 base64_data 但有 file_path，从文件加载
-        # 这里仅在需要时加载，避免内存占用过大
-        image_base64_for_embedding = base64_data
-        if not image_base64_for_embedding and file_path:
-            try:
-                with open(file_path, 'rb') as f:
-                    image_base64_for_embedding = base64.b64encode(f.read()).decode('utf-8')
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"按需加载图片失败 {file_path}: {e}")
         
         # 从文件路径推断格式
         img_format = None
@@ -653,9 +662,8 @@ class MultimodalChunker(BaseChunker):
             content=content,
             start_position=start_pos,
             end_position=end_pos,
-            # 核心图片数据（支持多模态处理）
-            image_path=file_path,           # 用于前端展示
-            image_base64=image_base64_for_embedding,  # 用于多模态嵌入
+            # 核心图片数据
+            image_path=file_path,               # 用于前端展示和向量化阶段加载
             thumbnail_base64=thumbnail_base64,  # 用于快速预览
             alt_text=alt_text,
             caption=image_info.get("caption"),
@@ -733,21 +741,10 @@ class MultimodalChunker(BaseChunker):
         page_number: Optional[int],
         metadata: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Create an image chunk with sheet_name support."""
-        image_base64 = None
-        width = None
-        height = None
+        """Create an image chunk with sheet_name support (no base64 embedding at chunking stage)."""
         img_format = None
         
-        if self.extract_image_base64:
-            base64_data, w, h, fmt = self._load_image_as_base64(image_path)
-            if base64_data:
-                image_base64 = base64_data
-                width = w
-                height = h
-                img_format = fmt
-        
-        if not img_format and image_path:
+        if image_path:
             img_format = Path(image_path).suffix.lstrip('.').lower()
         
         content = f"[Image: {alt_text}]" if alt_text else f"[Image: {image_path}]"
@@ -759,12 +756,9 @@ class MultimodalChunker(BaseChunker):
             content=content,
             start_position=start_pos,
             end_position=end_pos,
-            image_path=image_path,
+            image_path=image_path,  # 用于向量化阶段按需加载
             alt_text=alt_text,
-            format=img_format,
-            width=width,
-            height=height,
-            image_base64=image_base64
+            format=img_format
         )
         
         if sheet_name:
@@ -1265,23 +1259,11 @@ class MultimodalChunker(BaseChunker):
         chunk_index: int,
         metadata: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Create an image chunk with optional base64 encoding."""
-        image_base64 = None
-        width = None
-        height = None
+        """Create an image chunk (no base64 embedding at chunking stage)."""
         img_format = None
         
-        # Try to get image info and base64
-        if self.extract_image_base64:
-            base64_data, w, h, fmt = self._load_image_as_base64(image_path)
-            if base64_data:
-                image_base64 = base64_data
-                width = w
-                height = h
-                img_format = fmt
-        
         # Determine format from path
-        if not img_format and image_path:
+        if image_path:
             img_format = Path(image_path).suffix.lstrip('.').lower()
         
         # Content for image chunk (description or path)
@@ -1295,12 +1277,9 @@ class MultimodalChunker(BaseChunker):
             start_position=start_pos,
             end_position=end_pos,
             image_index=chunk_index,
-            image_path=image_path,
-            image_base64=image_base64,
+            image_path=image_path,  # 用于向量化阶段按需加载
             alt_text=alt_text,
             caption=alt_text,
-            width=width,
-            height=height,
             format=img_format,
             page_number=metadata.get('page_number')
         )

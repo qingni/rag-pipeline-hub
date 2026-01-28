@@ -23,6 +23,25 @@ class CSVLoader:
         """Initialize CSV loader."""
         self.name = "csv"
     
+    def _format_row_with_headers(self, headers: list, row: list) -> str:
+        """
+        将数据行格式化为带列名的文本，便于向量检索时理解语义。
+        
+        Args:
+            headers: 列名列表
+            row: 数据行
+            
+        Returns:
+            格式化后的文本，如 "user_id: U001 | game_title: Sekiro | rating: 5"
+        """
+        parts = []
+        for header, value in zip(headers, row):
+            # 处理空值
+            if pd.isna(value):
+                value = ""
+            parts.append(f"{header}: {value}")
+        return " | ".join(parts)
+    
     def extract_text(self, file_path: str) -> Dict[str, Any]:
         """
         Extract text from CSV document.
@@ -44,8 +63,16 @@ class CSVLoader:
             # Read CSV file
             df = pd.read_csv(file_path, encoding='utf-8', on_bad_lines='skip')
             
-            # Convert to text representation
-            full_text = df.to_string(index=False)
+            # 获取列名
+            headers = list(df.columns)
+            
+            # 将每行数据格式化为带列名的文本，便于分块后保持语义完整性
+            lines = []
+            for _, row in df.iterrows():
+                line = self._format_row_with_headers(headers, row.tolist())
+                lines.append(line)
+            
+            full_text = "\n".join(lines)
             
             # Create table representation
             tables = [{
