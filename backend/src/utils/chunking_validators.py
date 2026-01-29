@@ -334,6 +334,11 @@ class ChunkingParameterValidator:
         if table_strategy not in valid_table_strategies:
             raise ValueError(f"table_strategy must be one of {valid_table_strategies}")
         
+        # Image extraction (unified with multimodal chunker)
+        include_images = params.get('include_images', True)
+        if not isinstance(include_images, bool):
+            raise ValueError("include_images must be a boolean")
+        
         # Text chunk parameters
         text_chunk_size = params.get('text_chunk_size', 500)
         if not isinstance(text_chunk_size, int):
@@ -376,10 +381,15 @@ class ChunkingParameterValidator:
         if not isinstance(use_embedding, bool):
             raise ValueError("use_embedding must be a boolean")
         
+        # Image base path (optional)
+        image_base_path = params.get('image_base_path')
+        
         return {
             'text_strategy': text_strategy,
             'code_strategy': code_strategy,
             'table_strategy': table_strategy,
+            'include_images': include_images,
+            'image_base_path': image_base_path,
             'text_chunk_size': text_chunk_size,
             'text_overlap': text_overlap,
             'code_chunk_lines': code_chunk_lines,

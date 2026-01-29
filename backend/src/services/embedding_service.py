@@ -271,7 +271,13 @@ class EmbeddingService:
     def embed_documents(
         self, texts: Sequence[str], request_id: Optional[str] = None
     ) -> BatchEmbeddingResult:
-        """Vectorize multiple texts with partial failure handling."""
+        """Vectorize multiple texts with true batch API call for better performance.
+        
+        优化说明：
+        - 使用 langchain OpenAIEmbeddings.embed_documents() 进行真正的批量 API 调用
+        - 将 N 次串行请求减少为 1 次批量请求，大幅提升性能
+        - 保留验证失败的文本记录，批量处理有效文本
+        """
         if not texts:
             raise InvalidTextError("texts must contain at least 1 item")
 
@@ -290,9 +296,15 @@ class EmbeddingService:
         total_retry_count = 0
         total_rate_limit_hits = 0
 
+        # 第一步：验证所有文本，分离有效和无效文本
+        validated_texts: List[str] = []
+        valid_indices: List[int] = []  # 记录有效文本的原始索引
+        
         for index, raw_text in enumerate(texts):
             try:
                 validated_text = self._validate_text(raw_text)
+                validated_texts.append(validated_text)
+                valid_indices.append(index)
             except InvalidTextError as err:
                 failures.append(
                     self._build_failure(
@@ -301,76 +313,90 @@ class EmbeddingService:
                         error_message=str(err),
                         retry_recommended=False,
                         retry_count=0,
-                        text_preview=raw_text[:50],
+                        text_preview=raw_text[:50] if raw_text else "",
                     )
                 )
-                continue
 
-            doc_retry_count = 0
-            doc_rate_limit_hits = 0
-            doc_request_id = f"{batch_request_id}-{index}"
-
-            def _embed_single_document() -> List[float]:
-                nonlocal doc_retry_count, doc_rate_limit_hits
+        # 第二步：如果有有效文本，使用批量 API 调用
+        if validated_texts:
+            def _embed_batch() -> List[List[float]]:
+                nonlocal total_retry_count, total_rate_limit_hits
                 try:
-                    return self.embeddings.embed_query(validated_text)
+                    # 使用真正的批量 API：一次请求处理所有文本
+                    return self.embeddings.embed_documents(validated_texts)
                 except Exception as raw_error:  # pragma: no cover - defensive
-                    service_error = self._to_service_error(raw_error, doc_request_id)
+                    service_error = self._to_service_error(raw_error, batch_request_id)
                     if isinstance(service_error, (RateLimitError, APITimeoutError, NetworkError)):
-                        doc_retry_count += 1
+                        total_retry_count += 1
                         if isinstance(service_error, RateLimitError):
-                            doc_rate_limit_hits += 1
+                            total_rate_limit_hits += 1
                     raise service_error
 
             try:
-                doc_start = time.time()
-                vector = self.retry_handler.execute(
-                    _embed_single_document,
+                batch_start = time.time()
+                # 批量获取所有 embeddings
+                all_vectors = self.retry_handler.execute(
+                    _embed_batch,
                     retryable_exceptions=(RateLimitError, APITimeoutError, NetworkError),
-                    on_retry=self._create_retry_callback(doc_request_id),
+                    on_retry=self._create_retry_callback(batch_request_id),
                 )
-                vector = self._validate_vector_dimensions(vector, batch_request_id)
-                duration_ms = (time.time() - doc_start) * 1000
-                vectors.append(
-                    DocumentVectorResult(
-                        index=index,
-                        vector=vector,
-                        text_hash=self._hash_text(validated_text),
-                        text_length=len(validated_text),
-                        processing_time_ms=duration_ms,
-                        source_text=validated_text,  # Store original text
-                    )
-                )
-                total_retry_count += doc_retry_count
-                total_rate_limit_hits += doc_rate_limit_hits
+                batch_duration_ms = (time.time() - batch_start) * 1000
+                avg_duration_per_doc = batch_duration_ms / len(validated_texts) if validated_texts else 0
+
+                # 处理批量结果，将向量与原始索引关联
+                for i, (vector, original_index) in enumerate(zip(all_vectors, valid_indices)):
+                    validated_text = validated_texts[i]
+                    try:
+                        vector = self._validate_vector_dimensions(vector, batch_request_id)
+                        vectors.append(
+                            DocumentVectorResult(
+                                index=original_index,
+                                vector=vector,
+                                text_hash=self._hash_text(validated_text),
+                                text_length=len(validated_text),
+                                processing_time_ms=avg_duration_per_doc,
+                                source_text=validated_text,
+                            )
+                        )
+                    except VectorDimensionMismatchError as err:
+                        failures.append(
+                            self._build_failure(
+                                index=original_index,
+                                error_type=ErrorType.DIMENSION_MISMATCH_ERROR,
+                                error_message=str(err),
+                                retry_recommended=False,
+                                retry_count=0,
+                                text_preview=validated_text[:50],
+                            )
+                        )
             except (RateLimitError, APITimeoutError, NetworkError, AuthenticationError) as err:
-                failures.append(
-                    self._build_failure(
-                        index=index,
-                        error_type=self._map_error_type(err),
-                        error_message=str(err),
-                        retry_recommended=isinstance(
-                            err, (RateLimitError, APITimeoutError, NetworkError)
-                        ),
-                        retry_count=doc_retry_count,
-                        text_preview=validated_text[:50],
+                # 批量请求失败，将所有有效文本标记为失败
+                for i, original_index in enumerate(valid_indices):
+                    failures.append(
+                        self._build_failure(
+                            index=original_index,
+                            error_type=self._map_error_type(err),
+                            error_message=str(err),
+                            retry_recommended=isinstance(
+                                err, (RateLimitError, APITimeoutError, NetworkError)
+                            ),
+                            retry_count=total_retry_count,
+                            text_preview=validated_texts[i][:50],
+                        )
                     )
-                )
-                total_retry_count += doc_retry_count
-                total_rate_limit_hits += doc_rate_limit_hits
             except Exception as err:  # pragma: no cover - defensive
-                failures.append(
-                    self._build_failure(
-                        index=index,
-                        error_type=ErrorType.UNKNOWN_ERROR,
-                        error_message=str(err),
-                        retry_recommended=False,
-                        retry_count=doc_retry_count,
-                        text_preview=validated_text[:50],
+                # 未知错误，将所有有效文本标记为失败
+                for i, original_index in enumerate(valid_indices):
+                    failures.append(
+                        self._build_failure(
+                            index=original_index,
+                            error_type=ErrorType.UNKNOWN_ERROR,
+                            error_message=str(err),
+                            retry_recommended=False,
+                            retry_count=total_retry_count,
+                            text_preview=validated_texts[i][:50],
+                        )
                     )
-                )
-                total_retry_count += doc_retry_count
-                total_rate_limit_hits += doc_rate_limit_hits
 
         processing_time_ms = (time.time() - start_time) * 1000
         successful_count = len(vectors)

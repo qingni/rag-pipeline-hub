@@ -7,6 +7,7 @@ from .semantic_chunker import SemanticChunker
 from .parent_child_chunker import ParentChildChunker
 from .multimodal_chunker import MultimodalChunker
 from .hybrid_chunker import HybridChunker
+from .image_extractor import ImageExtractor
 
 
 # Chunker registry
@@ -51,6 +52,7 @@ __all__ = [
     'ParentChildChunker',
     'MultimodalChunker',
     'HybridChunker',
+    'ImageExtractor',
     'get_chunker',
     'CHUNKER_REGISTRY'
 ]

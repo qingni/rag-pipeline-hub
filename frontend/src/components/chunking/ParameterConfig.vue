@@ -418,6 +418,21 @@
             />
             <template #tips>表格内容的处理方式</template>
           </t-form-item>
+
+          <t-divider />
+
+          <!-- Image extraction option -->
+          <t-form-item label="图片处理">
+            <t-checkbox
+              v-model="parameters.include_images"
+              @change="handleParamChange"
+            >
+              提取图片（独立分块，支持多模态检索）
+            </t-checkbox>
+            <template #tips>
+              使用统一图片提取器，与多模态分块保持一致的处理方案
+            </template>
+          </t-form-item>
         </template>
 
         <!-- Estimated chunk count -->
@@ -449,6 +464,9 @@
             </t-tag>
             <t-tag theme="success" variant="outline" size="small">
               表格: {{ parameters.table_strategy === 'independent' ? '独立' : '合并' }}
+            </t-tag>
+            <t-tag v-if="parameters.include_images" theme="danger" variant="outline" size="small">
+              + 图片块
             </t-tag>
           </t-space>
         </div>
@@ -590,6 +608,7 @@ const getHybridDefaults = (codeBlockRatio = 0) => {
     text_strategy: 'semantic',
     code_strategy: 'lines',
     table_strategy: 'independent',
+    include_images: true,  // Enable unified image extraction by default
     text_chunk_size: 600,
     text_overlap: 100,
     code_chunk_lines: codeChunkLines,

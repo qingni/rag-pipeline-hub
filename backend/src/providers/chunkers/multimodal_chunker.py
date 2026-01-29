@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
 from .base_chunker import BaseChunker
+from .image_extractor import ImageExtractor
 from ...models.chunk_metadata import (
     ChunkTypeEnum,
     create_chunk_metadata
@@ -22,6 +23,9 @@ class MultimodalChunker(BaseChunker):
     2. Extracts images (with base64 or path) as independent chunks  
     3. Extracts code blocks as independent chunks
     4. Chunks remaining text using a configurable text strategy
+    
+    Image extraction is handled by the unified ImageExtractor module for consistency
+    across different chunking strategies.
     """
     
     # Regex patterns for content extraction
@@ -33,24 +37,6 @@ class MultimodalChunker(BaseChunker):
     
     CODE_BLOCK_PATTERN = re.compile(
         r'```(\w+)?\n([\s\S]*?)```',
-        re.MULTILINE
-    )
-    
-    IMAGE_PATTERN = re.compile(
-        r'!\[([^\]]*)\]\(([^)]+)\)',
-        re.MULTILINE
-    )
-    
-    # HTML image pattern
-    HTML_IMAGE_PATTERN = re.compile(
-        r'<img[^>]+src=["\']([^"\']+)["\'][^>]*(?:alt=["\']([^"\']*)["\'])?[^>]*/?>',
-        re.IGNORECASE
-    )
-    
-    # 占位符格式匹配（匹配 [IMAGE_N: 描述] 格式）
-    # 用于识别文档加载阶段生成的图片占位符
-    PLACEHOLDER_IMAGE_PATTERN = re.compile(
-        r'\[IMAGE_(\d+):\s*([^\]]*)\]',
         re.MULTILINE
     )
     
@@ -69,6 +55,9 @@ class MultimodalChunker(BaseChunker):
             min_code_lines: Minimum lines for code extraction (default: 3)
             image_base_path: Base path for resolving relative image paths
         """
+        # Initialize image extractor placeholder before parent init
+        # (will be properly set up in validate_params called by parent)
+        self._image_extractor: Optional[ImageExtractor] = None
         super().__init__(**params)
     
     def validate_params(self) -> None:
@@ -97,6 +86,12 @@ class MultimodalChunker(BaseChunker):
         
         # Image processing
         self.image_base_path = self.params.get('image_base_path', None)
+        
+        # Initialize unified image extractor
+        self._image_extractor = ImageExtractor(
+            image_base_path=self.image_base_path,
+            include_images=self.include_images
+        )
     
     def chunk(self, text: str, metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """
@@ -292,10 +287,14 @@ class MultimodalChunker(BaseChunker):
             chunks.extend(code_chunks)
             extracted_regions.extend(code_regions)
         
-        # Extract images
+        # Extract images using unified ImageExtractor
         if self.include_images:
-            image_chunks, image_regions = self._extract_images_from_page(
-                text, global_offset, sheet_name, page_number, metadata
+            image_chunks, image_regions = self._image_extractor.extract_images(
+                text=text,
+                metadata=metadata,
+                global_offset=global_offset,
+                sheet_name=sheet_name,
+                page_number=page_number
             )
             chunks.extend(image_chunks)
             extracted_regions.extend(image_regions)
@@ -453,325 +452,6 @@ class MultimodalChunker(BaseChunker):
             regions.append((start_pos, end_pos, 'code'))
         
         return chunks, regions
-    
-    def _extract_images_from_page(
-        self,
-        text: str,
-        global_offset: int,
-        sheet_name: Optional[str],
-        page_number: Optional[int],
-        metadata: Dict[str, Any]
-    ) -> Tuple[List[Dict[str, Any]], List[Tuple[int, int, str]]]:
-        """
-        Extract images from a single page.
-        
-        支持三种图片格式的识别：
-        1. 占位符格式 [IMAGE_N: 描述] - 文档加载阶段生成，关联 images 数组数据
-        2. Markdown 格式 ![alt](path)
-        3. HTML 格式 <img src="..." />
-        
-        占位符+结构化元数据方案：
-        - 占位符格式优先匹配，从 metadata.images 获取完整图片数据
-        - 图片数据包含 file_path（用于展示）和 base64_data（用于多模态嵌入）
-        """
-        chunks = []
-        regions = []
-        
-        # 获取预加载的图片数据（来自文档加载阶段）
-        images_data = metadata.get("images", [])
-        
-        # 方式1：匹配占位符格式并关联图片数据 [IMAGE_N: 描述]
-        for match in self.PLACEHOLDER_IMAGE_PATTERN.finditer(text):
-            image_index = int(match.group(1))
-            placeholder_text = match.group(2).strip()
-            start_pos = match.start()
-            end_pos = match.end()
-            
-            # 查找对应的图片数据
-            image_info = self._find_image_by_index(images_data, image_index, page_number)
-            
-            if image_info:
-                # 从加载结果创建图片块（包含完整数据）
-                image_chunk = self._create_image_chunk_from_data(
-                    image_info=image_info,
-                    placeholder_text=placeholder_text,
-                    start_pos=global_offset + start_pos,
-                    end_pos=global_offset + end_pos,
-                    chunk_index=len(chunks),
-                    sheet_name=sheet_name,
-                    page_number=page_number
-                )
-                if image_chunk:
-                    chunks.append(image_chunk)
-                    regions.append((start_pos, end_pos, 'image'))
-            else:
-                # 没有找到对应图片数据，创建基本图片块
-                image_chunk = self._create_placeholder_image_chunk(
-                    placeholder_text=placeholder_text,
-                    image_index=image_index,
-                    start_pos=global_offset + start_pos,
-                    end_pos=global_offset + end_pos,
-                    chunk_index=len(chunks),
-                    sheet_name=sheet_name,
-                    page_number=page_number
-                )
-                if image_chunk:
-                    chunks.append(image_chunk)
-                    regions.append((start_pos, end_pos, 'image'))
-        
-        # 方式2：匹配 Markdown 图片格式 ![alt](path)
-        for match in self.IMAGE_PATTERN.finditer(text):
-            start_pos = match.start()
-            # 跳过已被占位符匹配的区域
-            if any(r[0] <= start_pos < r[1] for r in regions):
-                continue
-                
-            alt_text = match.group(1)
-            image_path = match.group(2)
-            end_pos = match.end()
-            
-            image_chunk = self._create_image_chunk_with_sheet(
-                image_path=image_path,
-                alt_text=alt_text,
-                start_pos=global_offset + start_pos,
-                end_pos=global_offset + end_pos,
-                chunk_index=len(chunks),
-                sheet_name=sheet_name,
-                page_number=page_number,
-                metadata=metadata
-            )
-            
-            if image_chunk:
-                chunks.append(image_chunk)
-                regions.append((start_pos, end_pos, 'image'))
-        
-        # 方式3：匹配 HTML 图片格式 <img src="..." />
-        for match in self.HTML_IMAGE_PATTERN.finditer(text):
-            start_pos = match.start()
-            # 跳过已匹配的区域
-            if any(r[0] <= start_pos < r[1] for r in regions):
-                continue
-            
-            image_path = match.group(1)
-            alt_text = match.group(2) if match.lastindex >= 2 else ''
-            end_pos = match.end()
-            
-            image_chunk = self._create_image_chunk_with_sheet(
-                image_path=image_path,
-                alt_text=alt_text or '',
-                start_pos=global_offset + start_pos,
-                end_pos=global_offset + end_pos,
-                chunk_index=len(chunks),
-                sheet_name=sheet_name,
-                page_number=page_number,
-                metadata=metadata
-            )
-            
-            if image_chunk:
-                chunks.append(image_chunk)
-                regions.append((start_pos, end_pos, 'image'))
-        
-        return chunks, regions
-    
-    def _find_image_by_index(
-        self, 
-        images_data: List[Dict[str, Any]], 
-        image_index: int, 
-        page_number: Optional[int] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        根据图片索引查找图片数据。
-        
-        Args:
-            images_data: 图片数组（来自文档加载结果）
-            image_index: 图片索引（占位符中的数字）
-            page_number: 页码（可选，用于精确匹配）
-            
-        Returns:
-            匹配的图片数据，或 None
-        """
-        for img in images_data:
-            if img.get("image_index") == image_index:
-                # 如果指定了页码，验证页码匹配
-                if page_number is not None:
-                    img_page = img.get("page_number")
-                    if img_page is not None and img_page != page_number:
-                        continue
-                return img
-        return None
-    
-    def _create_image_chunk_from_data(
-        self,
-        image_info: Dict[str, Any],
-        placeholder_text: str,
-        start_pos: int,
-        end_pos: int,
-        chunk_index: int,
-        sheet_name: Optional[str],
-        page_number: Optional[int]
-    ) -> Dict[str, Any]:
-        """
-        从加载阶段的图片数据创建图片块。
-        
-        这是占位符+结构化元数据方案的核心方法：
-        - 图片块的 content 使用可读的描述文本
-        - metadata 包含图片路径和缩略图（file_path 用于展示和后续向量化）
-        
-        改进设计（延迟加载）：
-        - 分块阶段只保存 file_path 和 thumbnail_base64
-        - 完整的 base64_data 在向量化阶段按需加载（仅多模态模型需要）
-        - 减少分块结果的存储空间
-        
-        Args:
-            image_info: 图片数据（来自加载结果的 images 数组）
-            placeholder_text: 占位符中的描述文本
-            start_pos: 在文档中的起始位置
-            end_pos: 在文档中的结束位置
-            chunk_index: 块索引
-            sheet_name: 工作表名称
-            page_number: 页码
-            
-        Returns:
-            图片块字典
-        """
-        # 确定图片描述（优先使用 alt_text，其次 caption，最后用 placeholder_text）
-        alt_text = image_info.get("alt_text") or image_info.get("caption") or placeholder_text
-        content = f"[Image: {alt_text}]" if alt_text else "[Image]"
-        
-        # 提取图片属性（不在分块阶段加载完整 base64）
-        file_path = image_info.get("file_path")
-        thumbnail_base64 = image_info.get("thumbnail_base64")
-        mime_type = image_info.get("mime_type")
-        width = image_info.get("width")
-        height = image_info.get("height")
-        original_size = image_info.get("original_size")
-        context_before = image_info.get("context_before")
-        context_after = image_info.get("context_after")
-        
-        # 从文件路径推断格式
-        img_format = None
-        if mime_type:
-            img_format = mime_type.split('/')[-1] if '/' in mime_type else mime_type
-        elif file_path:
-            img_format = Path(file_path).suffix.lstrip('.').lower()
-        
-        image_metadata = create_chunk_metadata(
-            chunk_type=ChunkTypeEnum.IMAGE.value,
-            chunk_id=str(uuid.uuid4()),
-            chunk_index=chunk_index,
-            content=content,
-            start_position=start_pos,
-            end_position=end_pos,
-            # 核心图片数据
-            image_path=file_path,               # 用于前端展示和向量化阶段加载
-            thumbnail_base64=thumbnail_base64,  # 用于快速预览
-            alt_text=alt_text,
-            caption=image_info.get("caption"),
-            width=width,
-            height=height,
-            original_size=original_size,
-            format=img_format,
-            mime_type=mime_type,
-            # 图片上下文（提升检索相关性）
-            context_before=context_before,
-            context_after=context_after,
-            # 原始图片索引
-            image_index=image_info.get("image_index")
-        )
-        
-        # 添加工作表和页码信息
-        if sheet_name:
-            image_metadata['sheet_name'] = sheet_name
-        if page_number is not None:
-            image_metadata['page_number'] = page_number
-        
-        return {
-            'content': content,
-            'chunk_type': ChunkTypeEnum.IMAGE.value,
-            'parent_id': None,
-            'metadata': image_metadata
-        }
-    
-    def _create_placeholder_image_chunk(
-        self,
-        placeholder_text: str,
-        image_index: int,
-        start_pos: int,
-        end_pos: int,
-        chunk_index: int,
-        sheet_name: Optional[str],
-        page_number: Optional[int]
-    ) -> Dict[str, Any]:
-        """
-        创建基于占位符的图片块（没有找到对应图片数据时使用）。
-        """
-        content = f"[Image: {placeholder_text}]" if placeholder_text else "[Image]"
-        
-        image_metadata = create_chunk_metadata(
-            chunk_type=ChunkTypeEnum.IMAGE.value,
-            chunk_id=str(uuid.uuid4()),
-            chunk_index=chunk_index,
-            content=content,
-            start_position=start_pos,
-            end_position=end_pos,
-            alt_text=placeholder_text,
-            image_index=image_index
-        )
-        
-        if sheet_name:
-            image_metadata['sheet_name'] = sheet_name
-        if page_number is not None:
-            image_metadata['page_number'] = page_number
-        
-        return {
-            'content': content,
-            'chunk_type': ChunkTypeEnum.IMAGE.value,
-            'parent_id': None,
-            'metadata': image_metadata
-        }
-    
-    def _create_image_chunk_with_sheet(
-        self,
-        image_path: str,
-        alt_text: str,
-        start_pos: int,
-        end_pos: int,
-        chunk_index: int,
-        sheet_name: Optional[str],
-        page_number: Optional[int],
-        metadata: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Create an image chunk with sheet_name support (no base64 embedding at chunking stage)."""
-        img_format = None
-        
-        if image_path:
-            img_format = Path(image_path).suffix.lstrip('.').lower()
-        
-        content = f"[Image: {alt_text}]" if alt_text else f"[Image: {image_path}]"
-        
-        image_metadata = create_chunk_metadata(
-            chunk_type=ChunkTypeEnum.IMAGE.value,
-            chunk_id=str(uuid.uuid4()),
-            chunk_index=chunk_index,
-            content=content,
-            start_position=start_pos,
-            end_position=end_pos,
-            image_path=image_path,  # 用于向量化阶段按需加载
-            alt_text=alt_text,
-            format=img_format
-        )
-        
-        if sheet_name:
-            image_metadata['sheet_name'] = sheet_name
-        if page_number is not None:
-            image_metadata['page_number'] = page_number
-        
-        return {
-            'content': content,
-            'chunk_type': ChunkTypeEnum.IMAGE.value,
-            'parent_id': None,
-            'metadata': image_metadata
-        }
     
     def _extract_text_from_page(
         self,
@@ -946,9 +626,13 @@ class MultimodalChunker(BaseChunker):
             chunks.extend(code_chunks)
             extracted_regions.extend(code_regions)
         
-        # Extract images
+        # Extract images using unified ImageExtractor
         if self.include_images:
-            image_chunks, image_regions = self._extract_images(text, metadata)
+            image_chunks, image_regions = self._image_extractor.extract_images(
+                text=text,
+                metadata=metadata,
+                global_offset=0
+            )
             chunks.extend(image_chunks)
             extracted_regions.extend(image_regions)
         
@@ -1145,291 +829,6 @@ class MultimodalChunker(BaseChunker):
             regions.append((start_pos, end_pos, 'code'))
         
         return chunks, regions
-    
-    def _extract_images(
-        self, 
-        text: str, 
-        metadata: Dict[str, Any]
-    ) -> Tuple[List[Dict[str, Any]], List[Tuple[int, int, str]]]:
-        """
-        Extract image chunks from text (full text mode).
-        
-        支持三种图片格式：
-        1. 占位符格式 [IMAGE_N: 描述] - 关联 metadata.images 数据
-        2. Markdown 格式 ![alt](path)
-        3. HTML 格式 <img src="..." />
-        """
-        chunks = []
-        regions = []
-        
-        # 获取预加载的图片数据
-        images_data = metadata.get("images", [])
-        
-        # 方式1：匹配占位符格式 [IMAGE_N: 描述]
-        for match in self.PLACEHOLDER_IMAGE_PATTERN.finditer(text):
-            image_index = int(match.group(1))
-            placeholder_text = match.group(2).strip()
-            start_pos = match.start()
-            end_pos = match.end()
-            
-            # 查找对应的图片数据
-            image_info = self._find_image_by_index(images_data, image_index)
-            
-            if image_info:
-                image_chunk = self._create_image_chunk_from_data(
-                    image_info=image_info,
-                    placeholder_text=placeholder_text,
-                    start_pos=start_pos,
-                    end_pos=end_pos,
-                    chunk_index=len(chunks),
-                    sheet_name=None,
-                    page_number=image_info.get("page_number")
-                )
-                if image_chunk:
-                    chunks.append(image_chunk)
-                    regions.append((start_pos, end_pos, 'image'))
-            else:
-                image_chunk = self._create_placeholder_image_chunk(
-                    placeholder_text=placeholder_text,
-                    image_index=image_index,
-                    start_pos=start_pos,
-                    end_pos=end_pos,
-                    chunk_index=len(chunks),
-                    sheet_name=None,
-                    page_number=None
-                )
-                if image_chunk:
-                    chunks.append(image_chunk)
-                    regions.append((start_pos, end_pos, 'image'))
-        
-        # 方式2：匹配 Markdown 图片格式
-        for match in self.IMAGE_PATTERN.finditer(text):
-            start_pos = match.start()
-            if any(r[0] <= start_pos < r[1] for r in regions):
-                continue
-                
-            alt_text = match.group(1)
-            image_path = match.group(2)
-            end_pos = match.end()
-            
-            image_chunk = self._create_image_chunk(
-                image_path=image_path,
-                alt_text=alt_text,
-                start_pos=start_pos,
-                end_pos=end_pos,
-                chunk_index=len(chunks),
-                metadata=metadata
-            )
-            
-            if image_chunk:
-                chunks.append(image_chunk)
-                regions.append((start_pos, end_pos, 'image'))
-        
-        # 方式3：匹配 HTML 图片格式
-        for match in self.HTML_IMAGE_PATTERN.finditer(text):
-            start_pos = match.start()
-            if any(r[0] <= start_pos < r[1] for r in regions):
-                continue
-            
-            image_path = match.group(1)
-            alt_text = match.group(2) if match.lastindex >= 2 else ''
-            end_pos = match.end()
-            
-            image_chunk = self._create_image_chunk(
-                image_path=image_path,
-                alt_text=alt_text or '',
-                start_pos=start_pos,
-                end_pos=end_pos,
-                chunk_index=len(chunks),
-                metadata=metadata
-            )
-            
-            if image_chunk:
-                chunks.append(image_chunk)
-                regions.append((start_pos, end_pos, 'image'))
-        
-        return chunks, regions
-    
-    def _create_image_chunk(
-        self,
-        image_path: str,
-        alt_text: str,
-        start_pos: int,
-        end_pos: int,
-        chunk_index: int,
-        metadata: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Create an image chunk (no base64 embedding at chunking stage)."""
-        img_format = None
-        
-        # Determine format from path
-        if image_path:
-            img_format = Path(image_path).suffix.lstrip('.').lower()
-        
-        # Content for image chunk (description or path)
-        content = f"[Image: {alt_text}]" if alt_text else f"[Image: {image_path}]"
-        
-        image_metadata = create_chunk_metadata(
-            chunk_type=ChunkTypeEnum.IMAGE.value,
-            chunk_id=str(uuid.uuid4()),
-            chunk_index=chunk_index,
-            content=content,
-            start_position=start_pos,
-            end_position=end_pos,
-            image_index=chunk_index,
-            image_path=image_path,  # 用于向量化阶段按需加载
-            alt_text=alt_text,
-            caption=alt_text,
-            format=img_format,
-            page_number=metadata.get('page_number')
-        )
-        
-        return {
-            'content': content,
-            'chunk_type': ChunkTypeEnum.IMAGE.value,
-            'parent_id': None,
-            'metadata': image_metadata
-        }
-    
-    def _load_image_as_base64(
-        self, 
-        image_path: str
-    ) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[str]]:
-        """
-        Load image and convert to base64 for multimodal embedding support.
-        
-        Supports:
-        - Local file paths (absolute and relative)
-        - HTTP/HTTPS URLs (with fetch)
-        - Data URLs (extract existing base64)
-        
-        Returns:
-            Tuple of (base64_string, width, height, format) or (None, None, None, None)
-        """
-        try:
-            # Handle data URLs
-            if image_path.startswith('data:'):
-                return self._extract_data_url_base64(image_path)
-            
-            # Handle HTTP/HTTPS URLs
-            if image_path.startswith(('http://', 'https://')):
-                return self._fetch_url_image_base64(image_path)
-            
-            # Handle local file paths
-            return self._load_local_image_base64(image_path)
-            
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Failed to load image {image_path}: {e}")
-            return None, None, None, None
-    
-    def _extract_data_url_base64(
-        self, 
-        data_url: str
-    ) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[str]]:
-        """Extract base64 from data URL."""
-        import re
-        
-        # Parse data URL: data:image/png;base64,xxxxx
-        match = re.match(r'data:image/(\w+);base64,(.+)', data_url)
-        if not match:
-            return None, None, None, None
-        
-        img_format = match.group(1)
-        base64_str = match.group(2)
-        
-        # Try to get dimensions
-        width, height = self._get_base64_image_dimensions(base64_str)
-        
-        return base64_str, width, height, img_format
-    
-    def _fetch_url_image_base64(
-        self, 
-        url: str
-    ) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[str]]:
-        """Fetch image from URL and convert to base64."""
-        try:
-            import requests
-            from io import BytesIO
-            
-            # Fetch with timeout
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            
-            image_data = response.content
-            base64_str = base64.b64encode(image_data).decode('utf-8')
-            
-            # Detect format from content-type or URL
-            content_type = response.headers.get('content-type', '')
-            if 'png' in content_type:
-                img_format = 'png'
-            elif 'gif' in content_type:
-                img_format = 'gif'
-            elif 'webp' in content_type:
-                img_format = 'webp'
-            else:
-                img_format = 'jpeg'  # Default
-            
-            # Try to get dimensions
-            width, height = None, None
-            try:
-                from PIL import Image
-                img = Image.open(BytesIO(image_data))
-                width, height = img.size
-            except ImportError:
-                pass
-            
-            return base64_str, width, height, img_format
-            
-        except Exception:
-            return None, None, None, None
-    
-    def _load_local_image_base64(
-        self, 
-        image_path: str
-    ) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[str]]:
-        """Load local image file and convert to base64."""
-        # Resolve relative path
-        if self.image_base_path and not Path(image_path).is_absolute():
-            full_path = Path(self.image_base_path) / image_path
-        else:
-            full_path = Path(image_path)
-        
-        if not full_path.exists():
-            return None, None, None, None
-        
-        # Read and encode image
-        with open(full_path, 'rb') as f:
-            image_data = f.read()
-        
-        base64_str = base64.b64encode(image_data).decode('utf-8')
-        img_format = full_path.suffix.lstrip('.').lower()
-        
-        # Try to get dimensions
-        width, height = None, None
-        try:
-            from PIL import Image
-            img = Image.open(full_path)
-            width, height = img.size
-        except ImportError:
-            pass
-        
-        return base64_str, width, height, img_format
-    
-    def _get_base64_image_dimensions(
-        self, 
-        base64_str: str
-    ) -> Tuple[Optional[int], Optional[int]]:
-        """Get dimensions from base64 encoded image."""
-        try:
-            from PIL import Image
-            from io import BytesIO
-            
-            image_data = base64.b64decode(base64_str)
-            img = Image.open(BytesIO(image_data))
-            return img.size
-        except Exception:
-            return None, None
     
     def _extract_text(
         self, 

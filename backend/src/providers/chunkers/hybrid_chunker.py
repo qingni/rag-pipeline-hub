@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 import re
 import logging
 from .base_chunker import BaseChunker
+from .image_extractor import ImageExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +19,15 @@ class HybridChunker(BaseChunker):
     - Text content: semantic, paragraph, or character chunking
     - Code blocks: line-based chunking
     - Tables: independent chunks (preserve as Markdown)
-    - Images: independent chunks (preserve metadata)
+    - Images: independent chunks (using unified ImageExtractor for multimodal retrieval)
     
     When text_strategy is 'semantic', supports embedding models:
     - bge-m3: 1024维，8K上下文，多语言，速度快（推荐）
     - qwen3-embedding-8b: 4096维，32K上下文，高精度
     - hunyuan-embedding: 1024维，腾讯混元
+    
+    Image extraction uses the same unified ImageExtractor as MultimodalChunker,
+    ensuring consistent image handling across all chunking strategies for multimodal retrieval.
     """
     
     def __init__(self, **params):
@@ -36,6 +40,8 @@ class HybridChunker(BaseChunker):
         - use_embedding: Enable/disable embedding for semantic (default: True)
         - code_strategy: Strategy for code blocks ('lines', 'character', 'none')
         - table_strategy: Strategy for tables ('independent', 'merge_with_text')
+        - include_images: Whether to extract images using unified ImageExtractor (default: True)
+        - image_base_path: Base path for resolving relative image paths
         """
         super().__init__(**params)
         self._sub_chunkers = {}
@@ -43,6 +49,11 @@ class HybridChunker(BaseChunker):
         # Store embedding params for semantic text chunking
         self._embedding_model = params.get('embedding_model', 'bge-m3')
         self._use_embedding = params.get('use_embedding', True)
+        
+        # Image extraction params
+        self._include_images = params.get('include_images', True)
+        self._image_base_path = params.get('image_base_path')
+        self._image_extractor: Optional[ImageExtractor] = None
     
     def validate_params(self) -> None:
         """
@@ -74,6 +85,16 @@ class HybridChunker(BaseChunker):
         code_chunk_lines = self.params.get('code_chunk_lines', 50)
         if not isinstance(code_chunk_lines, int) or code_chunk_lines < 10:
             raise ValueError("code_chunk_lines must be >= 10")
+        
+        # Initialize unified image extractor if images are enabled
+        self._include_images = self.params.get('include_images', True)
+        self._image_base_path = self.params.get('image_base_path')
+        
+        if self._include_images:
+            self._image_extractor = ImageExtractor(
+                image_base_path=self._image_base_path,
+                include_images=self._include_images
+            )
     
     def _get_text_chunker(self):
         """Get or create the text chunker based on configuration."""
@@ -115,6 +136,7 @@ class HybridChunker(BaseChunker):
         Args:
             text: Input text to chunk
             metadata: Optional metadata about the source document
+                     Expected to contain 'images' array from document loading for image extraction
         
         Returns:
             List of chunk dictionaries with content type markers
@@ -122,11 +144,24 @@ class HybridChunker(BaseChunker):
         if not text or len(text) == 0:
             return []
         
+        metadata = metadata or {}
         chunks = []
         chunk_index = 0
         
-        # Extract different content types
-        content_segments = self._segment_content(text)
+        # First, extract images using unified ImageExtractor if enabled
+        # This ensures consistent image handling with MultimodalChunker
+        image_regions = []
+        if self._include_images and self._image_extractor:
+            image_chunks, image_regions = self._image_extractor.extract_images(
+                text=text,
+                metadata=metadata,
+                global_offset=0
+            )
+            chunks.extend(image_chunks)
+            chunk_index += len(image_chunks)
+        
+        # Extract different content types (excluding already processed image regions)
+        content_segments = self._segment_content(text, image_regions)
         
         for segment in content_segments:
             segment_type = segment['type']
@@ -159,23 +194,7 @@ class HybridChunker(BaseChunker):
                     chunk_index += 1
                 # else: merge_with_text - will be handled with surrounding text
                 
-            elif segment_type == 'image':
-                # Handle images as independent chunks
-                image_chunk = self._create_chunk(
-                    content=segment.get('caption', ''),
-                    index=chunk_index,
-                    start_pos=segment_start,
-                    end_pos=segment_start + len(segment_content),
-                    chunk_type='image',
-                    strategy='hybrid',
-                    content_type='image',
-                    image_path=segment.get('path', ''),
-                    image_alt=segment.get('alt', '')
-                )
-                chunks.append(image_chunk)
-                chunk_index += 1
-                
-            else:
+            elif segment_type == 'text':
                 # Chunk regular text
                 text_chunks = self._chunk_text(segment_content, segment_start, chunk_index)
                 chunks.extend(text_chunks)
@@ -188,18 +207,26 @@ class HybridChunker(BaseChunker):
         logger.info(f"Hybrid chunking produced {len(chunks)} chunks")
         return chunks
     
-    def _segment_content(self, text: str) -> List[Dict[str, Any]]:
+    def _segment_content(
+        self,
+        text: str,
+        exclude_regions: List[tuple] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Segment content into different types (text, code, table, image).
+        Segment content into different types (text, code, table).
+        
+        Note: Images are now handled separately by ImageExtractor before this method.
+        This method only handles code blocks and tables.
         
         Args:
             text: Input text
+            exclude_regions: List of (start, end, type) tuples to exclude (e.g., image regions)
         
         Returns:
             List of content segments with type and position
         """
         segments = []
-        current_pos = 0
+        exclude_regions = exclude_regions or []
         
         # Pattern to match code blocks (fenced or indented)
         code_pattern = r'```[\w]*\n[\s\S]*?```|`{3,}[\s\S]*?`{3,}'
@@ -207,29 +234,22 @@ class HybridChunker(BaseChunker):
         # Pattern to match Markdown tables
         table_pattern = r'(?:^\|.+\|$\n)+(?:^\|[-:| ]+\|$\n)(?:^\|.+\|$\n?)+'
         
-        # Pattern to match Markdown images
-        image_pattern = r'!\[([^\]]*)\]\(([^)]+)\)'
+        # Combine patterns (excluding images - now handled by ImageExtractor)
+        combined_pattern = f'({code_pattern})|({table_pattern})'
         
-        # Combine all patterns
-        combined_pattern = f'({code_pattern})|({table_pattern})|({image_pattern})'
+        # Track all non-text regions
+        non_text_regions = list(exclude_regions)  # Start with excluded regions
         
-        text_buffer = []
-        text_start = 0
-        
+        # Find code and table matches
         for match in re.finditer(combined_pattern, text, re.MULTILINE):
             match_start = match.start()
             match_end = match.end()
             matched_text = match.group()
             
-            # Add preceding text as text segment
-            if match_start > current_pos:
-                text_content = text[current_pos:match_start]
-                if text_content.strip():
-                    segments.append({
-                        'type': 'text',
-                        'content': text_content,
-                        'start_pos': current_pos
-                    })
+            # Skip if overlaps with excluded regions
+            if any(r[0] <= match_start < r[1] or r[0] < match_end <= r[1]
+                   for r in exclude_regions):
+                continue
             
             # Determine segment type
             if match.group(1):  # Code block
@@ -237,28 +257,70 @@ class HybridChunker(BaseChunker):
                     'type': 'code',
                     'content': matched_text,
                     'start_pos': match_start,
+                    'end_pos': match_end,
                     'language': self._extract_code_language(matched_text)
                 })
+                non_text_regions.append((match_start, match_end, 'code'))
             elif match.group(2):  # Table
                 rows, cols = self._count_table_dimensions(matched_text)
                 segments.append({
                     'type': 'table',
                     'content': matched_text,
                     'start_pos': match_start,
+                    'end_pos': match_end,
                     'rows': rows,
                     'cols': cols
                 })
-            elif match.group(3):  # Image
-                segments.append({
-                    'type': 'image',
-                    'content': matched_text,
-                    'start_pos': match_start,
-                    'alt': match.group(3),
-                    'path': match.group(4),
-                    'caption': match.group(3) or ''
-                })
+                non_text_regions.append((match_start, match_end, 'table'))
+        
+        # Extract text segments (excluding all non-text regions)
+        text_segments = self._extract_text_segments(text, non_text_regions)
+        segments.extend(text_segments)
+        
+        # Sort segments by position
+        segments.sort(key=lambda x: x['start_pos'])
+        
+        # If no special content found, treat entire text as text
+        if not segments:
+            segments.append({
+                'type': 'text',
+                'content': text,
+                'start_pos': 0
+            })
+        
+        return segments
+    
+    def _extract_text_segments(
+        self,
+        text: str,
+        non_text_regions: List[tuple]
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract text segments that are not covered by non-text regions.
+        
+        Args:
+            text: Full text
+            non_text_regions: List of (start, end, type) tuples
             
-            current_pos = match_end
+        Returns:
+            List of text segment dictionaries
+        """
+        segments = []
+        
+        # Sort regions by start position
+        sorted_regions = sorted(non_text_regions, key=lambda r: r[0])
+        
+        current_pos = 0
+        for start, end, _ in sorted_regions:
+            if current_pos < start:
+                text_content = text[current_pos:start]
+                if text_content.strip():
+                    segments.append({
+                        'type': 'text',
+                        'content': text_content,
+                        'start_pos': current_pos
+                    })
+            current_pos = max(current_pos, end)
         
         # Add remaining text
         if current_pos < len(text):
@@ -269,14 +331,6 @@ class HybridChunker(BaseChunker):
                     'content': remaining,
                     'start_pos': current_pos
                 })
-        
-        # If no special content found, treat entire text as text
-        if not segments:
-            segments.append({
-                'type': 'text',
-                'content': text,
-                'start_pos': 0
-            })
         
         return segments
     
