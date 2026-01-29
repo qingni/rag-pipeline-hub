@@ -271,11 +271,11 @@ const selectedStrategyType = computed(() => chunkingStore.selectedStrategy?.type
 const strategyLevel = ref('advanced')
 
 // Strategy classification
-const advancedStrategies = ['semantic', 'parent_child', 'hybrid', 'multimodal']
+const advancedStrategies = ['semantic', 'parent_child', 'hybrid']
 const basicStrategies = ['character', 'paragraph', 'heading']
 
 // New strategies added in this optimization
-const newStrategies = ['parent_child', 'hybrid', 'multimodal']
+const newStrategies = ['parent_child', 'hybrid']
 
 // Strategy details for tooltip
 const strategyDetails = {
@@ -310,16 +310,10 @@ const strategyDetails = {
     useCase: '长文档、需要上下文的问答'
   },
   hybrid: {
-    description: '针对不同内容类型（正文、代码块、表格）应用最适合的分块方法',
-    pros: '智能适配、灵活度高',
+    description: '针对不同内容类型（正文、代码块、表格、图片）智能应用最合适的分块策略，支持自定义阈值',
+    pros: '智能适配、灵活度高、支持多内容类型提取',
     cons: '配置项较多',
-    useCase: '混合内容文档、技术文档'
-  },
-  multimodal: {
-    description: '将表格、图片、代码块等非文本内容独立分块',
-    pros: '支持多种内容类型',
-    cons: '需要文档包含多模态内容',
-    useCase: '富媒体文档、技术手册'
+    useCase: '混合内容文档、技术手册、富媒体文档'
   }
 }
 

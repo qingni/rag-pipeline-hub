@@ -54,6 +54,9 @@ class TableChunkMetadata(BaseChunkMetadata):
     table_title: Optional[str] = None
     has_header: bool = True
     table_markdown: Optional[str] = None  # Full Markdown representation
+    context_before: Optional[str] = None  # Text context before table
+    context_after: Optional[str] = None  # Text context after table
+    section_title: Optional[str] = None  # Section/heading title the table belongs to
 
 
 @dataclass
@@ -88,6 +91,9 @@ class CodeChunkMetadata(BaseChunkMetadata):
     function_name: Optional[str] = None
     class_name: Optional[str] = None
     is_complete_block: bool = True
+    context_before: Optional[str] = None  # Text context before code block
+    context_after: Optional[str] = None  # Text context after code block
+    section_title: Optional[str] = None  # Section/heading title the code belongs to
 
 
 def create_chunk_metadata(

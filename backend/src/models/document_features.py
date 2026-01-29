@@ -41,6 +41,13 @@ class DocumentFeatures:
     document_format: str = ""  # 原始文档格式（json, csv, etc.）
     estimated_complexity: str = "medium"  # low, medium, high
     
+    # 混合分块正文策略推荐相关特征
+    has_table_layout: bool = True  # 表格是否保留了布局（Markdown表格格式）
+    is_flattened_tabular: bool = False  # 是否是扁平化的表格数据（布局丢失）
+    is_log_like: bool = False  # 是否是日志类文本（逐行独立记录）
+    is_slide_like: bool = False  # 是否是幻灯片类文档（每页/段独立）
+    line_length_uniformity: float = 0.0  # 行长度均匀度（0-1，越高越均匀）
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)

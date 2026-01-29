@@ -449,11 +449,13 @@ class ImageExtractor:
     ) -> Optional[Dict[str, Any]]:
         """
         Create image chunk from Markdown/HTML image reference.
-        
+
         Note: No base64 embedding at chunking stage - will be loaded during vectorization.
+
+        ✨ Enhanced: Extract context information for better retrieval relevance.
         """
         img_format = None
-        
+
         if image_path:
             # Resolve relative path if base path is provided
             if self.image_base_path and not Path(image_path).is_absolute():
@@ -463,13 +465,56 @@ class ImageExtractor:
                     resolved_path = image_path
             else:
                 resolved_path = image_path
-            
+
             img_format = Path(image_path).suffix.lstrip('.').lower()
         else:
             resolved_path = image_path
-        
+
         content = f"[Image: {alt_text}]" if alt_text else f"[Image: {image_path}]"
-        
+
+        # ✨ Extract context information (same logic as HybridChunker)
+        context_before = None
+        context_after = None
+        section_title = None
+
+        # Extract context if we have access to the full text
+        pages = metadata.get("pages", [])
+        if pages:
+            # Find the page containing this position
+            global_position = start_pos
+            current_pos = 0
+
+            for page in pages:
+                page_text = page.get("text", "")
+                page_length = len(page_text)
+
+                if current_pos <= global_position < current_pos + page_length:
+                    # Found the page
+                    local_pos = global_position - current_pos
+
+                    # Extract section title
+                    text_before = page_text[:local_pos]
+                    heading_pattern = r'^(#{1,6})\s+(.+)$'
+                    lines = text_before.split('\n')
+                    for line in reversed(lines):
+                        match = re.match(heading_pattern, line.strip())
+                        if match:
+                            section_title = line.strip()
+                            break
+
+                    # Extract context before
+                    context_chars = 300
+                    context_before_start = max(0, local_pos - context_chars)
+                    context_before = page_text[context_before_start:local_pos].strip()
+
+                    # Extract context after
+                    context_after_end = min(len(page_text), local_pos + context_chars)
+                    context_after = page_text[local_pos:context_after_end].strip()
+
+                    break
+
+                current_pos += page_length + 2  # +2 for separator
+
         image_metadata = create_chunk_metadata(
             chunk_type=ChunkTypeEnum.IMAGE.value,
             chunk_id=str(uuid.uuid4()),
@@ -480,14 +525,18 @@ class ImageExtractor:
             image_path=resolved_path,  # For vectorization stage
             alt_text=alt_text,
             caption=alt_text,
-            format=img_format
+            format=img_format,
+            # ✨ Add context information
+            context_before=context_before,
+            context_after=context_after,
+            section_title=section_title
         )
-        
+
         if sheet_name:
             image_metadata['sheet_name'] = sheet_name
         if page_number is not None:
             image_metadata['page_number'] = page_number
-        
+
         return {
             'content': content,
             'chunk_type': ChunkTypeEnum.IMAGE.value,

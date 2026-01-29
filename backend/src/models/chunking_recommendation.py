@@ -105,8 +105,7 @@ STRATEGY_DISPLAY_NAMES = {
     StrategyType.HEADING: "按标题分块",
     StrategyType.SEMANTIC: "语义分块",
     StrategyType.PARENT_CHILD: "父子文档分块",
-    StrategyType.HYBRID: "混合分块策略",
-    StrategyType.MULTIMODAL: "多模态分块"
+    StrategyType.HYBRID: "混合分块",
 }
 
 

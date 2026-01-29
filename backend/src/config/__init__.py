@@ -76,10 +76,6 @@ class Settings(BaseSettings):
     SEMANTIC_CHUNKER_USE_EMBEDDING: bool = True
     SEMANTIC_CHUNKER_SIMILARITY_THRESHOLD: float = 0.7
     
-    # Multimodal Chunker: qwen3-vl-embedding-8b for image-text unified embedding
-    MULTIMODAL_EMBEDDING_MODEL: str = "qwen3-vl-embedding-8b"
-    MULTIMODAL_CHUNKER_USE_EMBEDDING: bool = False  # 默认不使用（未来功能）
-    
     # Large document processing
     LARGE_DOCUMENT_THRESHOLD: int = 50000000  # 5000万字符
     STREAM_SEGMENT_SIZE: int = 100000  # 流式处理段大小
@@ -113,7 +109,6 @@ from .smart_params import (
     LENGTH_ADJUSTMENTS,
     EMBEDDING_MODEL_PARAMS,
     HYBRID_STRATEGY_PARAMS,
-    MULTIMODAL_STRATEGY_PARAMS,
     PARENT_CHILD_STRATEGY_PARAMS,
     HEADING_STRATEGY_PARAMS,
     PARAGRAPH_STRATEGY_PARAMS,
@@ -125,7 +120,6 @@ from .smart_params import (
     get_adaptive_text_params,
     get_semantic_params,
     get_hybrid_params,
-    get_multimodal_params,
     get_parent_child_params,
     get_heading_params,
     get_paragraph_params,
@@ -149,7 +143,6 @@ __all__ = [
     "LENGTH_ADJUSTMENTS",
     "EMBEDDING_MODEL_PARAMS",
     "HYBRID_STRATEGY_PARAMS",
-    "MULTIMODAL_STRATEGY_PARAMS",
     "PARENT_CHILD_STRATEGY_PARAMS",
     "HEADING_STRATEGY_PARAMS",
     "PARAGRAPH_STRATEGY_PARAMS",
@@ -161,7 +154,6 @@ __all__ = [
     "get_adaptive_text_params",
     "get_semantic_params",
     "get_hybrid_params",
-    "get_multimodal_params",
     "get_parent_child_params",
     "get_heading_params",
     "get_paragraph_params",

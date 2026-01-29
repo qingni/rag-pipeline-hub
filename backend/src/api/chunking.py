@@ -258,7 +258,7 @@ async def get_format_chunking_params(
 # NEW: GET /api/chunking/smart-params - Get smart parameters for a specific strategy
 @router.get("/smart-params")
 async def get_smart_chunking_params(
-    strategy_type: str = Query(..., description="Strategy type (character, paragraph, heading, semantic, parent_child, hybrid, multimodal)"),
+    strategy_type: str = Query(..., description="Strategy type (character, paragraph, heading, semantic, parent_child, hybrid)"),
     document_format: str = Query("default", description="Document format (e.g., 'pdf', 'csv', 'docx')"),
     char_count: int = Query(10000, ge=0, description="Document character count"),
     embedding_model: str = Query("bge-m3", description="Embedding model for semantic strategies"),
@@ -288,7 +288,7 @@ async def get_smart_chunking_params(
     from ..config.smart_params import get_smart_params, get_document_length_category
     
     # 验证策略类型
-    valid_strategies = ["character", "paragraph", "heading", "semantic", "parent_child", "hybrid", "multimodal"]
+    valid_strategies = ["character", "paragraph", "heading", "semantic", "parent_child", "hybrid"]
     if strategy_type.lower() not in valid_strategies:
         raise ValidationError(f"Invalid strategy type: {strategy_type}. Must be one of: {', '.join(valid_strategies)}")
     

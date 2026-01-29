@@ -203,28 +203,28 @@
           </t-alert>
         </template>
 
-        <!-- Multimodal strategy parameters -->
-        <template v-if="strategyType === 'multimodal'">
+        <!-- Hybrid strategy parameters -->
+        <template v-if="strategyType === 'hybrid'">
           <t-alert theme="info" style="margin-bottom: 16px">
             <template #message>
-              多模态分块：独立提取表格、图片、代码块，分别生成不同类型的分块
+              混合分块：针对不同内容类型（正文、代码、表格、图片）智能应用最合适的分块策略，支持自定义阈值
             </template>
           </t-alert>
 
-          <!-- Content type toggles -->
+          <!-- Content type extraction toggles -->
           <t-form-item label="内容类型提取">
             <t-space direction="vertical" style="width: 100%">
               <t-checkbox
                 v-model="parameters.include_tables"
                 @change="handleParamChange"
               >
-                提取表格（Markdown格式）
+                提取表格（Markdown格式，独立分块）
               </t-checkbox>
               <t-checkbox
                 v-model="parameters.include_images"
                 @change="handleParamChange"
               >
-                提取图片（独立分块）
+                提取图片（独立分块，支持多模态检索）
               </t-checkbox>
               <div v-if="parameters.include_images" class="sub-option-tips" style="padding-left: 24px;">
                 当前仅保存图片路径；向量化时若选用多模态模型，将自动加载图片内容
@@ -240,14 +240,28 @@
 
           <t-divider />
 
-          <!-- Text chunking strategy -->
-          <t-form-item label="文本分块策略" name="text_strategy">
+          <!-- Text strategy selection with smart recommendation -->
+          <t-form-item label="正文分块策略" name="text_strategy">
             <t-select
               v-model="parameters.text_strategy"
-              :options="textStrategyOptions"
+              :options="hybridTextStrategyOptions"
               @change="handleParamChange"
             />
-            <template #tips>非多模态内容的文本分块方式</template>
+            <template #tips>
+              <div v-if="recommendedTextStrategy && recommendedTextStrategy !== parameters.text_strategy" class="recommend-tip">
+                <t-icon name="lightbulb" style="color: var(--td-warning-color); margin-right: 4px;" />
+                <span style="color: var(--td-warning-color);">
+                  推荐：{{ getTextStrategyLabel(recommendedTextStrategy) }}
+                </span>
+                <span v-if="recommendedTextStrategyReason" style="color: var(--td-text-color-secondary); margin-left: 4px;">
+                  （{{ recommendedTextStrategyReason }}）
+                </span>
+                <t-link theme="primary" size="small" style="margin-left: 8px;" @click="applyRecommendedTextStrategy">
+                  应用推荐
+                </t-link>
+              </div>
+              <span v-else>普通文本内容的分块方式</span>
+            </template>
           </t-form-item>
 
           <template v-if="parameters.text_strategy !== 'none'">
@@ -270,74 +284,8 @@
                 :step="10"
                 @change="handleParamChange"
               />
-              <template #tips>相邻文本块的重叠字符数</template>
             </t-form-item>
           </template>
-
-          <t-divider />
-
-          <!-- Extraction thresholds -->
-          <t-form-item label="最小表格行数" name="min_table_rows">
-            <t-input-number
-              v-model="parameters.min_table_rows"
-              :min="1"
-              :max="10"
-              :step="1"
-              @change="handleParamChange"
-            />
-            <template #tips>少于此行数的表格将被忽略</template>
-          </t-form-item>
-
-          <t-form-item label="最小代码行数" name="min_code_lines">
-            <t-input-number
-              v-model="parameters.min_code_lines"
-              :min="1"
-              :max="20"
-              :step="1"
-              @change="handleParamChange"
-            />
-            <template #tips>少于此行数的代码块将被忽略</template>
-          </t-form-item>
-        </template>
-
-        <!-- Hybrid strategy parameters -->
-        <template v-if="strategyType === 'hybrid'">
-          <t-alert theme="info" style="margin-bottom: 16px">
-            <template #message>
-              混合分块：针对不同内容类型（正文、代码、表格）应用最合适的分块策略
-            </template>
-          </t-alert>
-
-          <!-- Text strategy selection -->
-          <t-form-item label="正文分块策略" name="text_strategy">
-            <t-select
-              v-model="parameters.text_strategy"
-              :options="hybridTextStrategyOptions"
-              @change="handleParamChange"
-            />
-            <template #tips>普通文本内容的分块方式</template>
-          </t-form-item>
-
-          <t-form-item label="文本块大小" name="text_chunk_size">
-            <t-input-number
-              v-model="parameters.text_chunk_size"
-              :min="100"
-              :max="5000"
-              :step="100"
-              @change="handleParamChange"
-            />
-            <template #tips>每个文本块的字符数</template>
-          </t-form-item>
-
-          <t-form-item label="文本重叠度" name="text_overlap">
-            <t-input-number
-              v-model="parameters.text_overlap"
-              :min="0"
-              :max="Math.floor(parameters.text_chunk_size * 0.3)"
-              :step="10"
-              @change="handleParamChange"
-            />
-          </t-form-item>
 
           <!-- Semantic-specific params -->
           <t-form-item v-if="parameters.text_strategy === 'semantic'" label="语义相似度阈值">
@@ -375,10 +323,10 @@
             </template>
           </t-form-item>
 
-          <t-divider />
+          <t-divider v-if="parameters.include_code" />
 
           <!-- Code strategy selection -->
-          <t-form-item label="代码分块策略" name="code_strategy">
+          <t-form-item v-if="parameters.include_code" label="代码分块策略" name="code_strategy">
             <t-select
               v-model="parameters.code_strategy"
               :options="codeStrategyOptions"
@@ -387,7 +335,7 @@
             <template #tips>代码块的分块方式</template>
           </t-form-item>
 
-          <t-form-item v-if="parameters.code_strategy === 'lines'" label="每块行数">
+          <t-form-item v-if="parameters.include_code && parameters.code_strategy === 'lines'" label="每块行数">
             <t-input-number
               v-model="parameters.code_chunk_lines"
               :min="10"
@@ -397,7 +345,7 @@
             />
           </t-form-item>
 
-          <t-form-item v-if="parameters.code_strategy === 'lines'" label="代码重叠行数">
+          <t-form-item v-if="parameters.include_code && parameters.code_strategy === 'lines'" label="代码重叠行数">
             <t-input-number
               v-model="parameters.code_overlap_lines"
               :min="0"
@@ -407,31 +355,40 @@
             />
           </t-form-item>
 
-          <t-divider />
+          <!-- Extraction thresholds -->
+          <t-divider v-if="parameters.include_tables || parameters.include_code" />
+          <t-form-item v-if="parameters.include_tables" label="最小表格行数" name="min_table_rows">
+            <t-input-number
+              v-model="parameters.min_table_rows"
+              :min="1"
+              :max="10"
+              :step="1"
+              @change="handleParamChange"
+            />
+            <template #tips>少于此行数的表格将被忽略</template>
+          </t-form-item>
+
+          <t-form-item v-if="parameters.include_code" label="最小代码行数" name="min_code_lines">
+            <t-input-number
+              v-model="parameters.min_code_lines"
+              :min="1"
+              :max="20"
+              :step="1"
+              @change="handleParamChange"
+            />
+            <template #tips>少于此行数的代码块将被忽略</template>
+          </t-form-item>
+
+          <t-divider v-if="parameters.include_tables" />
 
           <!-- Table strategy selection -->
-          <t-form-item label="表格分块策略" name="table_strategy">
+          <t-form-item v-if="parameters.include_tables" label="表格分块策略" name="table_strategy">
             <t-select
               v-model="parameters.table_strategy"
               :options="tableStrategyOptions"
               @change="handleParamChange"
             />
             <template #tips>表格内容的处理方式</template>
-          </t-form-item>
-
-          <t-divider />
-
-          <!-- Image extraction option -->
-          <t-form-item label="图片处理">
-            <t-checkbox
-              v-model="parameters.include_images"
-              @change="handleParamChange"
-            >
-              提取图片（独立分块，支持多模态检索）
-            </t-checkbox>
-            <template #tips>
-              使用统一图片提取器，与多模态分块保持一致的处理方案
-            </template>
           </t-form-item>
         </template>
 
@@ -444,25 +401,14 @@
           <t-tag v-if="strategyType === 'parent_child'" theme="primary" variant="light" style="margin-left: 8px">
             约 {{ estimatedParentChunks }} 个父块
           </t-tag>
-          <t-space v-if="strategyType === 'multimodal'" style="margin-top: 8px">
-            <t-tag v-if="parameters.include_tables" theme="success" variant="outline" size="small">
-              + 表格块
-            </t-tag>
-            <t-tag v-if="parameters.include_images" theme="warning" variant="outline" size="small">
-              + 图片块
-            </t-tag>
-            <t-tag v-if="parameters.include_code" theme="danger" variant="outline" size="small">
-              + 代码块
-            </t-tag>
-          </t-space>
           <t-space v-if="strategyType === 'hybrid'" style="margin-top: 8px">
             <t-tag theme="primary" variant="outline" size="small">
-              正文: {{ parameters.text_strategy }}
+              正文: {{ parameters.text_strategy === 'none' ? '不分块' : parameters.text_strategy }}
             </t-tag>
-            <t-tag v-if="parameters.code_strategy !== 'none'" theme="warning" variant="outline" size="small">
+            <t-tag v-if="parameters.include_code && parameters.code_strategy !== 'none'" theme="warning" variant="outline" size="small">
               代码: {{ parameters.code_strategy }}
             </t-tag>
-            <t-tag theme="success" variant="outline" size="small">
+            <t-tag v-if="parameters.include_tables" theme="success" variant="outline" size="small">
               表格: {{ parameters.table_strategy === 'independent' ? '独立' : '合并' }}
             </t-tag>
             <t-tag v-if="parameters.include_images" theme="danger" variant="outline" size="small">
@@ -503,17 +449,13 @@ const headingLevels = [
   { label: 'H6', value: 6 }
 ]
 
-const textStrategyOptions = [
-  { label: '按字符分块', value: 'character' },
-  { label: '按段落分块', value: 'paragraph' },
-  { label: '不分块（仅提取多模态）', value: 'none' }
-]
-
+// Hybrid text strategy options (includes all text strategies + 'none' for extraction-only mode)
 const hybridTextStrategyOptions = [
-  { label: '语义分块（推荐）', value: 'semantic' },
+  { label: '语义分块', value: 'semantic' },
   { label: '按段落分块', value: 'paragraph' },
   { label: '按字符分块', value: 'character' },
-  { label: '按标题分块', value: 'heading' }
+  { label: '按标题分块', value: 'heading' },
+  { label: '不分块（仅提取表格/图片/代码）', value: 'none' }
 ]
 
 const codeStrategyOptions = [
@@ -533,6 +475,37 @@ const embeddingModelOptions = [
   { label: 'Qwen3-Embedding-8B（4096维，32K上下文，高精度）', value: 'qwen3-embedding-8b' },
   { label: '混元 Embedding（1024维）', value: 'hunyuan-embedding' }
 ]
+
+// ========== 智能正文策略推荐 ==========
+
+// 从后端推荐参数中获取推荐的正文策略
+const recommendedTextStrategy = computed(() => {
+  if (strategyType.value !== 'hybrid') return null
+  const storeParams = chunkingStore.strategyParameters || {}
+  return storeParams.text_strategy || null
+})
+
+// 获取推荐理由
+const recommendedTextStrategyReason = computed(() => {
+  if (strategyType.value !== 'hybrid') return ''
+  const storeParams = chunkingStore.strategyParameters || {}
+  return storeParams.text_strategy_reason || ''
+})
+
+// 获取策略标签
+const getTextStrategyLabel = (strategy) => {
+  const option = hybridTextStrategyOptions.find(opt => opt.value === strategy)
+  // 移除"（推荐）"后缀以保持简洁
+  return option ? option.label.replace('（推荐）', '') : strategy
+}
+
+// 应用推荐的正文策略
+const applyRecommendedTextStrategy = () => {
+  if (recommendedTextStrategy.value) {
+    parameters.value.text_strategy = recommendedTextStrategy.value
+    handleParamChange()
+  }
+}
 
 // Get embedding model description tips with smart params
 const getEmbeddingModelTips = (model) => {
@@ -579,19 +552,7 @@ const getParentChildDefaults = (charCount = 10000) => {
   }
 }
 
-// Default parameters for multimodal strategy
-const multimodalDefaults = {
-  include_tables: true,
-  include_images: true,
-  include_code: true,
-  text_strategy: 'character',
-  text_chunk_size: 500,
-  text_overlap: 50,
-  min_table_rows: 2,
-  min_code_lines: 3
-}
-
-// Default parameters for hybrid strategy (smart based on code ratio)
+// Default parameters for hybrid strategy
 const getHybridDefaults = (codeBlockRatio = 0) => {
   let codeChunkLines = 50
   let codeOverlapLines = 8
@@ -605,14 +566,29 @@ const getHybridDefaults = (codeBlockRatio = 0) => {
   }
   
   return {
+    // Content extraction settings
+    include_tables: true,
+    include_images: true,
+    include_code: true,
+    
+    // Text strategy
     text_strategy: 'semantic',
-    code_strategy: 'lines',
-    table_strategy: 'independent',
-    include_images: true,  // Enable unified image extraction by default
     text_chunk_size: 600,
     text_overlap: 100,
+    
+    // Code strategy
+    code_strategy: 'lines',
     code_chunk_lines: codeChunkLines,
     code_overlap_lines: codeOverlapLines,
+    
+    // Table strategy
+    table_strategy: 'independent',
+    
+    // Extraction thresholds
+    min_table_rows: 2,
+    min_code_lines: 3,
+    
+    // Semantic params
     similarity_threshold: 0.55,
     use_embedding: true,
     embedding_model: 'bge-m3'
@@ -687,24 +663,17 @@ const estimateChunkCount = () => {
     const childStep = childSize - childOverlap
     const childrenPerParent = Math.ceil(parentSize / childStep)
     estimatedChunks.value = estimatedParentChunks.value * childrenPerParent
-  } else if (strategyType.value === 'multimodal') {
-    // For multimodal, estimate based on text strategy
+  } else if (strategyType.value === 'hybrid') {
+    // For hybrid, estimate based on text strategy and content types
     if (parameters.value.text_strategy === 'none') {
-      estimatedChunks.value = 0  // Will show multimodal tags instead
+      estimatedChunks.value = 0  // Will show content type tags instead
     } else {
       const textSize = parameters.value.text_chunk_size || 500
       const textOverlap = parameters.value.text_overlap || 50
       const effectiveSize = textSize - textOverlap
-      // Estimate about 70% of content is text (rest is tables/images/code)
-      estimatedChunks.value = Math.ceil((estimatedTextLength * 0.7) / effectiveSize)
+      // Estimate about 60% of content is text, 20% code, 20% tables/images
+      estimatedChunks.value = Math.ceil((estimatedTextLength * 0.6) / effectiveSize)
     }
-  } else if (strategyType.value === 'hybrid') {
-    // For hybrid, estimate based on text strategy and content types
-    const textSize = parameters.value.text_chunk_size || 500
-    const textOverlap = parameters.value.text_overlap || 50
-    const effectiveSize = textSize - textOverlap
-    // Estimate about 60% of content is text, 20% code, 20% tables/images
-    estimatedChunks.value = Math.ceil((estimatedTextLength * 0.6) / effectiveSize)
   } else {
     // For heading and semantic, harder to estimate
     estimatedChunks.value = Math.ceil(estimatedTextLength / 800)
@@ -738,12 +707,7 @@ watch(
         parameters.value = hasStoreParams 
           ? { ...smartDefaults, ...storeParams }
           : { ...smartDefaults, ...strategy.default_parameters }
-      } else if (strategy.type === 'multimodal') {
-        parameters.value = hasStoreParams
-          ? { ...multimodalDefaults, ...storeParams }
-          : { ...multimodalDefaults, ...strategy.default_parameters }
       } else if (strategy.type === 'hybrid') {
-        // 使用智能默认参数
         const smartDefaults = getHybridDefaults(codeBlockRatio)
         parameters.value = hasStoreParams
           ? { ...smartDefaults, ...storeParams }
@@ -821,5 +785,13 @@ watch(
   color: var(--td-text-color-placeholder);
   line-height: 1.5;
   margin-top: 4px;
+}
+
+.recommend-tip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

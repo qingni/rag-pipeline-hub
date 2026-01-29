@@ -5,7 +5,6 @@ from .paragraph_chunker import ParagraphChunker
 from .heading_chunker import HeadingChunker
 from .semantic_chunker import SemanticChunker
 from .parent_child_chunker import ParentChildChunker
-from .multimodal_chunker import MultimodalChunker
 from .hybrid_chunker import HybridChunker
 from .image_extractor import ImageExtractor
 
@@ -17,8 +16,7 @@ CHUNKER_REGISTRY = {
     'heading': HeadingChunker,
     'semantic': SemanticChunker,
     'parent_child': ParentChildChunker,
-    'multimodal': MultimodalChunker,
-    'hybrid': HybridChunker
+    'hybrid': HybridChunker,
 }
 
 
@@ -50,7 +48,6 @@ __all__ = [
     'HeadingChunker',
     'SemanticChunker',
     'ParentChildChunker',
-    'MultimodalChunker',
     'HybridChunker',
     'ImageExtractor',
     'get_chunker',

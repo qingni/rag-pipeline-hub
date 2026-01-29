@@ -40,6 +40,11 @@ class DocumentAnalyzer:
     FENCED_CODE_PATTERN = re.compile(r'```[\s\S]*?```')
     INDENTED_CODE_PATTERN = re.compile(r'^(?: {4}|\t).*$', re.MULTILINE)
     
+    # Log patterns (timestamp at start of line)
+    LOG_TIMESTAMP_PATTERN = re.compile(r'^\d{4}[-/]\d{2}[-/]\d{2}[\sT]\d{2}:\d{2}')
+    # Alternative log patterns
+    LOG_LEVEL_PATTERN = re.compile(r'^(INFO|DEBUG|WARN|ERROR|FATAL|WARNING|TRACE)\s', re.IGNORECASE)
+    
     def analyze(
         self, 
         text: str, 
@@ -126,6 +131,14 @@ class DocumentAnalyzer:
         features.is_structured_data = self._is_structured_data(text, document_result)
         features.document_format = self._get_document_format(document_result)
         features.estimated_complexity = self._estimate_complexity(features)
+        
+        # Analyze text strategy recommendation features (for hybrid chunking)
+        text_strategy_features = self._analyze_text_strategy_features(text, features, document_result)
+        features.has_table_layout = text_strategy_features["has_table_layout"]
+        features.is_flattened_tabular = text_strategy_features["is_flattened_tabular"]
+        features.is_log_like = text_strategy_features["is_log_like"]
+        features.is_slide_like = text_strategy_features["is_slide_like"]
+        features.line_length_uniformity = text_strategy_features["line_length_uniformity"]
         
         return features
     
@@ -303,6 +316,218 @@ class DocumentAnalyzer:
             return "medium"
         else:
             return "low"
+    
+    def _analyze_text_strategy_features(
+        self,
+        text: str,
+        features: DocumentFeatures,
+        document_result: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze features for recommending text chunking strategy in hybrid mode.
+        
+        This method detects document characteristics that affect the choice of
+        text chunking strategy (semantic, paragraph, heading, etc.).
+        
+        Returns:
+            Dictionary with:
+            - has_table_layout: bool - Whether tables retain Markdown layout
+            - is_flattened_tabular: bool - Whether tabular data is flattened to text
+            - is_log_like: bool - Whether text is log-like (line-by-line records)
+            - is_slide_like: bool - Whether content is slide-like (page-independent)
+            - line_length_uniformity: float - Uniformity of line lengths (0-1)
+        """
+        result = {
+            "has_table_layout": True,  # Default: assume tables have layout
+            "is_flattened_tabular": False,
+            "is_log_like": False,
+            "is_slide_like": False,
+            "line_length_uniformity": 0.0
+        }
+        
+        if not text:
+            return result
+        
+        doc_format = features.document_format.lower() if features.document_format else ""
+        
+        # Check for Markdown table layout in text
+        has_markdown_tables = features.table_count > 0 or bool(self.MARKDOWN_TABLE_PATTERN.search(text))
+        result["has_table_layout"] = has_markdown_tables
+        
+        # Detect flattened tabular data (table format without table layout)
+        result["is_flattened_tabular"] = self._detect_flattened_tabular(
+            text, doc_format, has_markdown_tables
+        )
+        
+        # Detect log-like text
+        result["is_log_like"] = self._detect_log_like_text(text)
+        
+        # Detect slide-like content (PPT/PPTX)
+        result["is_slide_like"] = self._detect_slide_like_content(
+            text, doc_format, document_result
+        )
+        
+        # Calculate line length uniformity
+        result["line_length_uniformity"] = self._calculate_line_uniformity(text)
+        
+        return result
+    
+    def _detect_flattened_tabular(
+        self,
+        text: str,
+        doc_format: str,
+        has_markdown_tables: bool
+    ) -> bool:
+        """
+        Detect if text is flattened tabular data (table content without layout).
+        
+        Characteristics:
+        1. Document format is spreadsheet (xlsx/csv) or similar
+        2. No Markdown table format in text (| separators)
+        3. Lines have uniform length (tabular data pattern)
+        """
+        # Only check for spreadsheet formats
+        if doc_format not in ("xlsx", "xls", "csv"):
+            return False
+        
+        # If Markdown tables exist, layout is preserved
+        if has_markdown_tables:
+            return False
+        
+        # Check line pattern characteristics
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        if len(lines) < 3:
+            return False
+        
+        # Check for uniform line lengths (typical of tabular data)
+        sample_lines = lines[:min(30, len(lines))]
+        lengths = [len(line) for line in sample_lines]
+        avg_len = sum(lengths) / len(lengths)
+        
+        if avg_len < 20:  # Too short, unlikely to be tabular
+            return False
+        
+        # Calculate coefficient of variation (CV)
+        if avg_len > 0:
+            variance = sum((l - avg_len) ** 2 for l in lengths) / len(lengths)
+            std_dev = variance ** 0.5
+            cv = std_dev / avg_len
+            
+            # Low CV (< 0.5) indicates uniform line lengths -> likely flattened table
+            if cv < 0.5:
+                return True
+        
+        return False
+    
+    def _detect_log_like_text(self, text: str) -> bool:
+        """
+        Detect if text is log-like (timestamps, log levels, line-by-line records).
+        
+        Log files should be chunked by paragraph to keep each log entry intact.
+        """
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        if len(lines) < 5:
+            return False
+        
+        sample_lines = lines[:min(30, len(lines))]
+        
+        # Check for timestamp patterns at line start
+        timestamp_count = sum(
+            1 for line in sample_lines 
+            if self.LOG_TIMESTAMP_PATTERN.match(line)
+        )
+        
+        # Check for log level patterns
+        log_level_count = sum(
+            1 for line in sample_lines
+            if self.LOG_LEVEL_PATTERN.match(line)
+        )
+        
+        total_matches = timestamp_count + log_level_count
+        match_ratio = total_matches / len(sample_lines) if sample_lines else 0
+        
+        # If more than 40% of lines have log patterns, consider it log-like
+        return match_ratio > 0.4
+    
+    def _detect_slide_like_content(
+        self,
+        text: str,
+        doc_format: str,
+        document_result: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Detect if content is slide-like (PPT/PPTX characteristics).
+        
+        Slide content should be chunked by paragraph to keep each slide intact.
+        
+        Characteristics:
+        1. Document format is pptx/ppt
+        2. Short paragraphs with clear separations
+        3. Bullet point style content
+        """
+        # Direct format check
+        if doc_format in ("pptx", "ppt"):
+            return True
+        
+        # Check metadata for slide indicators
+        if document_result:
+            metadata = document_result.get("metadata", {})
+            if metadata.get("slide_count", 0) > 0:
+                return True
+            if metadata.get("format", "").lower() in ("pptx", "ppt"):
+                return True
+        
+        # Heuristic: check for slide-like text patterns
+        # Short paragraphs, many bullet points
+        paragraphs = re.split(r'\n\s*\n', text)
+        paragraphs = [p.strip() for p in paragraphs if p.strip()]
+        
+        if len(paragraphs) < 3:
+            return False
+        
+        # Check average paragraph length (slides have short paragraphs)
+        avg_para_len = sum(len(p) for p in paragraphs) / len(paragraphs)
+        
+        # Check for bullet point patterns
+        bullet_pattern = re.compile(r'^[\s]*[-•*▪▸►]\s')
+        bullet_lines = sum(
+            1 for p in paragraphs 
+            for line in p.split('\n') 
+            if bullet_pattern.match(line)
+        )
+        total_lines = sum(len(p.split('\n')) for p in paragraphs)
+        bullet_ratio = bullet_lines / total_lines if total_lines > 0 else 0
+        
+        # Short paragraphs + high bullet ratio = slide-like
+        return avg_para_len < 300 and bullet_ratio > 0.3
+    
+    def _calculate_line_uniformity(self, text: str) -> float:
+        """
+        Calculate line length uniformity (0-1, higher = more uniform).
+        
+        Uniform line lengths indicate structured/tabular data.
+        """
+        lines = [l for l in text.split('\n') if l.strip()]
+        if len(lines) < 3:
+            return 0.0
+        
+        sample_lines = lines[:min(50, len(lines))]
+        lengths = [len(line) for line in sample_lines]
+        avg_len = sum(lengths) / len(lengths)
+        
+        if avg_len < 10:
+            return 0.0
+        
+        # Calculate coefficient of variation
+        variance = sum((l - avg_len) ** 2 for l in lengths) / len(lengths)
+        std_dev = variance ** 0.5
+        cv = std_dev / avg_len if avg_len > 0 else 1.0
+        
+        # Convert CV to uniformity score (lower CV = higher uniformity)
+        # CV of 0 -> uniformity of 1.0
+        # CV of 1 -> uniformity of 0.0
+        uniformity = max(0.0, min(1.0, 1.0 - cv))
+        return round(uniformity, 3)
 
 
 # Singleton instance

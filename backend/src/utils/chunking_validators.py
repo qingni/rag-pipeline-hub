@@ -224,89 +224,13 @@ class ChunkingParameterValidator:
         }
     
     @staticmethod
-    def validate_multimodal_params(params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Validate parameters for multimodal chunking strategy.
-        
-        Args:
-            params: Parameters dictionary
-        
-        Returns:
-            Validated parameters dictionary
-        
-        Raises:
-            ValueError: If parameters are invalid
-        """
-        # Boolean extraction flags
-        include_tables = params.get('include_tables', True)
-        include_images = params.get('include_images', True)
-        include_code = params.get('include_code', True)
-        
-        if not isinstance(include_tables, bool):
-            raise ValueError("include_tables must be a boolean")
-        
-        if not isinstance(include_images, bool):
-            raise ValueError("include_images must be a boolean")
-        
-        if not isinstance(include_code, bool):
-            raise ValueError("include_code must be a boolean")
-        
-        # Text strategy
-        text_strategy = params.get('text_strategy', 'character')
-        valid_text_strategies = ['character', 'paragraph', 'none']
-        if text_strategy not in valid_text_strategies:
-            # Auto-fallback to 'character' for unsupported strategies (e.g., from hybrid strategy switch)
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Unsupported text_strategy '{text_strategy}' for multimodal, falling back to 'character'")
-            text_strategy = 'character'
-        
-        # Text chunk parameters
-        text_chunk_size = params.get('text_chunk_size', 500)
-        if not isinstance(text_chunk_size, int):
-            raise ValueError("text_chunk_size must be an integer")
-        
-        if text_chunk_size < 100:
-            raise ValueError("text_chunk_size must be at least 100")
-        
-        if text_chunk_size > 5000:
-            raise ValueError("text_chunk_size cannot exceed 5000")
-        
-        text_overlap = params.get('text_overlap', 50)
-        if not isinstance(text_overlap, int):
-            raise ValueError("text_overlap must be an integer")
-        
-        if text_overlap < 0:
-            raise ValueError("text_overlap must be non-negative")
-        
-        if text_overlap >= text_chunk_size:
-            raise ValueError("text_overlap must be less than text_chunk_size")
-        
-        # Extraction thresholds
-        min_table_rows = params.get('min_table_rows', 2)
-        if not isinstance(min_table_rows, int) or min_table_rows < 1:
-            raise ValueError("min_table_rows must be a positive integer")
-        
-        min_code_lines = params.get('min_code_lines', 3)
-        if not isinstance(min_code_lines, int) or min_code_lines < 1:
-            raise ValueError("min_code_lines must be a positive integer")
-        
-        return {
-            'include_tables': include_tables,
-            'include_images': include_images,
-            'include_code': include_code,
-            'text_strategy': text_strategy,
-            'text_chunk_size': text_chunk_size,
-            'text_overlap': text_overlap,
-            'min_table_rows': min_table_rows,
-            'min_code_lines': min_code_lines
-        }
-    
-    @staticmethod
     def validate_hybrid_params(params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate parameters for hybrid chunking strategy.
         
+        Note: This now includes multimodal parameters as multimodal 
+        has been merged into hybrid.
+        
         Args:
             params: Parameters dictionary
         
@@ -316,9 +240,9 @@ class ChunkingParameterValidator:
         Raises:
             ValueError: If parameters are invalid
         """
-        # Text strategy
+        # Text strategy (extended to support 'none' from multimodal)
         text_strategy = params.get('text_strategy', 'semantic')
-        valid_text_strategies = ['semantic', 'paragraph', 'character', 'heading']
+        valid_text_strategies = ['semantic', 'paragraph', 'character', 'heading', 'none']
         if text_strategy not in valid_text_strategies:
             raise ValueError(f"text_strategy must be one of {valid_text_strategies}")
         
@@ -334,10 +258,18 @@ class ChunkingParameterValidator:
         if table_strategy not in valid_table_strategies:
             raise ValueError(f"table_strategy must be one of {valid_table_strategies}")
         
-        # Image extraction (unified with multimodal chunker)
+        # Content extraction flags (merged from multimodal)
+        include_tables = params.get('include_tables', True)
+        if not isinstance(include_tables, bool):
+            raise ValueError("include_tables must be a boolean")
+        
         include_images = params.get('include_images', True)
         if not isinstance(include_images, bool):
             raise ValueError("include_images must be a boolean")
+        
+        include_code = params.get('include_code', True)
+        if not isinstance(include_code, bool):
+            raise ValueError("include_code must be a boolean")
         
         # Text chunk parameters
         text_chunk_size = params.get('text_chunk_size', 500)
@@ -369,6 +301,15 @@ class ChunkingParameterValidator:
         if not isinstance(code_overlap_lines, int) or code_overlap_lines < 0:
             raise ValueError("code_overlap_lines must be non-negative")
         
+        # Extraction thresholds (merged from multimodal)
+        min_table_rows = params.get('min_table_rows', 2)
+        if not isinstance(min_table_rows, int) or min_table_rows < 1:
+            raise ValueError("min_table_rows must be a positive integer")
+        
+        min_code_lines = params.get('min_code_lines', 3)
+        if not isinstance(min_code_lines, int) or min_code_lines < 1:
+            raise ValueError("min_code_lines must be a positive integer")
+        
         # Semantic-specific parameters
         similarity_threshold = params.get('similarity_threshold', 0.5)
         if text_strategy == 'semantic':
@@ -388,12 +329,16 @@ class ChunkingParameterValidator:
             'text_strategy': text_strategy,
             'code_strategy': code_strategy,
             'table_strategy': table_strategy,
+            'include_tables': include_tables,
             'include_images': include_images,
+            'include_code': include_code,
             'image_base_path': image_base_path,
             'text_chunk_size': text_chunk_size,
             'text_overlap': text_overlap,
             'code_chunk_lines': code_chunk_lines,
             'code_overlap_lines': code_overlap_lines,
+            'min_table_rows': min_table_rows,
+            'min_code_lines': min_code_lines,
             'similarity_threshold': similarity_threshold,
             'use_embedding': use_embedding
         }
@@ -404,7 +349,7 @@ class ChunkingParameterValidator:
         Validate parameters for given strategy.
         
         Args:
-            strategy: Strategy name (character, paragraph, heading, semantic, parent_child, multimodal, hybrid)
+            strategy: Strategy name (character, paragraph, heading, semantic, parent_child, hybrid)
             params: Parameters dictionary
         
         Raises:
@@ -416,7 +361,6 @@ class ChunkingParameterValidator:
             'heading': ChunkingParameterValidator.validate_heading_params,
             'semantic': ChunkingParameterValidator.validate_semantic_params,
             'parent_child': ChunkingParameterValidator.validate_parent_child_params,
-            'multimodal': ChunkingParameterValidator.validate_multimodal_params,
             'hybrid': ChunkingParameterValidator.validate_hybrid_params,
         }
         

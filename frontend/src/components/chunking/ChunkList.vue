@@ -3,7 +3,7 @@
     <t-card title="分块列表" :bordered="false">
       <template #actions>
         <t-space>
-          <!-- Chunk type filter for multimodal results -->
+          <!-- Chunk type filter for hybrid chunking results -->
           <t-select
             v-if="hasMultipleTypes"
             v-model="selectedType"

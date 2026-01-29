@@ -218,7 +218,7 @@ EMBEDDING_MODEL_PARAMS = {
 # 策略专用参数配置
 # ============================================================================
 
-# 混合分块策略参数
+# 混合分块策略参数（合并了原 multimodal 的功能）
 HYBRID_STRATEGY_PARAMS = {
     # 正文分块策略参数
     "text": {
@@ -240,6 +240,9 @@ HYBRID_STRATEGY_PARAMS = {
         "heading": {
             "min_heading_level": 1,
             "max_heading_level": 3
+        },
+        "none": {
+            "description": "不分块文本（仅提取表格、图片、代码）"
         }
     },
     # 代码分块策略参数
@@ -253,31 +256,21 @@ HYBRID_STRATEGY_PARAMS = {
             "chunk_size": 800,
             "overlap": 100,
             "description": "按字符分块"
+        },
+        "none": {
+            "description": "不分块（保持代码块完整）"
         }
     },
-    # 表格/图片处理
+    # 表格处理
     "table": {
         "strategy": "independent",
         "min_rows": 2
     },
+    # 图片处理
     "image": {
         "strategy": "independent"
-    }
-}
-
-
-# 多模态分块策略参数
-MULTIMODAL_STRATEGY_PARAMS = {
-    "text": {
-        "character": {
-            "chunk_size": 500,
-            "overlap": 50
-        },
-        "paragraph": {
-            "min_chunk_size": 150,
-            "max_chunk_size": 1000
-        }
     },
+    # 内容提取阈值（从 multimodal 合并）
     "extraction": {
         "min_table_rows": 2,
         "min_code_lines": 3,
@@ -483,25 +476,49 @@ def get_hybrid_params(
     doc_format: str = "default",
     char_count: int = 10000,
     code_block_ratio: float = 0.0,
-    embedding_model: str = "bge-m3"
+    embedding_model: str = "bge-m3",
+    has_tables: bool = True,
+    has_images: bool = True,
+    has_code: bool = False,
+    # 新增：用于智能推荐正文分块策略的参数
+    has_table_layout: bool = True,
+    is_flattened_tabular: bool = False,
+    is_log_like: bool = False,
+    is_slide_like: bool = False,
+    has_clear_structure: bool = False,
+    heading_count: int = 0
 ) -> Dict[str, Any]:
     """
-    获取混合分块策略参数
+    获取混合分块策略参数（合并了原 multimodal 的功能）
+    
+    现在包含智能正文策略推荐，根据文档特征自动选择最佳的正文分块策略。
     
     Args:
         doc_format: 文档格式
         char_count: 文档字符数
         code_block_ratio: 代码块占比
         embedding_model: Embedding 模型
+        has_tables: 是否包含表格
+        has_images: 是否包含图片
+        has_code: 是否包含代码块
+        has_table_layout: 表格是否保留了布局（Markdown 表格格式）
+        is_flattened_tabular: 是否是扁平化的表格数据
+        is_log_like: 是否是日志类文本
+        is_slide_like: 是否是幻灯片类文档
+        has_clear_structure: 是否有清晰的标题结构
+        heading_count: 标题数量
         
     Returns:
-        混合分块策略的完整参数配置
+        混合分块策略的完整参数配置，包含推荐的正文策略及理由
     """
     # 获取基础文本参数
     text_params = get_adaptive_text_params(doc_format, char_count)
     
     # 获取语义分块参数（用于正文语义分块）
     semantic_params = get_semantic_params(embedding_model, doc_format, char_count)
+    
+    # 获取提取阈值配置
+    extraction = HYBRID_STRATEGY_PARAMS["extraction"]
     
     # 根据代码占比调整代码分块参数
     code_lines = HYBRID_STRATEGY_PARAMS["code"]["lines"]["lines_per_chunk"]
@@ -515,9 +532,21 @@ def get_hybrid_params(
         code_lines = 50
         code_overlap = 8
     
+    # ========== 智能推荐正文分块策略 ==========
+    text_strategy, text_strategy_reason = _recommend_text_strategy(
+        doc_format=doc_format,
+        has_table_layout=has_table_layout,
+        is_flattened_tabular=is_flattened_tabular,
+        is_log_like=is_log_like,
+        is_slide_like=is_slide_like,
+        has_clear_structure=has_clear_structure,
+        heading_count=heading_count
+    )
+    
     return {
         # 正文策略参数
-        "text_strategy": "semantic",
+        "text_strategy": text_strategy,
+        "text_strategy_reason": text_strategy_reason,
         "text_chunk_size": text_params["chunk_size"],
         "text_overlap": text_params["overlap"],
         "similarity_threshold": semantic_params["similarity_threshold"],
@@ -532,48 +561,12 @@ def get_hybrid_params(
         # 表格策略
         "table_strategy": "independent",
         
-        # 元信息
-        "format_adjustment": text_params.get("base_description", ""),
-        "length_adjustment": text_params.get("adjustment_reason", "")
-    }
-
-
-def get_multimodal_params(
-    doc_format: str = "default",
-    char_count: int = 10000,
-    has_tables: bool = True,
-    has_images: bool = True,
-    has_code: bool = False
-) -> Dict[str, Any]:
-    """
-    获取多模态分块策略参数
-    
-    Args:
-        doc_format: 文档格式
-        char_count: 文档字符数
-        has_tables: 是否包含表格
-        has_images: 是否包含图片
-        has_code: 是否包含代码块
-        
-    Returns:
-        多模态分块策略的完整参数配置
-    """
-    # 获取自适应文本参数
-    text_params = get_adaptive_text_params(doc_format, char_count)
-    extraction = MULTIMODAL_STRATEGY_PARAMS["extraction"]
-    
-    return {
-        # 内容提取设置
+        # 内容提取设置（合并自 multimodal）
         "include_tables": has_tables,
         "include_images": has_images,
-        "include_code": has_code,
+        "include_code": has_code or code_block_ratio > 0,
         
-        # 文本分块参数
-        "text_strategy": "character",
-        "text_chunk_size": text_params["chunk_size"],
-        "text_overlap": text_params["overlap"],
-        
-        # 提取阈值
+        # 提取阈值（合并自 multimodal）
         "min_table_rows": extraction["min_table_rows"],
         "min_code_lines": extraction["min_code_lines"],
         
@@ -581,6 +574,89 @@ def get_multimodal_params(
         "format_adjustment": text_params.get("base_description", ""),
         "length_adjustment": text_params.get("adjustment_reason", "")
     }
+
+
+def _recommend_text_strategy(
+    doc_format: str,
+    has_table_layout: bool = True,
+    is_flattened_tabular: bool = False,
+    is_log_like: bool = False,
+    is_slide_like: bool = False,
+    has_clear_structure: bool = False,
+    heading_count: int = 0
+) -> Tuple[str, str]:
+    """
+    根据文档特征推荐混合分块的正文策略
+    
+    推荐优先级：
+    1. 扁平化表格数据 -> 段落分块（保持每行记录完整）
+    2. 日志类文本 -> 段落分块（保持每条日志完整）
+    3. 幻灯片类文档 -> 段落分块（保持每页内容完整）
+    4. 结构化数据格式（JSON/CSV）无表格布局 -> 段落分块
+    5. 有清晰标题结构 -> 标题分块
+    6. 默认 -> 语义分块（通用策略）
+    
+    Args:
+        doc_format: 文档格式
+        has_table_layout: 是否有表格布局
+        is_flattened_tabular: 是否是扁平化表格
+        is_log_like: 是否是日志类文本
+        is_slide_like: 是否是幻灯片类
+        has_clear_structure: 是否有清晰结构
+        heading_count: 标题数量
+        
+    Returns:
+        (strategy, reason) - 推荐的策略和理由
+    """
+    fmt = doc_format.lower() if doc_format else ""
+    
+    # 1. 扁平化表格数据 -> 段落分块
+    if is_flattened_tabular:
+        return (
+            "paragraph",
+            "检测到表格数据（布局已扁平化），按段落分块可保持每行记录的完整性"
+        )
+    
+    # 2. 表格类格式但没有表格布局 -> 段落分块
+    if fmt in ("xlsx", "xls", "csv") and not has_table_layout:
+        return (
+            "paragraph",
+            f"{fmt.upper()} 文件表格布局未保留，推荐按段落分块保持数据行完整"
+        )
+    
+    # 3. 日志类文本 -> 段落分块
+    if is_log_like:
+        return (
+            "paragraph",
+            "检测到日志格式文本，按段落分块可保持每条日志记录的完整性"
+        )
+    
+    # 4. 幻灯片类文档 -> 段落分块
+    if is_slide_like or fmt in ("pptx", "ppt"):
+        return (
+            "paragraph",
+            "演示文稿每页内容相对独立，按段落分块可保持幻灯片内容的完整性"
+        )
+    
+    # 5. JSON 格式 -> 段落分块
+    if fmt == "json":
+        return (
+            "paragraph",
+            "JSON 结构化数据按段落分块可保持每条记录的完整性"
+        )
+    
+    # 6. 有清晰标题结构 -> 标题分块
+    if has_clear_structure and heading_count >= 5:
+        return (
+            "heading",
+            f"文档有清晰的标题层级结构（{heading_count}个标题），按标题分块可保持章节完整性"
+        )
+    
+    # 7. 默认 -> 语义分块
+    return (
+        "semantic",
+        "连续叙事文本，语义分块可自动识别自然语义边界"
+    )
 
 
 def get_parent_child_params(
@@ -689,7 +765,13 @@ def get_smart_params(
     code_block_ratio: float = 0.0,
     table_count: int = 0,
     image_count: int = 0,
-    heading_count: int = 0
+    heading_count: int = 0,
+    # 新增：用于智能推荐正文策略的参数
+    has_table_layout: bool = True,
+    is_flattened_tabular: bool = False,
+    is_log_like: bool = False,
+    is_slide_like: bool = False,
+    has_clear_structure: bool = False
 ) -> Dict[str, Any]:
     """
     统一的智能参数获取接口
@@ -698,7 +780,7 @@ def get_smart_params(
     
     Args:
         strategy_type: 策略类型 (character, paragraph, heading, semantic, 
-                       parent_child, hybrid, multimodal)
+                       parent_child, hybrid)
         doc_format: 文档格式
         char_count: 文档字符数
         embedding_model: Embedding 模型（用于语义相关策略）
@@ -706,6 +788,11 @@ def get_smart_params(
         table_count: 表格数量
         image_count: 图片数量
         heading_count: 标题数量
+        has_table_layout: 是否有表格布局
+        is_flattened_tabular: 是否是扁平化表格
+        is_log_like: 是否是日志类文本
+        is_slide_like: 是否是幻灯片类
+        has_clear_structure: 是否有清晰结构
         
     Returns:
         策略对应的智能参数配置
@@ -727,15 +814,19 @@ def get_smart_params(
     
     elif strategy_type == "hybrid":
         return get_hybrid_params(
-            doc_format, char_count, code_block_ratio, embedding_model
-        )
-    
-    elif strategy_type == "multimodal":
-        return get_multimodal_params(
-            doc_format, char_count,
+            doc_format=doc_format,
+            char_count=char_count,
+            code_block_ratio=code_block_ratio,
+            embedding_model=embedding_model,
             has_tables=table_count > 0,
             has_images=image_count > 0,
-            has_code=code_block_ratio > 0
+            has_code=code_block_ratio > 0,
+            has_table_layout=has_table_layout,
+            is_flattened_tabular=is_flattened_tabular,
+            is_log_like=is_log_like,
+            is_slide_like=is_slide_like,
+            has_clear_structure=has_clear_structure,
+            heading_count=heading_count
         )
     
     else:

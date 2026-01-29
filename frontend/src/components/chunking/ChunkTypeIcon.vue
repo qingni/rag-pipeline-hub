@@ -77,13 +77,7 @@ const iconConfig = {
     icon: 'component-layout',
     color: '#fa541c',
     label: '混合',
-    tooltip: '混合分块策略'
-  },
-  multimodal: {
-    icon: 'layers',
-    color: '#13c2c2',
-    label: '多模态',
-    tooltip: '多模态分块'
+    tooltip: '混合分块策略（支持多内容类型提取）'
   }
 }
 

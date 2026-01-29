@@ -22,7 +22,6 @@ from ..config.smart_params import (
     get_adaptive_text_params,
     get_semantic_params,
     get_hybrid_params,
-    get_multimodal_params,
     get_parent_child_params,
     get_heading_params,
     get_paragraph_params,
@@ -54,7 +53,6 @@ class ChunkingRecommendService:
         StrategyType.SEMANTIC: 1000,
         StrategyType.PARENT_CHILD: 400,  # Child chunk size
         StrategyType.HYBRID: 800,
-        StrategyType.MULTIMODAL: 1000
     }
     
     def __init__(self):
@@ -132,7 +130,13 @@ class ChunkingRecommendService:
             code_block_ratio=features.code_block_ratio,
             table_count=features.table_count,
             image_count=features.image_count,
-            heading_count=features.heading_count
+            heading_count=features.heading_count,
+            # 新增：传递正文策略推荐相关的特征
+            has_table_layout=features.has_table_layout,
+            is_flattened_tabular=features.is_flattened_tabular,
+            is_log_like=features.is_log_like,
+            is_slide_like=features.is_slide_like,
+            has_clear_structure=features.has_clear_structure
         )
     
     def analyze_document(
@@ -209,14 +213,14 @@ class ChunkingRecommendService:
             rec.reason = f"检测到结构化数据格式（{features.document_format or 'key-value'}），每行是独立的信息单元，按段落分块可保持记录完整性"
             recommendations.append(rec)
         
-        # 检测多模态内容
+        # 检测多模态内容（表格、图片等需要特殊处理的内容）
         has_multimodal = features.table_count >= 1 or features.image_count >= 1
         has_rich_multimodal = features.table_count >= 3 or features.image_count >= 3
         
-        # Rule 1: Multimodal content -> Multimodal chunking
+        # Rule 1: Multimodal content -> Hybrid chunking
         # 只要包含图片或表格就推荐，因为图片/表格是独立的信息单元
         if has_multimodal:
-            rec = self._create_multimodal_recommendation(features)
+            rec = self._create_hybrid_multimodal_recommendation(features)
             # 根据多模态内容数量调整置信度
             if has_rich_multimodal:
                 rec.confidence = 0.92
@@ -301,25 +305,36 @@ class ChunkingRecommendService:
             cons=["块大小不均匀", "依赖文档结构质量"]
         )
     
-    def _create_multimodal_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
-        """Create recommendation for multimodal chunking with smart params."""
+    def _create_hybrid_multimodal_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
+        """
+        Create recommendation for hybrid chunking with multimodal content.
+        """
         multimodal_summary = features.get_multimodal_summary()
         fmt = features.document_format or "default"
         
-        # 使用智能参数
-        smart_params = get_multimodal_params(
+        # 使用智能参数（包含正文策略推荐）
+        smart_params = get_hybrid_params(
             doc_format=fmt,
             char_count=features.total_char_count,
+            code_block_ratio=features.code_block_ratio,
+            embedding_model="bge-m3",
             has_tables=features.table_count > 0,
             has_images=features.image_count > 0,
-            has_code=features.code_block_ratio > 0
+            has_code=features.code_block_ratio > 0,
+            # 新增：传递正文策略推荐相关的特征
+            has_table_layout=features.has_table_layout,
+            is_flattened_tabular=features.is_flattened_tabular,
+            is_log_like=features.is_log_like,
+            is_slide_like=features.is_slide_like,
+            has_clear_structure=features.has_clear_structure,
+            heading_count=features.heading_count
         )
         
         # 根据多模态内容数量生成不同的推荐理由
         if features.image_count >= 3 or features.table_count >= 3:
-            reason = f"文档包含丰富的多模态内容（{multimodal_summary}），图片/表格作为独立信息单元需要独立分块检索"
+            reason = f"文档包含丰富的多内容类型（{multimodal_summary}），图片/表格作为独立信息单元需要独立分块检索"
         elif features.image_count >= 1 and features.table_count >= 1:
-            reason = f"文档同时包含图片和表格（{multimodal_summary}），多模态分块可分别独立检索"
+            reason = f"文档同时包含图片和表格（{multimodal_summary}），混合分块可分别独立检索"
         elif features.image_count >= 1:
             reason = f"文档包含图片内容（{multimodal_summary}），图片是完整的视觉信息单元，应独立分块"
         else:
@@ -329,33 +344,63 @@ class ChunkingRecommendService:
         if smart_params.get("length_adjustment"):
             reason += f"（{smart_params['length_adjustment']}）"
         
+        # 添加正文策略推荐说明
+        text_strategy_reason = smart_params.get("text_strategy_reason", "")
+        if text_strategy_reason:
+            reason += f"。正文策略：{text_strategy_reason}"
+        
+        # 根据推荐的正文策略调整优势说明
+        text_strategy = smart_params.get("text_strategy", "semantic")
+        pros = ["图片/表格独立检索", "支持多内容类型提取", "内容类型区分清晰"]
+        
+        if text_strategy == "paragraph":
+            pros.append(f"正文按段落分块保持记录完整")
+        elif text_strategy == "heading":
+            pros.append(f"正文按标题分块保持章节完整")
+        else:
+            pros.append(f"正文语义分块识别自然边界")
+        
+        pros.append(f"参数针对 {fmt.upper()} 格式优化")
+        
         return ChunkingRecommendation(
-            strategy=StrategyType.MULTIMODAL,
-            strategy_name=get_strategy_display_name(StrategyType.MULTIMODAL),
+            strategy=StrategyType.HYBRID,
+            strategy_name=get_strategy_display_name(StrategyType.HYBRID),
             reason=reason,
             confidence=0.85,
-            estimated_chunks=self._estimate_chunks(features, StrategyType.MULTIMODAL),
+            estimated_chunks=self._estimate_chunks(features, StrategyType.HYBRID),
             estimated_avg_chunk_size=smart_params["text_chunk_size"],
             suggested_params=smart_params,
-            pros=["图片/表格独立检索", "支持多模态向量化", "内容类型区分清晰", f"文本分块针对 {fmt.upper()} 格式优化"],
-            cons=["需要多模态 Embedding 模型", "处理复杂度较高"]
+            pros=pros,
+            cons=["配置项较多", "处理复杂度较高"]
         )
     
     def _create_hybrid_recommendation(self, features: DocumentFeatures) -> ChunkingRecommendation:
         """Create recommendation for hybrid chunking with smart params."""
         fmt = features.document_format or "default"
         
-        # 使用智能参数
+        # 使用智能参数（包含正文策略推荐）
         smart_params = get_hybrid_params(
             doc_format=fmt,
             char_count=features.total_char_count,
             code_block_ratio=features.code_block_ratio,
-            embedding_model="bge-m3"
+            embedding_model="bge-m3",
+            # 新增：传递正文策略推荐相关的特征
+            has_table_layout=features.has_table_layout,
+            is_flattened_tabular=features.is_flattened_tabular,
+            is_log_like=features.is_log_like,
+            is_slide_like=features.is_slide_like,
+            has_clear_structure=features.has_clear_structure,
+            heading_count=features.heading_count
         )
         
         reason = f"检测到技术文档特征（代码占比 {features.code_block_ratio:.1%}），建议混合策略"
         if smart_params.get("length_adjustment"):
             reason += f"（{smart_params['length_adjustment']}）"
+        
+        # 添加正文策略推荐说明
+        text_strategy_reason = smart_params.get("text_strategy_reason", "")
+        if text_strategy_reason:
+            reason += f"。正文策略：{text_strategy_reason}"
         
         return ChunkingRecommendation(
             strategy=StrategyType.HYBRID,
@@ -499,7 +544,7 @@ class ChunkingRecommendService:
             # Heading chunks are roughly based on heading count
             return max(features.heading_count, features.total_char_count // avg_chunk_size)
         
-        elif strategy == StrategyType.MULTIMODAL:
+        elif strategy == StrategyType.HYBRID:
             # Include table and image chunks
             text_chunks = features.total_char_count // avg_chunk_size
             return text_chunks + features.table_count + features.image_count

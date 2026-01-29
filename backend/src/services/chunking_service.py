@@ -26,8 +26,7 @@ class ChunkingService:
             "heading": ChunkingParameterValidator.validate_heading_params,
             "semantic": ChunkingParameterValidator.validate_semantic_params,
             "parent_child": ChunkingParameterValidator.validate_parent_child_params,
-            "multimodal": ChunkingParameterValidator.validate_multimodal_params,
-            "hybrid": ChunkingParameterValidator.validate_hybrid_params
+            "hybrid": ChunkingParameterValidator.validate_hybrid_params,
         }
     
     def load_source_document(self, document_id: str, db: Session) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
