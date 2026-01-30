@@ -271,18 +271,44 @@ class DocumentAnalyzer:
         return False
     
     def _get_document_format(self, document_result: Optional[Dict[str, Any]] = None) -> str:
-        """Get the original document format."""
+        """Get the original document format.
+        
+        Priority:
+        1. file_format field (explicitly passed original format)
+        2. Infer from file_name/filename extension
+        3. metadata.format field
+        4. loader field (fallback, usually indicates the loader used)
+        """
         if not document_result:
             return ""
         
-        # Check loader type
-        loader = document_result.get("loader", "")
-        if loader:
-            return loader
+        # 1. Check for explicitly passed file format (highest priority)
+        file_format = document_result.get("file_format", "")
+        if file_format:
+            return file_format.lower()
         
-        # Check metadata format
+        # 2. Try to infer from filename
+        filename = document_result.get("file_name", "") or document_result.get("filename", "")
+        if filename:
+            import os
+            _, ext = os.path.splitext(filename)
+            if ext:
+                return ext.lstrip(".").lower()
+        
+        # 3. Check metadata format
         metadata = document_result.get("metadata", {})
-        return metadata.get("format", "")
+        meta_format = metadata.get("format", "") or metadata.get("file_format", "")
+        if meta_format:
+            return meta_format.lower()
+        
+        # 4. Fallback to loader type (not ideal, as this is the loader name)
+        # Note: loader names like "unstructured", "docling" are not actual file formats
+        loader = document_result.get("loader", "")
+        # Only return loader if it looks like a file format
+        if loader and loader.lower() in ("json", "csv", "txt", "md", "html", "xml"):
+            return loader.lower()
+        
+        return ""
     
     def _estimate_complexity(self, features: DocumentFeatures) -> str:
         """Estimate document complexity."""
@@ -350,14 +376,33 @@ class DocumentAnalyzer:
         
         doc_format = features.document_format.lower() if features.document_format else ""
         
-        # Check for Markdown table layout in text
-        has_markdown_tables = features.table_count > 0 or bool(self.MARKDOWN_TABLE_PATTERN.search(text))
-        result["has_table_layout"] = has_markdown_tables
+        # Check for actual Markdown table layout in text and document_result
+        # Important: table_count > 0 doesn't mean layout is preserved (e.g., unstructured xlsx)
+        has_table_layout = False
+        
+        # 1. Check if document_result tables have actual Markdown layout (| separators)
+        if document_result and document_result.get("tables"):
+            for table in document_result.get("tables", []):
+                markdown = table.get("markdown", "")
+                # Real Markdown tables should contain | separators
+                if "|" in markdown:
+                    has_table_layout = True
+                    break
+        
+        # 2. Check if text itself contains Markdown table format
+        if not has_table_layout:
+            has_table_layout = bool(self.MARKDOWN_TABLE_PATTERN.search(text))
+        
+        result["has_table_layout"] = has_table_layout
         
         # Detect flattened tabular data (table format without table layout)
-        result["is_flattened_tabular"] = self._detect_flattened_tabular(
-            text, doc_format, has_markdown_tables
-        )
+        # For spreadsheet formats, if tables were detected but no layout, it's flattened
+        if doc_format in ("xlsx", "xls", "csv") and features.table_count > 0 and not has_table_layout:
+            result["is_flattened_tabular"] = True
+        else:
+            result["is_flattened_tabular"] = self._detect_flattened_tabular(
+                text, doc_format, has_table_layout
+            )
         
         # Detect log-like text
         result["is_log_like"] = self._detect_log_like_text(text)
@@ -464,9 +509,14 @@ class DocumentAnalyzer:
         1. Document format is pptx/ppt
         2. Short paragraphs with clear separations
         3. Bullet point style content
+        
+        Note: Different document formats use different thresholds to avoid
+        misclassifying bullet-point-heavy Word documents as slide-like.
         """
-        # Direct format check
-        if doc_format in ("pptx", "ppt"):
+        fmt = doc_format.lower() if doc_format else ""
+        
+        # Direct format check - PPT files are always slide-like
+        if fmt in ("pptx", "ppt"):
             return True
         
         # Check metadata for slide indicators
@@ -498,8 +548,17 @@ class DocumentAnalyzer:
         total_lines = sum(len(p.split('\n')) for p in paragraphs)
         bullet_ratio = bullet_lines / total_lines if total_lines > 0 else 0
         
-        # Short paragraphs + high bullet ratio = slide-like
-        return avg_para_len < 300 and bullet_ratio > 0.3
+        # Use different thresholds based on document format
+        # Word documents (docx/doc): stricter thresholds to avoid misclassifying
+        # bullet-point-heavy documents as slide-like
+        if fmt in ("docx", "doc"):
+            # Only very short paragraphs (<100) + very high bullet ratio (>0.6)
+            # indicates true slide-like content in Word
+            return avg_para_len < 100 and bullet_ratio > 0.6
+        else:
+            # Other formats: use standard thresholds
+            # Short paragraphs + high bullet ratio = slide-like
+            return avg_para_len < 300 and bullet_ratio > 0.3
     
     def _calculate_line_uniformity(self, text: str) -> float:
         """

@@ -172,6 +172,34 @@ def _extract_docx_paragraphs(file_path: str) -> List[str]:
         return []
 
 
+def _iter_docx_block_items(doc):
+    """按文档原始顺序迭代 DOCX 中的段落和表格。
+    
+    这是业内标准做法，通过遍历 Word 的底层 XML 结构来保持元素的原始顺序。
+    
+    Args:
+        doc: python-docx Document 对象
+        
+    Yields:
+        Tuple[str, Any]: ('paragraph', Paragraph, para_idx) 或 ('table', Table, table_idx)
+    """
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    
+    para_idx = 0
+    table_idx = 0
+    
+    for child in doc.element.body.iterchildren():
+        if isinstance(child, CT_P):
+            yield ('paragraph', Paragraph(child, doc), para_idx)
+            para_idx += 1
+        elif isinstance(child, CT_Tbl):
+            yield ('table', Table(child, doc), table_idx)
+            table_idx += 1
+
+
 class UnstructuredLoader:
     """Load documents using Unstructured library with multimodal support.
     
@@ -295,41 +323,80 @@ class UnstructuredLoader:
             # 统计元素类型用于调试
             element_type_counts = {}
             
-            # 对于 DOCX 文件：使用 python-docx 的段落和图片位置信息
-            if is_docx and docx_images:
+            # 用于收集 xlsx 文件的 sheet 名称 (page_number -> sheet_name 映射)
+            page_to_sheet_name: Dict[int, str] = {}
+            is_xlsx = file_ext in ('.xlsx', '.xls')
+            
+            # 对于 DOCX 文件：使用 iter_block_items 按原文档顺序遍历段落和表格
+            if is_docx:
                 # 图片已有完整信息，直接添加
-                images.extend(docx_images)
+                if docx_images:
+                    images.extend(docx_images)
                 
-                # 构建带图片占位符的文本
-                page_num = 1
-                pages_text[page_num] = []
-                
-                for para_idx, para_text in enumerate(docx_paragraphs):
-                    # 先添加段落文本
-                    if para_text:
-                        pages_text[page_num].append(para_text)
-                        full_text.append(para_text)
-                    
-                    # 检查该段落是否有图片，如果有则在文本后添加图片占位符
-                    if para_idx in docx_paragraph_image_map:
-                        for img_idx in docx_paragraph_image_map[para_idx]:
-                            if img_idx < len(docx_images):
-                                img_info = docx_images[img_idx]
-                                placeholder = f"[IMAGE_{img_idx}: {img_info.get('alt_text') or '图片'}]"
-                                pages_text[page_num].append(placeholder)
-                                full_text.append(placeholder)
-                
-                # 处理 unstructured 的表格元素 (DOCX 表格仍然用 unstructured)
+                # 预处理 unstructured 的表格元素（用于获取高质量的表格解析结果）
+                unstructured_tables = []
                 for element in elements:
                     element_type = type(element).__name__
                     element_type_counts[element_type] = element_type_counts.get(element_type, 0) + 1
-                    
                     if element_type == 'Table':
-                        table_info = self._process_table_element(element, page_num, len(tables))
+                        page_num = 1
+                        table_info = self._process_table_element(element, page_num, len(unstructured_tables))
                         if table_info:
-                            tables.append(table_info)
+                            unstructured_tables.append(table_info)
                 
-                logger.info(f"[Unstructured] DOCX processed with position-aware images")
+                # 使用 iter_block_items 按原文档顺序遍历
+                from docx import Document
+                doc = Document(file_path)
+                
+                page_num = 1
+                pages_text[page_num] = []
+                table_idx = 0
+                
+                for block_type, block, idx in _iter_docx_block_items(doc):
+                    if block_type == 'paragraph':
+                        para_text = block.text
+                        # 添加段落文本
+                        if para_text:
+                            pages_text[page_num].append(para_text)
+                            full_text.append(para_text)
+                        
+                        # 检查该段落是否有图片，如果有则在文本后添加图片占位符
+                        if idx in docx_paragraph_image_map:
+                            for img_idx in docx_paragraph_image_map[idx]:
+                                if img_idx < len(docx_images):
+                                    img_info = docx_images[img_idx]
+                                    placeholder = f"[IMAGE_{img_idx}: {img_info.get('alt_text') or '图片'}]"
+                                    pages_text[page_num].append(placeholder)
+                                    full_text.append(placeholder)
+                    
+                    elif block_type == 'table':
+                        # 在正确位置插入表格
+                        # 优先使用 unstructured 解析的表格（质量更高）
+                        if table_idx < len(unstructured_tables):
+                            table_info = unstructured_tables[table_idx]
+                            tables.append(table_info)
+                            table_text = table_info.get("markdown") or ""
+                        else:
+                            # 降级使用 python-docx 解析
+                            table_text = self._python_docx_table_to_markdown(block)
+                            table_info = {
+                                "page_number": page_num,
+                                "table_index": len(tables),
+                                "headers": [],
+                                "rows": [],
+                                "caption": None,
+                                "markdown": table_text,
+                                "html": None
+                            }
+                            tables.append(table_info)
+                        
+                        if table_text:
+                            pages_text[page_num].append(table_text)
+                            full_text.append(table_text)
+                        
+                        table_idx += 1
+                
+                logger.info(f"[Unstructured] DOCX processed with position-aware images and tables")
             
             else:
                 # 非 DOCX 文件：使用原有逻辑处理
@@ -341,6 +408,12 @@ class UnstructuredLoader:
                     page_num = raw_page_num if isinstance(raw_page_num, int) and raw_page_num > 0 else 1
                     element_type = type(element).__name__
                     element_type_counts[element_type] = element_type_counts.get(element_type, 0) + 1
+                    
+                    # 对于 xlsx 文件，提取 page_name（即 sheet 名称）
+                    if is_xlsx and hasattr(element, 'metadata'):
+                        page_name = getattr(element.metadata, 'page_name', None)
+                        if page_name and page_num not in page_to_sheet_name:
+                            page_to_sheet_name[page_num] = page_name
                     
                     if page_num not in pages_text:
                         pages_text[page_num] = []
@@ -370,8 +443,8 @@ class UnstructuredLoader:
                         table_info = self._process_table_element(element, page_num, len(tables))
                         if table_info:
                             tables.append(table_info)
-                            # 表格文本也加入
-                            table_text = element.text
+                            # 使用 Markdown 格式的表格文本（如果有），否则降级使用纯文本
+                            table_text = table_info.get("markdown") or element.text
                             pages_text[page_num].append(table_text)
                             full_text.append(table_text)
                             prev_text = table_text
@@ -392,25 +465,39 @@ class UnstructuredLoader:
             pages = []
             for page_num in sorted(pages_text.keys()):
                 text = "\n".join(pages_text[page_num])
-                pages.append({
+                page_info = {
                     "page_number": page_num,
                     "text": text,
                     "char_count": len(text)
-                })
+                }
+                # 对于 xlsx 文件，添加 sheet_name
+                if is_xlsx and page_num in page_to_sheet_name:
+                    page_info["sheet_name"] = page_to_sheet_name[page_num]
+                pages.append(page_info)
             
             # 日志：元素类型统计
             logger.info(f"[Unstructured] Element types: {element_type_counts}")
             
+            # 构建元数据
+            result_metadata = {
+                "elements_count": len(elements),
+                "image_count": len(images),
+                "table_count": len(tables),
+                "multimodal_ready": len(images) > 0,  # 标记是否有多模态内容
+                "element_types": element_type_counts  # 添加元素类型统计
+            }
+            
+            # 对于 xlsx 文件，添加 sheet 相关元数据（与 docling 输出保持一致）
+            if is_xlsx and page_to_sheet_name:
+                # 按页码排序获取 sheet 名称列表
+                sheet_names = [page_to_sheet_name[p] for p in sorted(page_to_sheet_name.keys())]
+                result_metadata["sheet_count"] = len(sheet_names)
+                result_metadata["sheet_names"] = sheet_names
+            
             return {
                 "success": True,
                 "loader": self.name,
-                "metadata": {
-                    "elements_count": len(elements),
-                    "image_count": len(images),
-                    "table_count": len(tables),
-                    "multimodal_ready": len(images) > 0,  # 标记是否有多模态内容
-                    "element_types": element_type_counts  # 添加元素类型统计
-                },
+                "metadata": result_metadata,
                 "pages": pages,
                 "images": images,
                 "tables": tables,
@@ -583,7 +670,10 @@ class UnstructuredLoader:
         page_num: int,
         table_index: int
     ) -> Optional[Dict[str, Any]]:
-        """Process a table element."""
+        """Process a table element.
+        
+        优化：将 HTML 表格转换为 Markdown 格式，以便分块器正确解析表头。
+        """
         try:
             metadata = element.metadata if hasattr(element, 'metadata') else None
             
@@ -593,7 +683,7 @@ class UnstructuredLoader:
                 "headers": [],
                 "rows": [],
                 "caption": None,
-                "markdown": element.text,
+                "markdown": None,  # 优先使用 HTML 转换的 Markdown
                 "html": None
             }
             
@@ -602,6 +692,16 @@ class UnstructuredLoader:
                 text_as_html = getattr(metadata, 'text_as_html', None)
                 if text_as_html:
                     table_info["html"] = text_as_html
+                    # 将 HTML 转换为 Markdown 表格格式
+                    markdown_table = self._html_table_to_markdown(text_as_html)
+                    if markdown_table:
+                        table_info["markdown"] = markdown_table
+                    # 从 HTML 提取表头
+                    table_info["headers"] = self._extract_headers_from_html(text_as_html)
+            
+            # 如果没有成功转换 HTML，降级使用纯文本
+            if not table_info["markdown"]:
+                table_info["markdown"] = element.text
             
             return table_info
             
@@ -650,6 +750,186 @@ class UnstructuredLoader:
             return img.size
         except:
             return None
+    
+    def _html_table_to_markdown(self, html: str) -> str:
+        """将 HTML 表格转换为 Markdown 格式。
+        
+        Args:
+            html: HTML 表格字符串
+            
+        Returns:
+            Markdown 格式的表格字符串
+        """
+        try:
+            from bs4 import BeautifulSoup
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            table = soup.find('table')
+            if not table:
+                return ""
+            
+            rows = []
+            headers = []
+            
+            # 提取表头 (thead > tr > th 或第一行 tr > th)
+            thead = table.find('thead')
+            if thead:
+                header_row = thead.find('tr')
+                if header_row:
+                    headers = [th.get_text(strip=True) for th in header_row.find_all(['th', 'td'])]
+            
+            # 如果没有 thead，检查第一行是否是表头 (tr > th)
+            if not headers:
+                first_row = table.find('tr')
+                if first_row:
+                    ths = first_row.find_all('th')
+                    if ths:
+                        headers = [th.get_text(strip=True) for th in ths]
+            
+            # 提取数据行 (tbody > tr 或直接 tr)
+            tbody = table.find('tbody')
+            data_rows = tbody.find_all('tr') if tbody else table.find_all('tr')
+            
+            for tr in data_rows:
+                # 跳过表头行（如果已经处理过）
+                if headers and tr.find('th') and not tr.find('td'):
+                    continue
+                    
+                cells = tr.find_all(['td', 'th'])
+                row_data = [cell.get_text(strip=True) for cell in cells]
+                
+                # 如果没有找到表头，使用第一行作为表头
+                if not headers and row_data:
+                    headers = row_data
+                    continue
+                
+                if row_data:
+                    rows.append(row_data)
+            
+            # 确保所有行的列数一致
+            if headers:
+                max_cols = max(len(headers), max((len(r) for r in rows), default=0))
+                headers = headers + [''] * (max_cols - len(headers))
+                rows = [r + [''] * (max_cols - len(r)) for r in rows]
+            
+            if not headers and not rows:
+                return ""
+            
+            # 构建 Markdown 表格
+            md_lines = []
+            
+            # 表头行
+            if headers:
+                md_lines.append('| ' + ' | '.join(headers) + ' |')
+                # 分隔行
+                md_lines.append('|' + '|'.join(['---' for _ in headers]) + '|')
+            
+            # 数据行
+            for row in rows:
+                md_lines.append('| ' + ' | '.join(row) + ' |')
+            
+            return '\n'.join(md_lines)
+            
+        except ImportError:
+            logger.warning("BeautifulSoup not installed, cannot convert HTML table to Markdown")
+            return ""
+        except Exception as e:
+            logger.warning(f"Failed to convert HTML table to Markdown: {e}")
+            return ""
+    
+    def _extract_headers_from_html(self, html: str) -> List[str]:
+        """从 HTML 表格中提取表头。
+        
+        Args:
+            html: HTML 表格字符串
+            
+        Returns:
+            表头列表
+        """
+        try:
+            from bs4 import BeautifulSoup
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            table = soup.find('table')
+            if not table:
+                return []
+            
+            headers = []
+            
+            # 方式1: 从 thead 提取
+            thead = table.find('thead')
+            if thead:
+                header_row = thead.find('tr')
+                if header_row:
+                    headers = [th.get_text(strip=True) for th in header_row.find_all(['th', 'td'])]
+            
+            # 方式2: 从第一行的 th 元素提取
+            if not headers:
+                first_row = table.find('tr')
+                if first_row:
+                    ths = first_row.find_all('th')
+                    if ths:
+                        headers = [th.get_text(strip=True) for th in ths]
+            
+            # 方式3: 如果没有 th，使用第一行 td 作为表头
+            if not headers:
+                first_row = table.find('tr')
+                if first_row:
+                    tds = first_row.find_all('td')
+                    if tds:
+                        headers = [td.get_text(strip=True) for td in tds]
+            
+            return headers
+            
+        except ImportError:
+            logger.warning("BeautifulSoup not installed, cannot extract headers from HTML")
+            return []
+        except Exception as e:
+            logger.warning(f"Failed to extract headers from HTML: {e}")
+            return []
+    
+    def _python_docx_table_to_markdown(self, table) -> str:
+        """将 python-docx Table 对象转换为 Markdown 格式。
+        
+        作为 unstructured 表格解析的降级方案。
+        
+        Args:
+            table: python-docx Table 对象
+            
+        Returns:
+            Markdown 格式的表格字符串
+        """
+        try:
+            rows_data = []
+            for row in table.rows:
+                row_cells = [cell.text.strip() for cell in row.cells]
+                rows_data.append(row_cells)
+            
+            if not rows_data:
+                return ""
+            
+            # 构建 Markdown 表格
+            md_lines = []
+            
+            # 表头（第一行）
+            header = rows_data[0]
+            md_lines.append("| " + " | ".join(header) + " |")
+            
+            # 分隔线
+            md_lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+            
+            # 数据行
+            for row in rows_data[1:]:
+                # 确保列数一致
+                while len(row) < len(header):
+                    row.append("")
+                md_lines.append("| " + " | ".join(row[:len(header)]) + " |")
+            
+            return "\n".join(md_lines)
+            
+        except Exception as e:
+            logger.warning(f"Failed to convert python-docx table to Markdown: {e}")
+            return ""
 
 
 # Global instance

@@ -75,7 +75,10 @@ def get_document_content(document_id: str, db: Session) -> tuple:
     Raises:
         HTTPException: If document not found
     """
-    # First, find the processing result from database
+    # First, get the document to retrieve original file format
+    document = db.query(Document).filter(Document.id == document_id).first()
+    
+    # Find the processing result from database
     processing_result = db.query(ProcessingResult).filter(
         ProcessingResult.document_id == document_id,
         ProcessingResult.processing_type == "load",
@@ -104,6 +107,12 @@ def get_document_content(document_id: str, db: Session) -> tuple:
             result = json.load(f)
             # Extract text content - support different result formats
             text = result.get("full_text", "") or result.get("content", {}).get("full_text", "") or result.get("content", {}).get("text", "")
+            
+            # Add original file format from document record (critical for proper strategy recommendation)
+            if document:
+                result["file_format"] = document.format
+                result["file_name"] = document.filename
+            
             return text, result
     except (json.JSONDecodeError, IOError) as e:
         raise HTTPException(

@@ -140,14 +140,26 @@ class ChunkingService:
                         "text": page_text,  # Include text for page-based chunking
                     })
             
-            # For Unstructured or other loaders: no sheet_name available
+            # For Unstructured loader: sheet_name directly in page (same as Docling)
+            elif loader_type == "unstructured":
+                for page in pages:
+                    page_text = page.get("text", "")
+                    text_parts.append(page_text)
+                    pages_metadata.append({
+                        "page_number": page.get("page_number"),
+                        "sheet_name": page.get("sheet_name"),  # Now supported in unstructured loader
+                        "char_count": page.get("char_count"),
+                        "text": page_text,  # Include text for page-based chunking
+                    })
+            
+            # For other loaders: no sheet_name available
             else:
                 for page in pages:
                     page_text = page.get("text", "")
                     text_parts.append(page_text)
                     pages_metadata.append({
                         "page_number": page.get("page_number"),
-                        "sheet_name": None,
+                        "sheet_name": page.get("sheet_name"),  # Try to get if available
                         "char_count": page.get("char_count"),
                         "text": page_text,  # Include text for page-based chunking
                     })
