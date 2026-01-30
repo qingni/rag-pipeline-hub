@@ -481,3 +481,4 @@ class ChunkTypeEnum:
 | 日期 | 类型 | 变更内容 | 影响需求 |
 |------|------|----------|----------|
 | 2026-01-20 | 初始版本 | 创建 002-doc-chunking-opt 功能规格文档 | - |
+| 2026-01-30 | BugFix | 修复 `validate_hybrid_params` 验证器丢失 `embedding_model` 参数的问题，导致混合分块策略中语义分块始终使用默认的 bge-m3 模型而非用户选择的模型 | FR-017, FR-020a |
