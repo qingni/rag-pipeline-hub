@@ -212,6 +212,242 @@
 
 ### Key Entities
 
+#### 已实现的分块器 (Chunker Registry)
+
+系统支持以下 6 种分块策略，由 `ChunkingService` 统一调度：
+
+| 分块器 | 策略类型 | 描述 | 适用场景 |
+|--------|----------|------|----------|
+| `CharacterChunker` | character | 按固定字符数分块，支持重叠 | 通用文本、快速分块 |
+| `ParagraphChunker` | paragraph | 以自然段落为单位，尊重段落边界 | 结构清晰的文档 |
+| `HeadingChunker` | heading | 按 H1/H2/H3 标题层级分块 | 技术文档、有标题结构的文档 |
+| `SemanticChunker` | semantic | 基于语义相似度智能分块 | 连续叙事文本、无明显结构 |
+| `ParentChildChunker` | parent_child | 生成父子两层分块结构 | 需要精确检索+完整上下文 |
+| `HybridChunker` | hybrid | 混合策略，针对不同内容类型应用不同策略 | 复杂文档（含代码、表格、图片） |
+
+#### 分块器参数详解
+
+**CharacterChunker 参数**：
+```python
+{
+    "chunk_size": 500,     # 块大小（字符数），范围 50-5000
+    "overlap": 50          # 重叠度（字符数），范围 0-500
+}
+```
+
+**ParagraphChunker 参数**：
+```python
+{
+    "min_chunk_size": 200,   # 最小块大小
+    "max_chunk_size": 1000,  # 最大块大小
+    "preserve_paragraphs": True  # 是否保留完整段落
+}
+```
+
+**HeadingChunker 参数**：
+```python
+{
+    "min_heading_level": 1,  # 最小标题级别（H1=1）
+    "max_heading_level": 3,  # 最大标题级别（H3=3）
+    "include_heading": True  # 块中是否包含标题文本
+}
+```
+
+**SemanticChunker 参数**：
+```python
+{
+    "similarity_threshold": 0.3,  # TF-IDF 相似度阈值
+    "embedding_similarity_threshold": 0.7,  # Embedding 相似度阈值
+    "min_chunk_size": 300,        # 最小块大小
+    "max_chunk_size": 1200,       # 最大块大小
+    "use_embedding": True,        # 是否使用 Embedding（否则用 TF-IDF）
+    "embedding_model": "bge-m3"   # Embedding 模型选择
+}
+```
+
+**ParentChildChunker 参数**：
+```python
+{
+    "parent_chunk_size": 2000,   # 父块大小，范围 500-10000
+    "child_chunk_size": 500,     # 子块大小，范围 100-2000
+    "child_overlap": 50,         # 子块重叠度，范围 0-500
+    "parent_overlap": 200        # 父块重叠度，范围 0-1000
+}
+```
+
+**HybridChunker 参数**：
+```python
+{
+    # 文本分块配置
+    "text_strategy": "semantic",     # 正文策略: semantic|paragraph|character|heading|none
+    "text_chunk_size": 500,          # 文本块大小
+    "text_overlap": 50,              # 文本块重叠度
+    "embedding_model": "bge-m3",     # 语义分块的 Embedding 模型
+    "use_embedding": True,           # 是否启用 Embedding
+    
+    # 代码分块配置
+    "code_strategy": "lines",        # 代码策略: lines|character|none
+    "code_chunk_lines": 50,          # 按行数分块时的行数
+    
+    # 表格配置
+    "table_strategy": "independent", # 表格策略: independent|merge_with_text
+    "min_table_rows": 2,             # 最小表格行数阈值
+    
+    # 多模态内容提取
+    "include_tables": True,          # 是否提取表格
+    "include_images": True,          # 是否提取图片
+    "include_code": True,            # 是否提取代码块
+    "min_code_lines": 3,             # 最小代码行数阈值
+    "image_base_path": None          # 图片路径基础目录
+}
+```
+
+#### SemanticChunker 三级降级机制
+
+语义分块采用三级降级策略确保稳定性：
+
+```
+1. 首选: EmbeddingService（支持 bge-m3、qwen3-embedding-8b、hunyuan-embedding）
+   │
+   ├─ 成功 → 使用 Embedding 向量计算句子间相似度
+   │
+   └─ 失败（API 不可用/超时）
+       │
+       ▼
+2. 备选: TF-IDF 相似度
+   │
+   ├─ 成功 → 使用词频-逆文档频率计算相似度
+   │
+   └─ 失败（句子数不足/计算失败）
+       │
+       ▼
+3. 兜底: 句子累加分块
+   │
+   └─ 按 min_chunk_size 累加句子，生成基础分块
+```
+
+**支持的 Embedding 模型**：
+| 模型 | 维度 | 上下文长度 | 特点 |
+|------|------|------------|------|
+| bge-m3 | 1024 | 8K | 多语言、速度快（推荐） |
+| qwen3-embedding-8b | 4096 | 32K | 高精度、长上下文 |
+| hunyuan-embedding | 1024 | - | 腾讯混元 |
+
+#### ImageExtractor 统一图片提取模块
+
+为保持所有分块策略的图片处理一致性，系统实现了统一的 `ImageExtractor` 模块：
+
+**核心功能**：
+- 从文档加载结果的 `images` 数组获取图片数据
+- 根据文本中的占位符 `[IMAGE_N: 描述]` 关联图片
+- 生成标准化的图片分块，包含 base64 数据用于多模态嵌入
+
+**图片分块元数据结构**：
+```python
+{
+    "chunk_type": "image",
+    "chunk_id": str,
+    "image_index": int,           # 图片索引
+    "image_path": str,            # 图片文件路径（展示用）
+    "image_base64": str,          # Base64 编码（嵌入用）
+    "alt_text": str,              # 替代文本
+    "caption": str,               # 图片标题
+    "width": int,                 # 宽度
+    "height": int,                # 高度
+    "mime_type": str,             # MIME 类型
+    "page_number": int,           # 所在页码
+    "context_before": str,        # 图片前上下文
+    "context_after": str,         # 图片后上下文
+    "section_title": str          # 所属章节标题
+}
+```
+
+#### 分块类型枚举 (ChunkTypeEnum)
+
+```python
+class ChunkTypeEnum:
+    TEXT = "text"      # 文本块
+    TABLE = "table"    # 表格块
+    IMAGE = "image"    # 图片块
+    CODE = "code"      # 代码块
+```
+
+#### 分块结果数据结构
+
+**标准分块结果 (ChunkingResult)**：
+```python
+{
+    "task_id": str,
+    "document_id": str,
+    "strategy_type": str,          # character|paragraph|heading|semantic|parent_child|hybrid
+    "parameters": Dict,            # 使用的分块参数
+    "total_chunks": int,           # 总块数
+    "statistics": {
+        "avg_chunk_size": float,
+        "max_chunk_size": int,
+        "min_chunk_size": int,
+        "char_count_distribution": List[int]
+    },
+    "chunks": [
+        {
+            "content": str,
+            "chunk_type": str,     # text|table|image|code
+            "parent_id": str,      # 父块 ID（parent_child 策略）
+            "metadata": {
+                "chunk_id": str,
+                "chunk_index": int,
+                "char_count": int,
+                "word_count": int,
+                "start_position": int,
+                "end_position": int,
+                "page_number": int,
+                "sheet_name": str,
+                # 表格特有字段
+                "table_markdown": str,
+                "row_count": int,
+                "column_count": int,
+                "headers": List[str],
+                # 图片特有字段
+                "image_base64": str,
+                "image_path": str,
+                "alt_text": str,
+                # 代码特有字段
+                "language": str,
+                "function_name": str,
+                "class_name": str,
+                # 上下文字段
+                "context_before": str,
+                "context_after": str,
+                "section_title": str
+            }
+        }
+    ],
+    "created_at": str              # ISO 格式时间戳
+}
+```
+
+**父子分块结果扩展**：
+```python
+{
+    # ... 基础字段 ...
+    "total_parent_chunks": int,
+    "parent_chunks": [
+        {
+            "content": str,
+            "chunk_type": "parent",
+            "metadata": {
+                "chunk_id": str,
+                "child_count": int,
+                "child_ids": List[str]
+            }
+        }
+    ],
+    "chunks": [
+        # 子块，包含 parent_id 引用
+    ]
+}
+```
+
 - **ParentChildChunk**: 父子分块结构，parent 包含完整上下文内容，children 为子块 ID 列表，每个子块包含 parent_id 引用
 - **MultimodalChunk**: 多模态分块实体，包含 type 字段（text/table/image/code）和对应类型的专属元数据
 - **ChunkingRecommendation**: 策略推荐实体，包含推荐策略、推荐理由、文档特征分析结果、预估效果指标

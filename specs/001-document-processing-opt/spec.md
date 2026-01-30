@@ -180,13 +180,23 @@
 - `specs/001-document-processing/` 规格文档
 
 #### 新增解析器
-- **DoclingLoader** - IBM Docling 解析器，支持高精度文档理解
+
+**已实现的加载器** (共 18 种):
+- **DoclingServeLoader** - IBM Docling Serve 解析器，高精度文档理解，支持同步/异步模式
+- **PyMuPDFLoader** - PDF 高性能解析器（MuPDF 引擎）
+- **PyPDFLoader** - PDF 基础解析器
+- **UnstructuredLoader** - 通用文档解析器（支持多种格式）
+- **DOCXLoader** - DOCX 文档解析器（支持图片提取）
+- **DOCLoader** - DOC 文档解析器（antiword 引擎）
+- **TextLoader** - 文本/Markdown 文件解析器（支持编码检测）
 - **CSVLoader** - CSV 文件解析器
 - **JSONLoader** - JSON 文件解析器
 - **HTMLLoader** - HTML 文档解析器
 - **XMLLoader** - XML 文档解析器
-- **EPUBLoader** - EPUB 电子书解析器
-- **EmailLoader** - EML 邮件解析器
+- **XLSXLoader** - Excel 文件解析器（openpyxl 引擎）
+- **PPTXLoader** - PowerPoint 解析器
+- **EPUBLoader** - EPUB 电子书解析器（待实现）
+- **EmailLoader** - EML 邮件解析器（待实现）
 - **MSGLoader** - MSG 邮件解析器
 - **PropertiesLoader** - Properties 配置文件解析器
 - **VTTLoader** - VTT 字幕文件解析器
@@ -194,30 +204,76 @@
 #### 增强的解析器选择策略
 
 ```python
-extended_format_map = {
-    # 现有格式优化（多层级降级）
-    "pdf": ["docling", "pymupdf", "unstructured"],
-    "docx": ["docling", "docx"],
-    "pptx": ["docling", "unstructured"],
-    "xlsx": ["docling", "pandas"],
+# 实际实现的格式策略配置 (format_strategies.py)
+FORMAT_STRATEGIES = {
+    # PDF 格式：Docling Serve 为主，多级降级
+    "pdf": FormatStrategy(
+        primary_loader="docling_serve",
+        fallback_chain=["pymupdf", "pypdf", "unstructured"],
+        size_threshold_mb=5,  # 大于 5MB 使用异步模式
+        quality_priority=True
+    ),
     
-    # 新增格式
-    "csv": ["csv"],
-    "json": ["json"],
-    "html": ["html", "unstructured"],
-    "htm": ["html", "unstructured"],
-    "xml": ["xml", "unstructured"],
-    "epub": ["epub"],
-    "eml": ["email"],
-    "msg": ["msg"],
-    "properties": ["properties"],
-    "vtt": ["vtt"],
-    "xls": ["pandas", "unstructured"],
-    "ppt": ["unstructured"],
-    "doc": ["doc", "unstructured"],
-    "markdown": ["text"],
-    "mdx": ["text"],
+    # Office 文档
+    "docx": FormatStrategy(primary_loader="docling_serve", fallback_chain=["docx"]),
+    "doc": FormatStrategy(primary_loader="doc", fallback_chain=["unstructured"]),
+    "xlsx": FormatStrategy(primary_loader="docling_serve", fallback_chain=["xlsx", "unstructured"]),
+    "xls": FormatStrategy(primary_loader="xlsx", fallback_chain=["unstructured"]),
+    "pptx": FormatStrategy(primary_loader="docling_serve", fallback_chain=["pptx", "unstructured"]),
+    "ppt": FormatStrategy(primary_loader="unstructured"),
+    
+    # 文本格式
+    "txt": FormatStrategy(primary_loader="text"),
+    "md": FormatStrategy(primary_loader="text"),
+    "markdown": FormatStrategy(primary_loader="text"),
+    
+    # 数据格式
+    "csv": FormatStrategy(primary_loader="csv"),
+    "json": FormatStrategy(primary_loader="json"),
+    "xml": FormatStrategy(primary_loader="xml"),
+    
+    # Web 格式
+    "html": FormatStrategy(primary_loader="html", fallback_chain=["unstructured"]),
+    "htm": FormatStrategy(primary_loader="html", fallback_chain=["unstructured"]),
+    
+    # 特殊格式
+    "properties": FormatStrategy(primary_loader="properties"),
+    "vtt": FormatStrategy(primary_loader="vtt"),
+    "msg": FormatStrategy(primary_loader="msg"),
 }
+```
+
+#### 异步任务状态 (LoadingTaskStatus)
+
+```python
+class LoadingTaskStatus:
+    """异步加载任务状态枚举"""
+    PENDING = "pending"      # 任务已创建，等待处理
+    STARTED = "started"      # 任务正在执行
+    SUCCESS = "success"      # 任务成功完成
+    FAILURE = "failure"      # 任务执行失败
+    CANCELLED = "cancelled"  # 任务被取消
+```
+
+#### 异步加载流程
+
+```
+1. 前端提交异步加载请求
+   └─> POST /processing/load/async
+       └─> LoadingService.submit_async_load()
+           └─> DoclingServeLoader.submit_async_convert_async()
+               └─> 返回 task_id 和 external_task_id
+           
+2. 前端轮询任务状态
+   └─> GET /processing/load/task/{task_id}/status
+       └─> LoadingService.get_async_task_status()
+           └─> DoclingServeLoader.poll_task_status_async()
+               └─> 返回 status、progress
+           
+3. 任务完成后获取结果
+   └─> GET /processing/load/task/{task_id}/result
+       └─> LoadingService.get_async_task_result()
+           └─> 返回完整加载结果（与同步模式格式一致）
 ```
 
 #### 统一数据结构

@@ -115,6 +115,73 @@
 
 ### Key Entities
 
+#### 已实现的分块器 (Chunker Registry)
+
+系统支持以下 6 种分块策略：
+
+| 分块器 | 策略类型 | 描述 | 适用场景 |
+|--------|----------|------|----------|
+| `CharacterChunker` | character | 按固定字符数分块，支持重叠 | 通用文本、快速分块 |
+| `ParagraphChunker` | paragraph | 以自然段落为单位，尊重段落边界 | 结构清晰的文档 |
+| `HeadingChunker` | heading | 按 H1/H2/H3 标题层级分块 | 技术文档、有标题结构的文档 |
+| `SemanticChunker` | semantic | 基于语义相似度智能分块 | 连续叙事文本、无明显结构 |
+| `ParentChildChunker` | parent_child | 生成父子两层分块结构 | 需要精确检索+完整上下文 |
+| `HybridChunker` | hybrid | 混合策略，针对不同内容类型应用不同策略 | 复杂文档（含代码、表格、图片） |
+
+#### 分块器参数配置
+
+**通用参数**：
+```python
+{
+    "chunk_size": 500,     # 块大小（字符数）
+    "overlap": 50          # 重叠度（字符数）
+}
+```
+
+**SemanticChunker 特有参数**：
+```python
+{
+    "similarity_threshold": 0.3,        # TF-IDF 相似度阈值
+    "embedding_similarity_threshold": 0.7,  # Embedding 相似度阈值
+    "min_chunk_size": 300,              # 最小块大小
+    "max_chunk_size": 1200,             # 最大块大小
+    "use_embedding": True,              # 是否使用 Embedding
+    "embedding_model": "bge-m3"         # Embedding 模型
+}
+```
+
+**ParentChildChunker 特有参数**：
+```python
+{
+    "parent_chunk_size": 2000,   # 父块大小
+    "child_chunk_size": 500,     # 子块大小
+    "child_overlap": 50,         # 子块重叠度
+    "parent_overlap": 200        # 父块重叠度
+}
+```
+
+**HybridChunker 特有参数**：
+```python
+{
+    "text_strategy": "semantic",     # 正文策略
+    "code_strategy": "lines",        # 代码策略
+    "table_strategy": "independent", # 表格策略
+    "include_tables": True,          # 是否提取表格
+    "include_images": True,          # 是否提取图片
+    "include_code": True             # 是否提取代码块
+}
+```
+
+#### 分块类型枚举 (ChunkTypeEnum)
+
+```python
+class ChunkTypeEnum:
+    TEXT = "text"      # 文本块
+    TABLE = "table"    # 表格块
+    IMAGE = "image"    # 图片块
+    CODE = "code"      # 代码块
+```
+
 - **ChunkingTask**: 表示分块任务，包含源文档引用、分块策略、分块参数、任务状态（pending/running/completed/partial/failed）、创建时间等属性
 - **ChunkingStrategy**: 表示分块策略，包含策略名称、策略类型（字数/段落/标题/语义）、策略描述、默认参数等属性
 - **DocumentChunk**: 表示单个文档块，包含content（块文本内容）和metadata（chunk_id、chunk_index、char_count、word_count、page_number、start_position、end_position、包含的标题、段落数、降级标记等）
