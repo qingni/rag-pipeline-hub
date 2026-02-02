@@ -124,10 +124,10 @@
 ### 第三批格式 (其他)
 
 - [x] T031 [P] [US4] 创建 XML 加载器 `backend/src/providers/loaders/xml_loader.py`
-- [x] T032 [P] [US4] 创建 EPUB 加载器 `backend/src/providers/loaders/epub_loader.py`
-- [x] T033 [P] [US4] 创建 Email (EML) 加载器 `backend/src/providers/loaders/email_loader.py`
-- [x] T034 [P] [US4] 创建 MSG 加载器 `backend/src/providers/loaders/msg_loader.py`
-- [x] T035 [P] [US4] 创建 VTT 加载器 `backend/src/providers/loaders/vtt_loader.py`
+- [ ] ~~T032 [P] [US4] 创建 EPUB 加载器~~ (不再实现)
+- [ ] ~~T033 [P] [US4] 创建 Email (EML) 加载器~~ (不再实现)
+- [ ] ~~T034 [P] [US4] 创建 MSG 加载器~~ (不再实现)
+- [ ] ~~T035 [P] [US4] 创建 VTT 加载器~~ (不再实现)
 - [x] T036 [P] [US4] 创建 Properties 加载器 `backend/src/providers/loaders/properties_loader.py`
 
 ### 注册和配置
@@ -280,10 +280,6 @@ Task: "创建 HTML 加载器 backend/src/providers/loaders/html_loader.py"
 Task: "创建 CSV 加载器 backend/src/providers/loaders/csv_loader.py"
 Task: "创建 JSON 加载器 backend/src/providers/loaders/json_loader.py"
 Task: "创建 XML 加载器 backend/src/providers/loaders/xml_loader.py"
-Task: "创建 EPUB 加载器 backend/src/providers/loaders/epub_loader.py"
-Task: "创建 Email 加载器 backend/src/providers/loaders/email_loader.py"
-Task: "创建 MSG 加载器 backend/src/providers/loaders/msg_loader.py"
-Task: "创建 VTT 加载器 backend/src/providers/loaders/vtt_loader.py"
 Task: "创建 Properties 加载器 backend/src/providers/loaders/properties_loader.py"
 ```
 

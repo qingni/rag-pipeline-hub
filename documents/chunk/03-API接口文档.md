@@ -151,11 +151,49 @@
         "id": "semantic",
         "name": "按语义分块",
         "type": "semantic",
-        "description": "基于语义相似度智能切分",
+        "description": "基于语义相似度智能切分，支持 Embedding 模型",
         "default_parameters": {
           "similarity_threshold": 0.3,
+          "embedding_similarity_threshold": 0.7,
           "min_chunk_size": 300,
-          "max_chunk_size": 1200
+          "max_chunk_size": 1200,
+          "use_embedding": true,
+          "embedding_model": "bge-m3"
+        },
+        "is_active": true
+      },
+      {
+        "id": "parent_child",
+        "name": "父子分块",
+        "type": "parent_child",
+        "description": "生成两层分块结构，父块提供上下文，子块用于检索",
+        "default_parameters": {
+          "parent_chunk_size": 2000,
+          "child_chunk_size": 500,
+          "child_overlap": 50,
+          "parent_overlap": 200
+        },
+        "is_active": true
+      },
+      {
+        "id": "hybrid",
+        "name": "混合分块",
+        "type": "hybrid",
+        "description": "针对不同内容类型（正文、代码、表格、图片）应用最合适的策略",
+        "default_parameters": {
+          "text_strategy": "semantic",
+          "text_chunk_size": 500,
+          "text_overlap": 50,
+          "embedding_model": "bge-m3",
+          "use_embedding": true,
+          "code_strategy": "lines",
+          "code_chunk_lines": 50,
+          "table_strategy": "independent",
+          "min_table_rows": 2,
+          "include_tables": true,
+          "include_images": true,
+          "include_code": true,
+          "min_code_lines": 3
         },
         "is_active": true
       }
@@ -549,4 +587,404 @@
 | 400 | 请求参数错误 |
 | 404 | 资源不存在 |
 | 500 | 服务器错误 |
+
+---
+
+## 9. 父子分块专用接口
+
+### 9.1 创建父子分块任务
+
+**接口**: `POST /chunk`
+
+**描述**: 使用父子分块策略创建分块任务
+
+**请求体**:
+```json
+{
+  "document_id": "doc_123",
+  "strategy_type": "parent_child",
+  "parameters": {
+    "parent_chunk_size": 2000,
+    "child_chunk_size": 500,
+    "child_overlap": 50,
+    "parent_overlap": 200
+  }
+}
+```
+
+**响应**:
+```json
+{
+  "success": true,
+  "message": "父子分块任务创建并完成",
+  "data": {
+    "task_id": "task_789",
+    "status": "completed",
+    "document_id": "doc_123",
+    "strategy_type": "parent_child",
+    "result_id": "result_999",
+    "total_parent_chunks": 5,
+    "total_child_chunks": 20,
+    "created_at": "2025-12-08T10:30:00Z"
+  }
+}
+```
+
+### 9.2 获取父子分块结果
+
+**接口**: `GET /result/{result_id}`
+
+**描述**: 获取父子分块结果，包含父块和子块的层级关系
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "result_id": "result_999",
+    "strategy_type": "parent_child",
+    "total_parent_chunks": 5,
+    "total_child_chunks": 20,
+    "parent_chunks": [
+      {
+        "chunk_id": "parent_0",
+        "sequence_number": 0,
+        "content": "父块完整内容...",
+        "chunk_type": "parent",
+        "metadata": {
+          "start_position": 0,
+          "end_position": 2000,
+          "child_count": 4,
+          "child_ids": ["child_0_0", "child_0_1", "child_0_2", "child_0_3"]
+        }
+      }
+    ],
+    "child_chunks": [
+      {
+        "chunk_id": "child_0_0",
+        "sequence_number": 0,
+        "content": "子块内容...",
+        "chunk_type": "child",
+        "parent_id": "parent_0",
+        "metadata": {
+          "parent_sequence": 0,
+          "child_sequence": 0,
+          "start_position": 0,
+          "end_position": 500
+        }
+      }
+    ]
+  }
+}
+```
+
+### 9.3 通过子块ID获取父块
+
+**接口**: `GET /chunk/{child_chunk_id}/parent`
+
+**描述**: 根据子块ID获取对应的父块内容（用于检索后获取完整上下文）
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "child_chunk_id": "child_0_0",
+    "parent_chunk": {
+      "chunk_id": "parent_0",
+      "content": "父块完整内容...",
+      "metadata": {
+        "child_count": 4,
+        "child_ids": ["child_0_0", "child_0_1", "child_0_2", "child_0_3"]
+      }
+    }
+  }
+}
+```
+
+---
+
+## 10. 混合分块与多模态接口
+
+### 10.1 创建混合分块任务
+
+**接口**: `POST /chunk`
+
+**描述**: 使用混合分块策略，针对不同内容类型应用不同策略
+
+**请求体**:
+```json
+{
+  "document_id": "doc_123",
+  "strategy_type": "hybrid",
+  "parameters": {
+    "text_strategy": "semantic",
+    "text_chunk_size": 500,
+    "text_overlap": 50,
+    "embedding_model": "bge-m3",
+    "use_embedding": true,
+    "code_strategy": "lines",
+    "code_chunk_lines": 50,
+    "table_strategy": "independent",
+    "min_table_rows": 2,
+    "include_tables": true,
+    "include_images": true,
+    "include_code": true,
+    "min_code_lines": 3
+  }
+}
+```
+
+**响应**:
+```json
+{
+  "success": true,
+  "message": "混合分块任务创建并完成",
+  "data": {
+    "task_id": "task_789",
+    "status": "completed",
+    "document_id": "doc_123",
+    "strategy_type": "hybrid",
+    "result_id": "result_999",
+    "total_chunks": 35,
+    "chunk_type_distribution": {
+      "text": 25,
+      "table": 5,
+      "image": 3,
+      "code": 2
+    },
+    "created_at": "2025-12-08T10:30:00Z"
+  }
+}
+```
+
+### 10.2 获取多模态分块结果
+
+**接口**: `GET /result/{result_id}`
+
+**描述**: 获取混合分块结果，包含不同类型的分块
+
+**参数**:
+- `chunk_type` (string, optional): 过滤分块类型(text/table/image/code)
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "result_id": "result_999",
+    "strategy_type": "hybrid",
+    "total_chunks": 35,
+    "chunk_type_distribution": {
+      "text": 25,
+      "table": 5,
+      "image": 3,
+      "code": 2
+    },
+    "chunks": [
+      {
+        "chunk_id": "text_0",
+        "chunk_type": "text",
+        "content": "正文内容...",
+        "metadata": {
+          "strategy": "semantic",
+          "char_count": 523
+        }
+      },
+      {
+        "chunk_id": "table_0",
+        "chunk_type": "table",
+        "content": "| 列1 | 列2 |\n|-----|-----|\n| 值1 | 值2 |",
+        "metadata": {
+          "row_count": 2,
+          "column_count": 2,
+          "headers": ["列1", "列2"],
+          "page_number": 1
+        }
+      },
+      {
+        "chunk_id": "image_0",
+        "chunk_type": "image",
+        "content": "图片描述文本",
+        "metadata": {
+          "image_index": 0,
+          "image_path": "/path/to/image.png",
+          "image_base64": "iVBORw0KGgo...",
+          "alt_text": "示例图片",
+          "caption": "图1: 系统架构图",
+          "width": 800,
+          "height": 600,
+          "mime_type": "image/png",
+          "page_number": 1,
+          "context_before": "前文上下文...",
+          "context_after": "后文上下文..."
+        }
+      },
+      {
+        "chunk_id": "code_0",
+        "chunk_type": "code",
+        "content": "def example():\n    return 'Hello'",
+        "metadata": {
+          "language": "python",
+          "line_count": 2,
+          "page_number": 2
+        }
+      }
+    ]
+  }
+}
+```
+
+### 10.3 按类型获取分块
+
+**接口**: `GET /result/{result_id}/chunks/{chunk_type}`
+
+**描述**: 获取指定类型的所有分块
+
+**路径参数**:
+- `chunk_type`: 分块类型(text/table/image/code)
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "chunk_type": "image",
+    "total": 3,
+    "chunks": [
+      {
+        "chunk_id": "image_0",
+        "chunk_type": "image",
+        "content": "图片描述文本",
+        "metadata": {
+          "image_index": 0,
+          "image_path": "/path/to/image.png",
+          "image_base64": "iVBORw0KGgo...",
+          "alt_text": "示例图片",
+          "width": 800,
+          "height": 600
+        }
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 11. 智能推荐接口
+
+### 11.1 获取分块策略推荐
+
+**接口**: `POST /recommend`
+
+**描述**: 根据文档特征推荐最佳分块策略
+
+**请求体**:
+```json
+{
+  "document_id": "doc_123"
+}
+```
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "document_id": "doc_123",
+    "document_name": "技术文档.pdf",
+    "document_features": {
+      "has_headings": true,
+      "heading_count": {
+        "h1": 3,
+        "h2": 12,
+        "h3": 25
+      },
+      "has_tables": true,
+      "table_count": 5,
+      "has_images": true,
+      "image_count": 8,
+      "has_code_blocks": true,
+      "code_block_count": 10,
+      "total_chars": 50000,
+      "avg_paragraph_length": 300
+    },
+    "recommended_strategy": {
+      "strategy_type": "hybrid",
+      "confidence": 0.95,
+      "reason": "文档包含多种内容类型（标题、表格、图片、代码），建议使用混合分块策略",
+      "parameters": {
+        "text_strategy": "heading",
+        "code_strategy": "lines",
+        "table_strategy": "independent",
+        "include_tables": true,
+        "include_images": true,
+        "include_code": true
+      }
+    },
+    "alternative_strategies": [
+      {
+        "strategy_type": "heading",
+        "confidence": 0.75,
+        "reason": "文档有清晰的标题层级结构"
+      },
+      {
+        "strategy_type": "semantic",
+        "confidence": 0.60,
+        "reason": "文档内容连贯，适合语义分块"
+      }
+    ]
+  }
+}
+```
+
+### 11.2 预览分块效果
+
+**接口**: `POST /preview`
+
+**描述**: 预览分块效果（使用文档前 10% 内容进行试分块）
+
+**请求体**:
+```json
+{
+  "document_id": "doc_123",
+  "strategy_type": "hybrid",
+  "parameters": {
+    "text_strategy": "semantic",
+    "text_chunk_size": 500
+  }
+}
+```
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "preview_text_length": 5000,
+    "preview_percentage": 10,
+    "estimated_total_chunks": 35,
+    "preview_chunks": [
+      {
+        "chunk_id": "preview_0",
+        "chunk_type": "text",
+        "content": "预览块内容...",
+        "char_count": 523
+      }
+    ],
+    "statistics": {
+      "avg_chunk_size": 500,
+      "max_chunk_size": 650,
+      "min_chunk_size": 350,
+      "chunk_type_distribution": {
+        "text": 3,
+        "table": 1,
+        "image": 0
+      }
+    },
+    "estimated_processing_time": 12.5
+  }
+}
+```
 

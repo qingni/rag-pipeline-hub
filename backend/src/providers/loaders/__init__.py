@@ -16,8 +16,6 @@ from .json_loader import json_loader
 from .xml_loader import xml_loader
 from .xlsx_loader import xlsx_loader
 from .pptx_loader import pptx_loader
-from .msg_loader import msg_loader
-from .vtt_loader import vtt_loader
 from .properties_loader import properties_loader
 from .docling_serve_client import docling_serve_loader
 
@@ -44,11 +42,7 @@ LOADER_INSTANCES = {
     # Text loaders
     'text': text_loader,
     
-    # Email loaders
-    'msg': msg_loader,
-    
     # Specialized loaders
-    'vtt': vtt_loader,
     'properties': properties_loader,
     
     # Advanced loaders
@@ -143,8 +137,6 @@ __all__ = [
     'xml_loader',
     'xlsx_loader',
     'pptx_loader',
-    'msg_loader',
-    'vtt_loader',
     'properties_loader',
     'LOADER_INSTANCES',
     'get_loader',

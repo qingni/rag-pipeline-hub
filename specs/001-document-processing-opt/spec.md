@@ -126,6 +126,7 @@
 - 当用户尝试访问已移除的解析 API 时，系统应返回清晰的错误信息
 - 当 Docling 和所有备用解析器都失败时，系统如何处理？
 - 当文档格式识别错误导致选择错误解析器时，如何自动纠正？
+- 当同步加载接口降级使用 Docling Serve 时，前端必须正确检测 `async_mode` 响应并转换为异步任务模式，否则将导致用户无法看到处理进度和队列组件
 
 ## Requirements *(mandatory)*
 
@@ -145,10 +146,11 @@
 - **FR-009**: 系统必须设计统一的标准化数据结构，所有解析器输出都转换为此格式
 - **FR-009a**: 系统必须支持通过 Docling Serve 的异步 API 加载大文件，提供 `/load/async`、`/load/task/{task_id}/status`、`/load/task/{task_id}/result`、`/load/task/{task_id}/cancel` 等端点
 - **FR-009b**: 异步加载必须通过 `LoadingTask` 实体追踪任务状态（pending/started/success/failure/cancelled）、进度和处理耗时，并在任务成功后持久化结果为标准化加载结果 JSON
+- **FR-009c**: 当同步加载接口 (`/processing/load`) 的加载器降级到 Docling Serve 时，后端返回 `async_mode=true` 及 `task_id`、`external_task_id`，前端必须检测此响应并自动转换为异步任务模式，将任务加入队列并启动轮询
 
 #### 格式扩展
 - **FR-010**: 系统必须按分批策略扩展格式支持（第1批：PDF/DOCX/XLSX/PPTX）
-- **FR-011**: 系统必须支持新增格式的专用解析器（CSV、JSON、HTML、XML、EPUB等）
+- **FR-011**: 系统必须支持新增格式的专用解析器（CSV、JSON、HTML、XML等）
 - **FR-012**: 系统必须更新格式映射配置，支持多解析器降级策略
 
 #### 加载结果持久化与预览
@@ -195,11 +197,7 @@
 - **XMLLoader** - XML 文档解析器
 - **XLSXLoader** - Excel 文件解析器（openpyxl 引擎）
 - **PPTXLoader** - PowerPoint 解析器
-- **EPUBLoader** - EPUB 电子书解析器（待实现）
-- **EmailLoader** - EML 邮件解析器（待实现）
-- **MSGLoader** - MSG 邮件解析器
-- **PropertiesLoader** - Properties 配置文件解析器
-- **VTTLoader** - VTT 字幕文件解析器
+
 
 #### 增强的解析器选择策略
 
@@ -274,6 +272,30 @@ class LoadingTaskStatus:
    └─> GET /processing/load/task/{task_id}/result
        └─> LoadingService.get_async_task_result()
            └─> 返回完整加载结果（与同步模式格式一致）
+```
+
+#### 同步接口降级到异步模式流程
+
+当同步加载接口因加载器降级而使用 Docling Serve 时，会自动转换为异步模式：
+
+```
+1. 前端提交同步加载请求
+   └─> POST /processing/load
+       └─> LoadingService.load_document()
+           └─> FallbackManager.load_with_fallback()
+               └─> 主加载器（如 PyMuPDF）失败
+               └─> 降级到 DoclingServeLoader（异步模式）
+                   └─> 返回 async_mode=true, task_id, external_task_id
+
+2. 前端检测到 async_mode=true
+   └─> loadDocumentSync() 中检测 result.metadata.async_mode
+       └─> 自动转换为异步任务模式
+       └─> 将任务添加到 loadingQueueStore
+       └─> 启动队列轮询 loadingQueueStore.startPolling()
+
+3. 后续流程与显式异步加载一致
+   └─> 轮询 GET /processing/load/task/{task_id}/status
+   └─> 完成后获取结果
 ```
 
 #### 统一数据结构

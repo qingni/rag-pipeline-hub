@@ -193,11 +193,7 @@ export async function getLoadingResult(documentId) {
 
 | 格式 | 主解析器 | 降级解析器 |
 |------|----------|------------|
-| EPUB | ebooklib | Unstructured |
-| EML | email 模块 | Unstructured |
-| MSG | extract-msg | Unstructured |
 | XML | lxml | xml.etree |
-| VTT | webvtt-py | - |
 | PROPERTIES | jproperties | - |
 | XLS | xlrd | pandas |
 | PPT | Unstructured | - |

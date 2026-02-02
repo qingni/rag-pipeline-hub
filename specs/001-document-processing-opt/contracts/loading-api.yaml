@@ -56,10 +56,6 @@ paths:
               - csv
               - json
               - xml
-              - epub
-              - email
-              - msg
-              - vtt
               - properties
         - name: enable_fallback
           in: query

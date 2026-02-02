@@ -260,7 +260,7 @@ LOADER_REGISTRY: Dict[str, LoaderConfig] = {
     "unstructured": LoaderConfig(
         name="unstructured",
         display_name="Unstructured",
-        supported_formats=["pdf", "docx", "xlsx", "pptx", "html", "epub", "eml", "msg"],
+        supported_formats=["pdf", "docx", "xlsx", "pptx", "html"],
         priority=10,  # 作为通用降级
         avg_speed="slow",
         quality_level=ExtractionQuality.MEDIUM,

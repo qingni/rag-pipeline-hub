@@ -104,11 +104,7 @@ for page in result.document.pages:
 
 | 格式 | 主解析器 | 降级解析器 | 依赖库 |
 |------|----------|------------|--------|
-| EPUB | ebooklib | Unstructured | ebooklib |
-| EML | email 模块 | Unstructured | 内置 |
-| MSG | extract-msg | Unstructured | extract-msg |
 | XML | lxml | xml.etree | lxml |
-| VTT | webvtt-py | 自定义解析 | webvtt-py |
 | PROPERTIES | jproperties | 自定义解析 | jproperties |
 | XLS | xlrd, pandas | Unstructured | xlrd, pandas |
 | PPT | Unstructured | - | unstructured |
@@ -124,7 +120,7 @@ pip install docling PyMuPDF python-docx openpyxl python-pptx pandas
 pip install beautifulsoup4 lxml markdown mistune
 
 # 第三批格式
-pip install ebooklib extract-msg webvtt-py jproperties xlrd
+pip install jproperties xlrd
 
 # 可选：Unstructured 作为通用降级
 pip install "unstructured[all-docs]"
@@ -186,11 +182,7 @@ format_strategy_map = {
     "mdx": ["text"],
     
     # 第三批：专用解析器
-    "epub": ["epub", "unstructured"],
-    "eml": ["email", "unstructured"],
-    "msg": ["msg", "unstructured"],
     "xml": ["xml", "unstructured"],
-    "vtt": ["vtt"],
     "properties": ["properties"],
     "xls": ["pandas", "unstructured"],
     "ppt": ["unstructured"],

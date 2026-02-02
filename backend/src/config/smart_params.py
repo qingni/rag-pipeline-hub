@@ -132,14 +132,6 @@ FORMAT_BASE_PARAMS = {
         "description": "PPT 97-2003 格式"
     },
     
-    # ===== 电子书 =====
-    "epub": {
-        "chunk_size": 1000,
-        "overlap": 200,
-        "category": DocumentCategory.EBOOK,
-        "description": "电子书章节较长，需要充分重叠"
-    },
-    
     # ===== 默认 =====
     "default": {
         "chunk_size": 600,

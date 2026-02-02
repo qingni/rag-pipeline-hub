@@ -216,8 +216,7 @@ async def get_format_chunking_params(
                     "long_documents": ["pdf", "docx", "doc"],
                     "plain_text": ["txt", "md"],
                     "web_content": ["html", "htm"],
-                    "presentations": ["pptx", "ppt"],
-                    "ebooks": ["epub"]
+                    "presentations": ["pptx", "ppt"]
                 }
             },
             message="所有文档格式的推荐分块参数"

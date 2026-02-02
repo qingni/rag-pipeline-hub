@@ -109,7 +109,7 @@ rag-framework-spec/
 
 - **主解析器**: Docling（支持 PDF、DOCX、XLSX、PPTX 等复杂文档）
 - **降级策略**: 自动降级到专用加载器（PyMuPDF、python-docx、openpyxl 等）
-- **支持格式**: PDF、DOCX、DOC、XLSX、XLS、PPTX、HTML、CSV、JSON、XML、EPUB、EML、MSG、VTT、TXT、MD 等 20+ 种格式
+- **支持格式**: PDF、DOCX、DOC、XLSX、XLS、PPTX、HTML、CSV、JSON、XML、TXT、MD 等 15+ 种格式
 - **输出格式**: 统一的 StandardDocumentResult 结构（含全文、分页、元数据、表格）
 
 ### 2. 文档分块 (Document Chunking)

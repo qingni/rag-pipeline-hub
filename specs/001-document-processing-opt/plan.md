@@ -67,11 +67,7 @@ backend/
 │           ├── json_loader.py       # JSON 加载器 (新增)
 │           ├── html_loader.py       # HTML 加载器 (新增)
 │           ├── xml_loader.py        # XML 加载器 (新增)
-│           ├── epub_loader.py       # EPUB 加载器 (新增)
-│           ├── email_loader.py      # EML 加载器 (新增)
-│           ├── msg_loader.py        # MSG 加载器 (新增)
 │           ├── properties_loader.py # Properties 加载器 (新增)
-│           ├── vtt_loader.py        # VTT 加载器 (新增)
 │           ├── xlsx_loader.py       # XLSX 加载器 (新增)
 │           ├── pptx_loader.py       # PPTX 加载器 (新增)
 │           └── [existing loaders]   # 现有加载器保留

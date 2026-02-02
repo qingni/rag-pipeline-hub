@@ -615,6 +615,43 @@ async function loadDocumentSync() {
       loaderType.value || undefined
     )
     
+    // 检查后端是否返回了异步模式（降级使用 docling_serve 时会发生）
+    // metadata 中的 async_mode 表示任务需要异步轮询
+    if (result?.metadata?.async_mode) {
+      console.log('[DocumentLoad] 后端返回异步模式，转换为异步任务:', result.metadata)
+      
+      const taskId = result.metadata.task_id
+      const externalTaskId = result.metadata.external_task_id
+      
+      if (!taskId) {
+        throw new Error('异步模式缺少 task_id')
+      }
+      
+      // 转换为异步任务模式
+      queuedTaskId.value = taskId
+      taskQueued.value = true
+      status.value = 'idle'
+      loading.value = false
+      
+      // 将任务添加到队列 Store 进行统一管理
+      loadingQueueStore.addTask({
+        task_id: taskId,
+        external_task_id: externalTaskId,
+        document_id: selectedDocument.value.id,
+        document_name: selectedDocument.value.filename,
+        loader_type: result.provider || 'docling_serve',
+        status: 'pending',
+        progress: 0,
+        created_at: new Date().toISOString()
+      })
+      
+      // 开始队列轮询
+      loadingQueueStore.startPolling()
+      
+      console.log('[DocumentLoad] 已转换为异步任务:', taskId, 'external:', externalTaskId)
+      return
+    }
+    
     loadResult.value = result
     status.value = 'completed'
     
