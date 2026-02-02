@@ -1,6 +1,35 @@
 """Response formatting utilities."""
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
+import math
+
+
+def sanitize_statistics(stats: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    清理 statistics 中的无穷大值，确保 JSON 序列化安全。
+    
+    Args:
+        stats: 原始统计数据
+        
+    Returns:
+        清理后的统计数据
+    """
+    if not stats:
+        return {}
+    
+    def clean_value(value):
+        """递归清理值"""
+        if isinstance(value, float):
+            if math.isinf(value) or math.isnan(value):
+                return 0  # 将 inf/nan 替换为 0
+            return value
+        elif isinstance(value, dict):
+            return {k: clean_value(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [clean_value(item) for item in value]
+        return value
+    
+    return clean_value(stats)
 
 
 def success_response(

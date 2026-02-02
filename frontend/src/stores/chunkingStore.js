@@ -211,6 +211,11 @@ export const useChunkingStore = defineStore('chunking', {
           // Load the full result with chunks
           await this.loadChunkingResult(response.data.result_id)
           
+          // 如果是父子分块，加载父块（树状视图需要父块数据，includeChildren=true获取子块）
+          if (this.isParentChildResult) {
+            await this.loadParentChunks(null, true)
+          }
+          
           // 不再自动选中历史策略，让用户根据智能推荐或手动选择策略
           // 只有当用户明确指定了策略类型时才更新选中状态
           if (strategyType) {
@@ -552,16 +557,33 @@ export const useChunkingStore = defineStore('chunking', {
 
     /**
      * Load parent chunks for parent-child result (NEW)
+     * 注意：为了树状视图能正确显示，需要加载所有父块
+     * includeChildren=true 时会同时返回每个父块的子块数据
      */
-    async loadParentChunks(resultId = null, includeChildren = false) {
+    async loadParentChunks(resultId = null, includeChildren = true) {
       const rId = resultId || this.currentResult?.result_id
       if (!rId) return
 
       this.parentChunksLoading = true
       try {
-        const response = await chunkingService.getParentChunks(rId, includeChildren)
+        // 使用较大的 pageSize 加载所有父块，确保树状视图能完整显示
+        // 后端 API 限制最大 100，如果父块超过 100 个需要分页加载
+        const pageSize = 100
+        const response = await chunkingService.getParentChunks(rId, includeChildren, 1, pageSize)
         if (response.success && response.data) {
           this.parentChunks = response.data.items || []
+          
+          // 如果父块总数超过当前加载的数量，继续加载剩余的父块
+          const total = response.data.total || 0
+          if (total > pageSize) {
+            const totalPages = Math.ceil(total / pageSize)
+            for (let page = 2; page <= totalPages; page++) {
+              const moreResponse = await chunkingService.getParentChunks(rId, includeChildren, page, pageSize)
+              if (moreResponse.success && moreResponse.data?.items) {
+                this.parentChunks = [...this.parentChunks, ...moreResponse.data.items]
+              }
+            }
+          }
         }
       } catch (error) {
         console.error('Failed to load parent chunks:', error)

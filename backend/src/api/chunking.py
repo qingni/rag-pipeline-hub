@@ -10,7 +10,7 @@ from ..models.document import Document
 from ..models.chunking_strategy import ChunkingStrategy
 from ..models.chunking_task import ChunkingTask, StrategyType, TaskStatus
 from ..models.chunking_result import ChunkingResult
-from ..utils.formatters import success_response, paginated_response
+from ..utils.formatters import success_response, paginated_response, sanitize_statistics
 from ..utils.error_handlers import NotFoundError, ValidationError
 import json
 
@@ -770,7 +770,7 @@ async def get_latest_result_for_document(
             "parameters": result.chunking_params,
             "status": result.status.value,
             "total_chunks": result.total_chunks,
-            "statistics": result.statistics,
+            "statistics": sanitize_statistics(result.statistics),
             "version": result.version,
             "is_active": result.is_active,
             "processing_time": result.processing_time,
@@ -817,7 +817,7 @@ async def get_chunking_result(
         "parameters": result.chunking_params,
         "status": result.status.value,
         "total_chunks": result.total_chunks,
-        "statistics": result.statistics,
+        "statistics": sanitize_statistics(result.statistics),
         "file_path": result.json_file_path,
         "created_at": result.created_at.isoformat() if result.created_at else None
     }

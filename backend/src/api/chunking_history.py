@@ -7,7 +7,7 @@ from datetime import datetime
 from ..storage.database import get_db
 from ..models.chunking_result import ChunkingResult
 from ..models.document import Document
-from ..utils.formatters import success_response, paginated_response
+from ..utils.formatters import success_response, paginated_response, sanitize_statistics
 from ..utils.error_handlers import NotFoundError
 import os
 
@@ -96,7 +96,7 @@ async def get_chunking_history(
     items = []
     for result in results:
         # Enrich statistics with parameters if not present
-        stats = result.statistics or {}
+        stats = sanitize_statistics(result.statistics) or {}
         if 'parameters' not in stats and result.chunking_params:
             stats['parameters'] = result.chunking_params
         
@@ -178,7 +178,7 @@ async def get_version_history(
             "total_chunks": ver.total_chunks,
             "parameters": ver.chunking_params,
             "processing_time": ver.processing_time,
-            "statistics": ver.statistics,
+            "statistics": sanitize_statistics(ver.statistics),
             "previous_version_id": ver.previous_version_id,
             "replacement_reason": ver.replacement_reason,
             "created_at": ver.created_at.isoformat() if ver.created_at else None
@@ -288,15 +288,15 @@ async def compare_results(
             "strategy_type": result.chunking_strategy.value,
             "total_chunks": result.total_chunks,
             "processing_time": result.processing_time,
-            "statistics": result.statistics,
+            "statistics": sanitize_statistics(result.statistics),
             "parameters": result.chunking_params
         })
     
     # Statistical comparison
     comparison["statistics_comparison"] = {
-        "avg_chunk_sizes": [r.statistics.get("avg_chunk_size", 0) for r in results],
-        "max_chunk_sizes": [r.statistics.get("max_chunk_size", 0) for r in results],
-        "min_chunk_sizes": [r.statistics.get("min_chunk_size", 0) for r in results],
+        "avg_chunk_sizes": [sanitize_statistics(r.statistics).get("avg_chunk_size", 0) for r in results],
+        "max_chunk_sizes": [sanitize_statistics(r.statistics).get("max_chunk_size", 0) for r in results],
+        "min_chunk_sizes": [sanitize_statistics(r.statistics).get("min_chunk_size", 0) for r in results],
         "total_chunks": [r.total_chunks for r in results],
         "processing_times": [r.processing_time for r in results]
     }
@@ -304,7 +304,7 @@ async def compare_results(
     # Simple recommendations
     fastest = min(results, key=lambda r: r.processing_time)
     most_balanced = min(results, key=lambda r: abs(
-        r.statistics.get("max_chunk_size", 0) - r.statistics.get("avg_chunk_size", 0)
+        sanitize_statistics(r.statistics).get("max_chunk_size", 0) - sanitize_statistics(r.statistics).get("avg_chunk_size", 0)
     ))
     
     comparison["recommendations"] = [

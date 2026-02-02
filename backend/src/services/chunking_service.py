@@ -509,6 +509,31 @@ class ChunkingService:
         statistics['child_count'] = len(child_chunks)
         statistics['avg_children_per_parent'] = len(child_chunks) / len(parent_chunks) if parent_chunks else 0
         
+        # 计算平均父块大小
+        if parent_chunks:
+            parent_sizes = [p.get('metadata', {}).get('char_count', 0) or len(p.get('content', '')) for p in parent_chunks]
+            statistics['avg_parent_size'] = int(sum(parent_sizes) / len(parent_sizes)) if parent_sizes else 0
+        else:
+            statistics['avg_parent_size'] = 0
+        
+        # 计算子块大小分布（用于统计视图）
+        if child_chunks:
+            buckets = [
+                {'name': '0-200', 'min': 0, 'max': 200, 'count': 0},
+                {'name': '200-500', 'min': 200, 'max': 500, 'count': 0},
+                {'name': '500-800', 'min': 500, 'max': 800, 'count': 0},
+                {'name': '800-1200', 'min': 800, 'max': 1200, 'count': 0},
+                {'name': '>1200', 'min': 1200, 'max': 999999, 'count': 0}  # 使用大整数代替 inf，避免 JSON 序列化问题
+            ]
+            for chunk in child_chunks:
+                size = chunk.get('metadata', {}).get('char_count', 0) or len(chunk.get('content', ''))
+                for bucket in buckets:
+                    if bucket['min'] <= size < bucket['max']:
+                        bucket['count'] += 1
+                        break
+            # 返回时只保留需要的字段，移除 min/max
+            statistics['size_distribution'] = [{'name': b['name'], 'count': b['count']} for b in buckets]
+        
         # Create result directory if needed
         from pathlib import Path
         from ..config import settings
@@ -585,7 +610,7 @@ class ChunkingService:
                 start_position=parent_data['metadata'].get('start_position', 0),
                 end_position=parent_data['metadata'].get('end_position', 0),
                 child_count=parent_data['metadata'].get('child_count', 0),
-                metadata={
+                chunk_metadata={
                     'char_count': parent_data['metadata'].get('char_count', 0),
                     'word_count': parent_data['metadata'].get('word_count', 0),
                     'child_ids': parent_data['metadata'].get('child_ids', [])

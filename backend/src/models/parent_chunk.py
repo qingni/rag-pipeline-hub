@@ -81,9 +81,15 @@ class ParentChunk(Base):
             data["children"] = [
                 {
                     "id": child.id,
+                    "parent_id": self.id,  # 添加parent_id方便前端映射
                     "sequence_number": child.sequence_number,
+                    "content": child.content,  # 完整内容
                     "content_preview": child.content[:100] + "..." if len(child.content) > 100 else child.content,
-                    "chunk_type": child.chunk_type.value if child.chunk_type else "text"
+                    "chunk_type": child.chunk_type.value if child.chunk_type else "text",
+                    "metadata": {
+                        **({"char_count": len(child.content)} if child.content else {}),
+                        **(child.chunk_metadata or {})
+                    }
                 }
                 for child in self.children
             ]

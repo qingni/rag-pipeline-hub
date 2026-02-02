@@ -49,58 +49,47 @@
               <template v-if="hasResult">
                 <!-- Result Header Info -->
                 <t-card :bordered="false" class="result-header">
-                  <t-space>
-                    <t-tag theme="primary" variant="light">
-                      文档: {{ currentResult?.document_name || '未知' }}
-                    </t-tag>
-                    <t-tag theme="success" variant="light">
-                      策略: {{ getStrategyLabel(currentResult?.strategy_type) }}
-                    </t-tag>
-                    <t-tag theme="warning" variant="light">
-                      共 {{ chunksTotalCount }} 个分块
-                    </t-tag>
-                  </t-space>
+                  <div class="result-header-content">
+                    <t-space>
+                      <t-tag theme="primary" variant="light">
+                        文档: {{ currentResult?.document_name || '未知' }}
+                      </t-tag>
+                      <t-tag theme="success" variant="light">
+                        策略: {{ getStrategyLabel(currentResult?.strategy_type) }}
+                      </t-tag>
+                      <t-tag theme="warning" variant="light">
+                        共 {{ chunksTotalCount }} 个分块
+                      </t-tag>
+                    </t-space>
+                  </div>
                 </t-card>
 
-                <t-row :gutter="16" class="results-row">
-                  <!-- Chunk List -->
-                  <t-col :span="12">
-                    <ChunkList
-                      :chunks="chunks"
-                      :total-count="chunksTotalCount"
-                      :page="chunksPage"
-                      :page-size="chunksPageSize"
-                      :selected-chunk-id="selectedChunk?.id"
-                      :loading="resultLoading"
-                      @select="handleSelectChunk"
-                      @page-change="handleChunkPageChange"
-                    />
-                  </t-col>
-
-                  <!-- Chunk Detail -->
-                  <t-col :span="12">
-                    <ChunkDetail :chunk="selectedChunk" />
-                  </t-col>
-                </t-row>
+                <!-- 可视化视图 -->
+                <div class="visualization-container">
+                <ChunkVisualizer
+                    :chunks="chunks"
+                    :parent-chunks="parentChunks"
+                    :strategy-type="currentResult?.strategy_type"
+                    :document-name="currentResult?.document_name"
+                    :external-statistics="externalStatistics"
+                    @chunk-click="handleSelectChunk"
+                    @load-parent="handleLoadParentDetail"
+                    @refresh="handleRefreshResult"
+                  />
+                </div>
               </template>
 
-              <!-- Empty State - 保持与有数据时相同的布局结构 -->
+              <!-- Empty State -->
               <template v-else-if="!currentTask">
-                <t-row :gutter="16" class="results-row">
-                  <!-- 左侧空状态 - 占据分块列表的位置 -->
-                  <t-col :span="12">
-                    <t-card :bordered="false" class="empty-state-card">
-                      <t-empty description="请在左侧配置并开始分块操作，或在历史记录中查看已完成的分块结果" />
-                    </t-card>
-                  </t-col>
-
-                  <!-- 右侧空状态 - 占据分块详情的位置 -->
-                  <t-col :span="12">
-                    <t-card :bordered="false" class="empty-state-card">
-                      <t-empty description="暂无分块详情" />
-                    </t-card>
-                  </t-col>
-                </t-row>
+                <div class="empty-state-container">
+                  <t-card :bordered="false" class="empty-state-card">
+                    <t-empty description="请在左侧配置并开始分块操作，或在历史记录中查看已完成的分块结果">
+                      <template #image>
+                        <t-icon name="chart-pie" size="64px" style="color: var(--td-text-color-placeholder)" />
+                      </template>
+                    </t-empty>
+                  </t-card>
+                </div>
               </template>
             </div>
           </t-tab-panel>
@@ -125,9 +114,8 @@ import DocumentSelector from '@/components/chunking/DocumentSelector.vue'
 import StrategySelector from '@/components/chunking/StrategySelector.vue'
 import ParameterConfig from '@/components/chunking/ParameterConfig.vue'
 import ChunkingProgress from '@/components/chunking/ChunkingProgress.vue'
-import ChunkList from '@/components/chunking/ChunkList.vue'
-import ChunkDetail from '@/components/chunking/ChunkDetail.vue'
 import HistoryList from '@/components/chunking/HistoryList.vue'
+import { ChunkVisualizer } from '@/components/chunking/visualization'
 
 const chunkingStore = useChunkingStore()
 
@@ -151,10 +139,39 @@ const hasResult = computed(() => {
 
 const chunks = computed(() => chunkingStore.chunks)
 const chunksTotalCount = computed(() => chunkingStore.chunksTotalCount)
-const chunksPage = computed(() => chunkingStore.chunksPage)
-const chunksPageSize = computed(() => chunkingStore.chunksPageSize)
-const selectedChunk = computed(() => chunkingStore.selectedChunk)
-const resultLoading = computed(() => chunkingStore.resultLoading)
+
+// 父块相关
+const parentChunks = computed(() => chunkingStore.parentChunks)
+
+// 统计数据：使用后端返回的统计信息，避免分页导致的数据不完整问题
+const externalStatistics = computed(() => {
+  if (!chunkingStore.currentResult) return null
+  
+  const result = chunkingStore.currentResult
+  const stats = result.statistics || {}
+  
+  // 合并后端统计数据和前端需要的字段
+  const baseStats = {
+    total_chunks: result.total_chunks || chunkingStore.chunksTotalCount,
+    total_characters: stats.total_characters || 0,
+    avg_chunk_size: stats.avg_chunk_size || 0,
+    min_chunk_size: stats.min_chunk_size || 0,
+    max_chunk_size: stats.max_chunk_size || 0,
+    size_distribution: stats.size_distribution || []
+  }
+  
+  // 父子块统计：后端保存的是扁平结构，前端组件需要嵌套结构
+  if (chunkingStore.isParentChildResult) {
+    baseStats.parent_child_stats = {
+      parent_count: stats.parent_count || 0,
+      child_count: stats.child_count || result.total_chunks || 0,
+      avg_parent_size: stats.avg_parent_size || 0,
+      avg_children_per_parent: stats.avg_children_per_parent || 0
+    }
+  }
+  
+  return baseStats
+})
 
 // Helper functions
 const getStrategyLabel = (type) => {
@@ -163,10 +180,14 @@ const getStrategyLabel = (type) => {
     'PARAGRAPH': '按段落',
     'HEADING': '按标题',
     'SEMANTIC': '按语义',
+    'PARENT_CHILD': '父子分块',
+    'HYBRID': '混合分块',
     'character': '按字数',
     'paragraph': '按段落',
     'heading': '按标题',
-    'semantic': '按语义'
+    'semantic': '按语义',
+    'parent_child': '父子分块',
+    'hybrid': '混合分块'
   }
   return labels[type] || type
 }
@@ -186,9 +207,9 @@ const handleStartChunking = async () => {
 const handleViewResult = async (resultId) => {
   try {
     await chunkingStore.loadChunkingResult(resultId)
-    // Auto-select first chunk for preview
-    if (chunkingStore.chunks.length > 0) {
-      chunkingStore.selectChunk(chunkingStore.chunks[0])
+    // 如果是父子分块，加载父块
+    if (chunkingStore.isParentChildResult) {
+      await chunkingStore.loadParentChunks()
     }
   } catch (error) {
     MessagePlugin.error('加载结果失败')
@@ -198,9 +219,9 @@ const handleViewResult = async (resultId) => {
 const handleViewHistory = async (resultId) => {
   try {
     await chunkingStore.loadChunkingResult(resultId)
-    // Auto-select first chunk for preview
-    if (chunkingStore.chunks.length > 0) {
-      chunkingStore.selectChunk(chunkingStore.chunks[0])
+    // 如果是父子分块，加载父块
+    if (chunkingStore.isParentChildResult) {
+      await chunkingStore.loadParentChunks()
     }
     // Switch to current tab to show results
     activeTab.value = 'current'
@@ -218,12 +239,17 @@ const handleSelectChunk = (chunk) => {
   chunkingStore.selectChunk(chunk)
 }
 
-const handleChunkPageChange = async ({ page }) => {
+const handleLoadParentDetail = async (parentId) => {
+  try {
+    await chunkingStore.getParentWithChildren(parentId)
+  } catch (error) {
+    console.error('加载父块详情失败:', error)
+  }
+}
+
+const handleRefreshResult = async () => {
   if (chunkingStore.currentResult) {
-    await chunkingStore.loadChunkingResult(
-      chunkingStore.currentResult.result_id,
-      page
-    )
+    await handleViewResult(chunkingStore.currentResult.result_id)
   }
 }
 
@@ -232,9 +258,13 @@ const handleTabChange = (value) => {
 }
 
 // Watch for task completion to auto-load results
-watch(() => chunkingStore.currentTask?.status, (newStatus, oldStatus) => {
+watch(() => chunkingStore.currentTask?.status, async (newStatus, oldStatus) => {
   if (newStatus === 'completed' && oldStatus === 'processing') {
     MessagePlugin.success('分块任务完成！')
+    // 如果是父子分块，自动加载父块
+    if (chunkingStore.isParentChildResult) {
+      await chunkingStore.loadParentChunks()
+    }
   } else if (newStatus === 'failed' && oldStatus === 'processing') {
     MessagePlugin.error('分块任务失败，请检查错误信息')
   }
@@ -257,14 +287,14 @@ onUnmounted(() => {
   border-right: 1px solid var(--td-component-border);
   overflow-y: auto;
   height: 100vh;
-  flex-shrink: 0; /* 防止侧边栏被压缩 */
-  min-width: 380px; /* 最小宽度 */
-  max-width: 380px; /* 最大宽度 */
+  flex-shrink: 0;
+  min-width: 380px;
+  max-width: 380px;
 }
 
 .panel-content {
   padding: 20px 16px;
-  width: 100%; /* 确保内容不超出宽度 */
+  width: 100%;
   box-sizing: border-box;
 }
 
@@ -299,7 +329,7 @@ onUnmounted(() => {
 
 /* 当前任务容器 */
 .current-task-container {
-  max-width: 1400px;
+  max-width: 1600px;
   margin: 0 auto;
 }
 
@@ -313,24 +343,37 @@ onUnmounted(() => {
   padding: 0px 24px 0px 24px;
 }
 
-/* 结果行样式 */
-.results-row {
-  margin-top: 0;
+.result-header-content {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
 }
 
-/* 空状态卡片 */
-.empty-state-card {
-  min-height: 400px;
+/* 可视化容器 */
+.visualization-container {
+  background: var(--td-bg-color-container);
+  border-radius: 8px;
+  min-height: 600px;
+  overflow: hidden;
+}
+
+/* 空状态容器 */
+.empty-state-container {
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
+  min-height: 500px;
+}
+
+.empty-state-card {
+  width: 100%;
+  max-width: 600px;
 }
 
 .empty-state-card :deep(.t-card__body) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  min-height: 400px;
+  padding: 60px 40px;
 }
 </style>
