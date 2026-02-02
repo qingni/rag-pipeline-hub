@@ -30,7 +30,6 @@ from .chunk import Chunk, ChunkType
 from .chunking_task import ChunkingTask, TaskStatus, StrategyType
 from .chunking_result import ChunkingResult, ResultStatus
 from .parent_chunk import ParentChunk
-from .hybrid_chunking_config import HybridChunkingConfig
 from .chunk_metadata import (
     ChunkTypeEnum,
     TextChunkMetadata,
@@ -75,7 +74,6 @@ __all__ = [
     "ChunkingResult",
     "ResultStatus",
     "ParentChunk",
-    "HybridChunkingConfig",
     
     # Chunk metadata models
     "ChunkTypeEnum",

@@ -469,7 +469,7 @@ class ChunkTypeEnum:
 - **MultimodalChunk**: 多模态分块实体，包含 type 字段（text/table/image/code）和对应类型的专属元数据
 - **ChunkingRecommendation**: 策略推荐实体，包含推荐策略、推荐理由、文档特征分析结果、预估效果指标
 - **ChunkingComparison**: 策略对比结果实体，包含多个策略的分块统计对比数据
-- **HybridChunkingConfig**: 混合分块配置实体，包含各内容类型与分块策略的映射关系
+
 
 ### Assumptions
 

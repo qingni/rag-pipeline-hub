@@ -35,23 +35,7 @@ CREATE INDEX idx_parent_chunk_result ON parent_chunks(result_id);
 CREATE INDEX idx_parent_chunk_sequence ON parent_chunks(result_id, sequence_number);
 
 -- ============================================
--- 3. 创建 hybrid_chunking_configs 表：存储混合分块策略配置
--- ============================================
-CREATE TABLE IF NOT EXISTS hybrid_chunking_configs (
-    id VARCHAR(36) PRIMARY KEY,
-    result_id VARCHAR(36) NOT NULL,
-    content_type VARCHAR(20) NOT NULL,
-    strategy_type VARCHAR(20) NOT NULL,
-    strategy_params JSON,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (result_id) REFERENCES chunking_results(result_id) ON DELETE CASCADE,
-    UNIQUE(result_id, content_type)
-);
-
-CREATE INDEX idx_hybrid_config_result ON hybrid_chunking_configs(result_id);
-
--- ============================================
--- 4. 添加新的分块策略到 chunking_strategies 表
+-- 3. 添加新的分块策略到 chunking_strategies 表
 -- ============================================
 INSERT OR IGNORE INTO chunking_strategies (strategy_id, strategy_name, strategy_type, description, default_params, is_enabled, requires_structure) VALUES
 ('ps-parent-child', '父子文档分块', 'parent_child', '生成父块和子块的两层结构，子块用于检索，父块提供上下文', '{"parent_chunk_size": 2000, "child_chunk_size": 500, "child_overlap": 50, "parent_overlap": 200}', 1, 0),

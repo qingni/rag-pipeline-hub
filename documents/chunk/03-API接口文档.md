@@ -1,6 +1,6 @@
 # 文档分块 API 接口文档
 
-**生成日期**: 2025-12-08  
+**更新日期**: 2026-02-02  
 **项目**: RAG Framework - 文档分块模块  
 **基础路径**: `/api/chunking`
 
@@ -15,6 +15,10 @@
 5. [结果查询接口](#5-结果查询接口)
 6. [历史管理接口](#6-历史管理接口)
 7. [版本管理接口](#7-版本管理接口)
+8. [父子分块专用接口](#9-父子分块专用接口)
+9. [混合分块与多模态接口](#10-混合分块与多模态接口)
+10. [智能推荐接口](#11-智能推荐接口)
+11. [参数推荐接口](#12-参数推荐接口)
 
 ---
 
@@ -987,4 +991,197 @@
   }
 }
 ```
+
+---
+
+## 12. 参数推荐接口
+
+### 12.1 获取格式相关参数推荐
+
+**接口**: `GET /format-params`
+
+**描述**: 根据文档格式获取推荐的分块参数
+
+**参数**:
+- `document_format` (string, optional): 文档格式(pdf/csv/docx/xlsx等)
+- `char_count` (int, optional): 文档字符数
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "format": "csv",
+    "recommended_params": {
+      "chunk_size": 800,
+      "overlap": 50,
+      "text_strategy": "paragraph"
+    }
+  }
+}
+```
+
+### 12.2 获取智能参数推荐
+
+**接口**: `GET /smart-params`
+
+**描述**: 根据文档特征获取智能参数推荐
+
+**参数**:
+- `strategy_type` (string, required): 策略类型(character/paragraph/heading/semantic/parent_child/hybrid)
+- `document_format` (string, default="default"): 文档格式
+- `char_count` (int, default=10000): 文档字符数
+- `embedding_model` (string, default="bge-m3"): Embedding模型
+- `code_block_ratio` (float, default=0.0): 代码块比例(0-1)
+- `table_count` (int, default=0): 表格数量
+- `image_count` (int, default=0): 图片数量
+- `heading_count` (int, default=0): 标题数量
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "strategy_type": "hybrid",
+    "parameters": {
+      "text_strategy": "semantic",
+      "text_chunk_size": 500,
+      "embedding_model": "bge-m3",
+      "include_tables": true,
+      "include_images": true,
+      "include_code": true
+    },
+    "reasoning": "文档包含表格和图片，推荐使用混合分块策略"
+  }
+}
+```
+
+### 12.3 获取Embedding参数推荐
+
+**接口**: `GET /embedding-params`
+
+**描述**: 获取Embedding相关的参数推荐
+
+**参数**:
+- `model` (string, default="bge-m3"): Embedding模型名称
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "model": "bge-m3",
+    "dimensions": 1024,
+    "max_tokens": 8192,
+    "recommended_similarity_threshold": 0.7,
+    "batch_size": 32
+  }
+}
+```
+
+---
+
+## 13. 其他接口
+
+### 13.1 获取任务队列状态
+
+**接口**: `GET /queue`
+
+**描述**: 获取当前分块任务队列状态
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "pending_tasks": 2,
+    "running_tasks": 1,
+    "queue": [
+      {
+        "task_id": "task_001",
+        "document_name": "文档1.pdf",
+        "strategy_type": "semantic",
+        "status": "running",
+        "queue_position": 0
+      },
+      {
+        "task_id": "task_002",
+        "document_name": "文档2.docx",
+        "strategy_type": "paragraph",
+        "status": "pending",
+        "queue_position": 1
+      }
+    ]
+  }
+}
+```
+
+### 13.2 批量删除分块结果
+
+**接口**: `POST /results/batch-delete`
+
+**描述**: 批量删除多个分块结果
+
+**请求体**:
+```json
+{
+  "result_ids": ["result_001", "result_002", "result_003"]
+}
+```
+
+**响应**:
+```json
+{
+  "success": true,
+  "message": "成功删除 3 个结果",
+  "data": {
+    "deleted_count": 3,
+    "failed_count": 0
+  }
+}
+```
+
+### 13.3 分析文档特征
+
+**接口**: `POST /analyze`
+
+**描述**: 分析文档特征，用于策略推荐
+
+**请求体**:
+```json
+{
+  "document_id": "doc_123"
+}
+```
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "document_id": "doc_123",
+    "features": {
+      "total_chars": 50000,
+      "heading_count": 15,
+      "paragraph_count": 80,
+      "table_count": 5,
+      "image_count": 8,
+      "code_block_count": 10,
+      "code_block_ratio": 0.15,
+      "avg_paragraph_length": 500
+    }
+  }
+}
+```
+
+---
+
+## 14. 状态码说明
+
+| 状态码 | 说明 |
+|-------|------|
+| 200 | 成功 |
+| 400 | 请求参数错误 |
+| 404 | 资源不存在 |
+| 500 | 服务器错误 |
 

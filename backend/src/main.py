@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     from .models import chunking_strategy, chunking_task, embedding_models
     from .models import vector_index, index_statistics, query_history
     from .models import search, generation, loading_task
-    from .models import parent_chunk, hybrid_chunking_config  # New models for chunking optimization
+    from .models import parent_chunk  # New models for chunking optimization
     
     # Initialize database tables
     init_db()

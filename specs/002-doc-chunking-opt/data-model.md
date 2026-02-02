@@ -121,20 +121,6 @@ CREATE INDEX idx_parent_chunk_result ON parent_chunks(result_id);
 
 ---
 
-### 4. HybridChunkingConfig (新增)
-
-**表名**: `hybrid_chunking_configs`
-
-存储混合分块策略配置。
-
-| 字段 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| id | String(36) | PK | UUID |
-| result_id | String(36) | FK, NOT NULL | 关联 ChunkingResult |
-| content_type | Enum | NOT NULL | text/table/image/code |
-| strategy_type | Enum | NOT NULL | 该内容类型使用的策略 |
-| strategy_params | JSON | | 策略参数 |
-
 ---
 
 ### 5. ChunkingRecommendation (新增 - 非持久化)
@@ -309,16 +295,7 @@ CREATE TABLE parent_chunks (
 
 CREATE INDEX idx_parent_chunk_result ON parent_chunks(result_id);
 
--- 3. 创建 hybrid_chunking_configs 表
-CREATE TABLE hybrid_chunking_configs (
-    id VARCHAR(36) PRIMARY KEY,
-    result_id VARCHAR(36) NOT NULL REFERENCES chunking_results(result_id),
-    content_type VARCHAR(20) NOT NULL,
-    strategy_type VARCHAR(20) NOT NULL,
-    strategy_params JSON,
-    UNIQUE(result_id, content_type)
-);
-
+-- 3. 更新
 -- 4. 更新 chunking_strategies 表（添加新策略）
 INSERT INTO chunking_strategies (id, name, strategy_type, description, default_params, is_enabled) VALUES
 ('ps-parent-child', '父子文档分块', 'parent_child', '生成父块和子块的两层结构，子块用于检索，父块提供上下文', '{"parent_size": 2000, "child_size": 400, "child_overlap": 50}', true),

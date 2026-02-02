@@ -22,7 +22,7 @@
 
 **Purpose**: 数据库迁移和新依赖安装
 
-- [x] T001 执行数据库迁移脚本，创建 `parent_chunks`, `hybrid_chunking_configs` 表，扩展 `chunks` 表字段 in `migrations/002-chunking-opt.sql`
+- [x] T001 执行数据库迁移脚本，创建 `parent_chunks` 表，扩展 `chunks` 表字段 in `migrations/002-chunking-opt.sql`
 - [x] T002 [P] 更新后端依赖：添加 `langchain_experimental`, `langchain_openai` 到 `backend/requirements.txt`
 - [x] T003 [P] 添加环境变量配置 `SEMANTIC_CHUNKER_MODEL`, `MULTIMODAL_EMBEDDING_MODEL`, `LARGE_DOCUMENT_THRESHOLD` 到 `backend/src/config/settings.py`
 
@@ -38,7 +38,7 @@
 - [x] T005 [P] 扩展 `StrategyType` 枚举，添加 `PARENT_CHILD`, `HYBRID`, `MULTIMODAL` 类型 in `backend/src/models/chunking_strategy.py`
 - [x] T006 [P] 扩展 `Chunk` 模型，添加 `chunk_type`, `parent_id` 字段 in `backend/src/models/chunk.py`
 - [x] T007 创建 `ParentChunk` 模型 in `backend/src/models/parent_chunk.py`
-- [x] T008 [P] 创建 `HybridChunkingConfig` 模型 in `backend/src/models/hybrid_chunking_config.py`
+- [x] T008 [P] ~~创建 `HybridChunkingConfig` 模型~~ (已移除，未实际使用)
 - [x] T009 扩展 `BaseChunker` 抽象类，添加 `chunk_stream` 方法签名（生成器接口）in `backend/src/providers/chunkers/base_chunker.py`
 - [x] T010 创建多模态分块元数据 JSON Schema（TextChunkMetadata, TableChunkMetadata, ImageChunkMetadata, CodeChunkMetadata）in `backend/src/models/chunk_metadata.py`
 - [x] T010a [P] 扩展 `CharacterChunker`，添加滑动窗口参数支持（window_size, step_size）实现 FR-005 in `backend/src/providers/chunkers/character_chunker.py`
@@ -124,7 +124,7 @@
 
 - [ ] T039 [US4] 实现 `HybridChunker` 分块器（根据内容类型分发到不同子分块器）in `backend/src/providers/chunkers/hybrid_chunker.py`
 - [ ] T040 [US4] 注册 `HybridChunker` 到分块器工厂 in `backend/src/providers/chunkers/__init__.py`
-- [ ] T041 [US4] 扩展 `ChunkingService`，支持混合分块配置保存（HybridChunkingConfig）in `backend/src/services/chunking_service.py`
+- [ ] T041 [US4] 扩展 `ChunkingService`，支持混合分块配置保存 in `backend/src/services/chunking_service.py`
 - [ ] T042 [P] [US4] 扩展 `ParameterConfig.vue`，添加混合策略配置 UI（各内容类型策略选择下拉框）in `frontend/src/components/chunking/ParameterConfig.vue`
 - [ ] T043 [US4] 扩展分块统计信息，显示各类型内容的分块数量 in `frontend/src/components/chunking/ChunkList.vue`
 
