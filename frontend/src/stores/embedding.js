@@ -4,6 +4,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import embeddingService from '@/services/embeddingService'
+import { createProgressStream, clearProgress as clearProgressApi } from '@/services/embeddingProgressService'
 
 export const useEmbeddingStore = defineStore('embedding', () => {
   // State
@@ -15,19 +16,45 @@ export const useEmbeddingStore = defineStore('embedding', () => {
   const documentsWithChunking = ref([])
   const availableModels = ref([])
   const error = ref(null)
+  
+  // New: Progress tracking state
+  const currentTaskId = ref(null)
+  const progress = ref({
+    total: 0,
+    completed: 0,
+    failed: 0,
+    cached: 0,
+    speed: 0,
+    eta_seconds: 0,
+    status: 'idle',
+    percentage: 0,
+    current_item: null,
+  })
+  const isCancelling = ref(false)
+  const progressConnection = ref(null)
 
   // Getters
   const currentResult = computed(() => embeddingResults.value)
   
   const selectedDocument = computed(() => {
     if (!selectedDocumentId.value) return null
+    // 兼容 document_id 和 id 两种字段名
     return documentsWithChunking.value.find(
-      doc => doc.id === selectedDocumentId.value
+      doc => (doc.document_id || doc.id) === selectedDocumentId.value
     )
   })
   
   const canStartEmbedding = computed(() => {
     return selectedDocumentId.value && selectedModel.value && !isProcessing.value
+  })
+  
+  // New: Progress getters
+  const hasActiveTask = computed(() => {
+    return currentTaskId.value !== null && isProcessing.value
+  })
+  
+  const canCancel = computed(() => {
+    return hasActiveTask.value && !isCancelling.value && progress.value.status === 'processing'
   })
 
   // Actions
@@ -39,12 +66,17 @@ export const useEmbeddingStore = defineStore('embedding', () => {
         page_size: 100
       })
       
-      // Response structure: { success: true, data: { items: [...], total: ... } }
-      documentsWithChunking.value = response.data?.items || []
+      // Response structure: { success: true, data: { documents: [...], total: ... } }
+      // 兼容多种响应格式
+      console.log('[Embedding Store] API response:', response)
+      const documents = response.data?.documents || response.documents || response.data?.items || []
+      console.log('[Embedding Store] Parsed documents:', documents.length)
+      documentsWithChunking.value = documents
       return documentsWithChunking.value
     } catch (err) {
       const errorMessage = err.message || '获取已分块文档列表失败'
       error.value = errorMessage
+      console.error('[Embedding Store] Error:', errorMessage)
       throw err
     }
   }
@@ -52,7 +84,7 @@ export const useEmbeddingStore = defineStore('embedding', () => {
   async function fetchModels() {
     try {
       error.value = null
-      const response = await embeddingService.listModels()
+      const response = await embeddingService.getAvailableModels()
       
       // Handle two possible response formats:
       // 1. Wrapped: { success: true, data: { models: [...] } }
@@ -155,6 +187,93 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     selectedModel.value = availableModels.value[0]?.name || 'qwen3-embedding-8b'
     clearResults()
   }
+  
+  // New: Progress tracking actions
+  function startProgressTracking(taskId) {
+    // Close existing connection if any
+    stopProgressTracking()
+    
+    currentTaskId.value = taskId
+    progress.value = {
+      total: 0,
+      completed: 0,
+      failed: 0,
+      cached: 0,
+      speed: 0,
+      eta_seconds: 0,
+      status: 'processing',
+      percentage: 0,
+      current_item: null,
+    }
+    
+    progressConnection.value = createProgressStream(taskId, {
+      onProgress: (data) => {
+        progress.value = {
+          ...progress.value,
+          ...data,
+        }
+      },
+      onComplete: (data) => {
+        progress.value.status = data.status || 'completed'
+        isProcessing.value = false
+        stopProgressTracking()
+      },
+      onError: (err) => {
+        console.error('Progress stream error:', err)
+        error.value = '进度跟踪连接失败'
+      },
+    })
+  }
+  
+  function stopProgressTracking() {
+    if (progressConnection.value) {
+      progressConnection.value.close()
+      progressConnection.value = null
+    }
+  }
+  
+  async function cancelCurrentTask() {
+    if (!currentTaskId.value || isCancelling.value) {
+      return false
+    }
+    
+    try {
+      isCancelling.value = true
+      
+      const response = await fetch(`/api/v1/embedding/progress/${currentTaskId.value}/cancel`, {
+        method: 'POST',
+      })
+      
+      if (!response.ok) {
+        throw new Error('取消请求失败')
+      }
+      
+      progress.value.status = 'cancelling'
+      return true
+    } catch (err) {
+      error.value = err.message || '取消任务失败'
+      return false
+    } finally {
+      isCancelling.value = false
+    }
+  }
+  
+  function resetProgress() {
+    stopProgressTracking()
+    currentTaskId.value = null
+    progress.value = {
+      total: 0,
+      completed: 0,
+      failed: 0,
+      cached: 0,
+      speed: 0,
+      eta_seconds: 0,
+      status: 'idle',
+      percentage: 0,
+      current_item: null,
+    }
+    isCancelling.value = false
+  }
 
   async function fetchEmbeddingHistory(documentId = null) {
     try {
@@ -197,8 +316,9 @@ export const useEmbeddingStore = defineStore('embedding', () => {
         }
       } else if (resultData.document_id) {
         // 如果 API 没有返回 document_name，尝试从已加载的文档列表中查找
+        // 兼容 document_id 和 id 两种字段名
         const doc = documentsWithChunking.value.find(
-          d => d.document_id === resultData.document_id
+          d => (d.document_id || d.id) === resultData.document_id
         )
         if (doc) {
           documentInfo = {
@@ -254,11 +374,18 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     documentsWithChunking,
     availableModels,
     error,
+    // New: Progress state
+    currentTaskId,
+    progress,
+    isCancelling,
     
     // Getters
     currentResult,
     selectedDocument,
     canStartEmbedding,
+    // New: Progress getters
+    hasActiveTask,
+    canCancel,
     
     // Actions
     fetchDocumentsWithChunking,
@@ -269,6 +396,11 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     deleteEmbeddingResult,  // 新增
     startEmbedding,
     clearResults,
-    resetSelection
+    resetSelection,
+    // New: Progress actions
+    startProgressTracking,
+    stopProgressTracking,
+    cancelCurrentTask,
+    resetProgress
   }
 })

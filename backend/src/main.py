@@ -140,6 +140,10 @@ async def api_health_check():
 from .api import documents, loading, processing, chunking
 from .api import chunking_preview, chunking_history, chunking_recommend
 from .api import embedding_routes, embedding_query_routes
+from .api import embedding_recommend  # New: Model recommendation API
+from .api import embedding_progress   # New: Progress SSE API
+from .api import embedding_cache      # New: Cache management API
+from .api import embedding_results    # New: Result management API
 from .api import vector_index
 from .api import search
 from .api import generation
@@ -155,6 +159,10 @@ app.include_router(chunking_history.router, prefix="/api/v1/chunking", tags=["Ch
 app.include_router(chunking_recommend.router, prefix="/api/v1", tags=["Chunking - Recommendation"])
 app.include_router(embedding_routes.router, prefix="/api/v1", tags=["Embedding"])
 app.include_router(embedding_query_routes.router, prefix="/api/v1", tags=["Embedding - Queries"])
+app.include_router(embedding_recommend.router, prefix="/api/v1", tags=["Embedding - Recommendation"])
+app.include_router(embedding_progress.router, prefix="/api/v1", tags=["Embedding - Progress"])
+app.include_router(embedding_cache.router, prefix="/api/v1", tags=["Embedding - Cache"])
+app.include_router(embedding_results.router, prefix="/api/v1", tags=["Embedding - Results"])
 app.include_router(vector_index.router, prefix="/api", tags=["Vector Index"])
 app.include_router(search.router, prefix="/api/v1", tags=["Search"])
 app.include_router(generation.router, prefix="/api/v1", tags=["Generation"])

@@ -16,6 +16,31 @@
             :loading="loadingDocs"
           />
           
+          <!-- 智能推荐按钮 -->
+          <div class="recommend-section" v-if="store.selectedDocumentId">
+            <t-button
+              variant="outline"
+              :loading="isGettingRecommendation"
+              @click="handleGetRecommendation"
+            >
+              <template #icon>
+                <Sparkles :size="16" />
+              </template>
+              智能推荐模型
+            </t-button>
+          </div>
+          
+          <!-- 推荐卡片 -->
+          <ModelRecommendCard
+            v-if="showRecommendation && recommendStore.hasRecommendations"
+            :recommendations="recommendStore.recommendations"
+            :document-analysis="recommendStore.documentAnalysis"
+            :top-recommendation="recommendStore.topRecommendation"
+            :show-actions="false"
+            :initial-model="recommendStore.selectedModel"
+            @select="handleSelectRecommendation"
+          />
+          
           <!-- 模型选择器 -->
           <ModelSelector
             v-model="store.selectedModel"
@@ -125,17 +150,24 @@
 <script setup>
 import { onMounted, ref, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { Hash, Zap, AlertCircle } from 'lucide-vue-next'
+import { Hash, Zap, AlertCircle, Sparkles } from 'lucide-vue-next'
 import { useEmbeddingStore } from '@/stores/embedding'
+import { useModelRecommendStore } from '@/stores/modelRecommendStore'
 import DocumentSelector from '@/components/embedding/DocumentSelector.vue'
 import ModelSelector from '@/components/embedding/ModelSelector.vue'
 import EmbeddingResults from '@/components/embedding/EmbeddingResults.vue'
 import EmbeddingResultCard from '@/components/embedding/EmbeddingResultCard.vue'
 import EmbeddingHistoryList from '@/components/embedding/EmbeddingHistoryList.vue'
+import ModelRecommendCard from '@/components/embedding/ModelRecommendCard.vue'
+import FeatureRadarChart from '@/components/embedding/FeatureRadarChart.vue'
+import chunkingService from '@/services/chunkingService'
 
 const store = useEmbeddingStore()
+const recommendStore = useModelRecommendStore()
 
 const activeTab = ref('current')
+const showRecommendation = ref(false)
+const isGettingRecommendation = ref(false)
 const loadingDocs = ref(false)
 const loadingModels = ref(false)
 const loadingResult = ref(false)
@@ -162,8 +194,9 @@ const buttonText = computed(() => {
 
 const currentDocumentInfo = computed(() => {
   if (!store.selectedDocumentId) return null
+  // 兼容 document_id 和 id 两种字段名
   return store.documentsWithChunking.find(
-    doc => doc.document_id === store.selectedDocumentId
+    doc => (doc.document_id || doc.id) === store.selectedDocumentId
   )
 })
 
@@ -282,6 +315,84 @@ function handleDownloadHistory(item) {
   MessagePlugin.info('正在准备导出...')
   // TODO: 实现从历史记录导出
 }
+
+// 智能推荐相关方法
+async function handleGetRecommendation() {
+  if (!store.selectedDocumentId) {
+    MessagePlugin.warning('请先选择文档')
+    return
+  }
+  
+  isGettingRecommendation.value = true
+  
+  try {
+    // 获取选中文档的信息
+    // 兼容 document_id 和 id 两种字段名
+    const docInfo = store.documentsWithChunking.find(
+      doc => (doc.document_id || doc.id) === store.selectedDocumentId
+    )
+    
+    if (!docInfo) {
+      MessagePlugin.warning('未找到选中的文档信息')
+      return
+    }
+    
+    // 通过分块服务获取该文档的最新分块结果（包含 chunks）
+    let chunks = []
+    try {
+      // 第一步：获取最新分块结果的元数据（包含 result_id）
+      const latestResult = await chunkingService.getLatestResultForDocument(store.selectedDocumentId)
+      const resultId = latestResult?.data?.result_id || latestResult?.result_id
+      
+      if (resultId) {
+        // 第二步：通过 result_id 获取完整的分块数据（包含 chunks）
+        const fullResult = await chunkingService.getChunkingResult(resultId, true, 1, 200)
+        // 从响应中提取 chunks 数据 (结构: data.chunks.items)
+        if (fullResult?.data?.chunks?.items) {
+          chunks = fullResult.data.chunks.items
+        } else if (fullResult?.data?.chunks && Array.isArray(fullResult.data.chunks)) {
+          chunks = fullResult.data.chunks
+        } else if (fullResult?.chunks?.items) {
+          chunks = fullResult.chunks.items
+        } else if (fullResult?.chunks && Array.isArray(fullResult.chunks)) {
+          chunks = fullResult.chunks
+        }
+      }
+    } catch (error) {
+      console.warn('获取分块数据失败:', error)
+    }
+    
+    if (!chunks || chunks.length === 0) {
+      MessagePlugin.warning('文档暂无分块数据，无法进行推荐。请先对文档进行分块处理。')
+      return
+    }
+    
+    await recommendStore.recommendForDocument(
+      store.selectedDocumentId,
+      docInfo.filename || docInfo.document_name || '未知文档',
+      chunks
+    )
+    
+    showRecommendation.value = true
+    
+    // 自动选择推荐的模型
+    if (recommendStore.selectedModel) {
+      store.selectedModel = recommendStore.selectedModel
+      MessagePlugin.success('已自动选择推荐模型: ' + recommendStore.topRecommendation?.model?.display_name)
+    }
+  } catch (error) {
+    MessagePlugin.error('获取推荐失败: ' + (error.message || '未知错误'))
+  } finally {
+    isGettingRecommendation.value = false
+  }
+}
+
+function handleSelectRecommendation(rec) {
+  if (rec && rec.model) {
+    store.selectedModel = rec.model.model_name
+    MessagePlugin.info('已选择模型: ' + rec.model.display_name)
+  }
+}
 </script>
 
 <style scoped>
@@ -365,6 +476,11 @@ function handleDownloadHistory(item) {
 .validation-hint svg {
   flex-shrink: 0;
   color: #f59e0b;
+}
+
+.recommend-section {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .main-content {

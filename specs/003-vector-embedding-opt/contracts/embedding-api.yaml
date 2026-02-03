@@ -1,0 +1,550 @@
+openapi: 3.0.3
+info:
+  title: Document Embedding Optimization API
+  description: 文档向量化功能优化 API - 支持多模态、批量处理、增量向量化、进度反馈
+  version: 2.0.0
+  
+servers:
+  - url: /api
+    description: Backend API
+
+tags:
+  - name: Embedding
+    description: 向量化核心操作
+  - name: Progress
+    description: 进度查询与推送
+  - name: Cache
+    description: 缓存管理
+  - name: Comparison
+    description: 结果对比
+
+paths:
+  # ============ 向量化核心操作 ============
+  /embedding/from-document:
+    post:
+      tags: [Embedding]
+      summary: 对文档分块进行向量化
+      description: 支持多模态、增量、批量配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbeddingRequest'
+      responses:
+        '200':
+          description: 向量化结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /embedding/task/{task_id}:
+    get:
+      tags: [Embedding]
+      summary: 查询任务状态
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 任务状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatusResponse'
+
+  /embedding/task/{task_id}/cancel:
+    post:
+      tags: [Embedding]
+      summary: 取消正在运行的任务
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelResponse'
+
+  /embedding/result/{result_id}:
+    get:
+      tags: [Embedding]
+      summary: 获取向量化结果详情
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 向量化结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResultDetail'
+
+  /embedding/result/{result_id}/activate:
+    post:
+      tags: [Embedding]
+      summary: 设置为活跃结果
+      description: 将指定结果设为活跃状态（用于后续检索）
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 设置成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result_id:
+                    type: string
+                  is_active:
+                    type: boolean
+
+  /embedding/results:
+    get:
+      tags: [Embedding]
+      summary: 获取向量化结果列表
+      parameters:
+        - name: document_id
+          in: query
+          schema:
+            type: string
+        - name: model
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [SUCCESS, PARTIAL_SUCCESS, FAILED]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 结果列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResultList'
+
+  # ============ 进度推送 ============
+  /embedding/progress/{task_id}:
+    get:
+      tags: [Progress]
+      summary: 实时进度推送（SSE）
+      description: 使用 Server-Sent Events 推送向量化进度
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE 流式响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events 流
+
+  # ============ 缓存管理 ============
+  /embedding/cache/status:
+    get:
+      tags: [Cache]
+      summary: 获取缓存状态
+      responses:
+        '200':
+          description: 缓存状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStatus'
+
+  /embedding/cache:
+    delete:
+      tags: [Cache]
+      summary: 清除缓存
+      parameters:
+        - name: model
+          in: query
+          description: 按模型清除（不传则清除全部）
+          schema:
+            type: string
+        - name: document_id
+          in: query
+          description: 按文档清除
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 清除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cleared_count:
+                    type: integer
+
+  # ============ 结果对比 ============
+  /embedding/compare:
+    post:
+      tags: [Comparison]
+      summary: 对比不同模型的向量化结果
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompareRequest'
+      responses:
+        '200':
+          description: 对比结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompareResponse'
+
+components:
+  schemas:
+    # ============ 请求 Schemas ============
+    EmbeddingRequest:
+      type: object
+      required: [document_id, model]
+      properties:
+        document_id:
+          type: string
+          description: 文档 ID
+        chunking_result_id:
+          type: string
+          description: 分块结果 ID（可选，默认使用最新活跃结果）
+        model:
+          type: string
+          description: 向量化模型
+          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+        config:
+          $ref: '#/components/schemas/EmbeddingConfig'
+
+    EmbeddingConfig:
+      type: object
+      properties:
+        batch_size:
+          type: integer
+          minimum: 10
+          maximum: 200
+          default: 50
+          description: 每批处理的分块数
+        concurrency:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: 并发请求数
+        enable_cache:
+          type: boolean
+          default: true
+          description: 启用向量缓存
+        incremental:
+          type: boolean
+          default: true
+          description: 增量模式（跳过未变化分块）
+        force_recompute:
+          type: boolean
+          default: false
+          description: 强制重新计算（忽略缓存和增量）
+        multimodal_model:
+          type: string
+          default: qwen3-vl-embedding-8b
+          description: 多模态向量化模型（用于图片）
+
+    CompareRequest:
+      type: object
+      required: [document_id, result_ids]
+      properties:
+        document_id:
+          type: string
+        result_ids:
+          type: array
+          items:
+            type: string
+          minItems: 2
+          maxItems: 5
+
+    # ============ 响应 Schemas ============
+    EmbeddingResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        result_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, partial, failed, cancelled]
+        statistics:
+          $ref: '#/components/schemas/EmbeddingStatistics'
+
+    TaskStatusResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        document_id:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, partial, failed, cancelled]
+        config:
+          $ref: '#/components/schemas/EmbeddingConfig'
+        progress:
+          $ref: '#/components/schemas/EmbeddingProgress'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    EmbeddingProgress:
+      type: object
+      properties:
+        total_chunks:
+          type: integer
+          description: 总分块数
+        completed:
+          type: integer
+          description: 已完成数
+        failed:
+          type: integer
+          description: 失败数
+        cached:
+          type: integer
+          description: 缓存命中数
+        current_batch:
+          type: integer
+          description: 当前批次
+        speed:
+          type: number
+          description: 处理速度（块/秒）
+        eta_seconds:
+          type: number
+          description: 预估剩余时间（秒）
+
+    EmbeddingStatistics:
+      type: object
+      properties:
+        total_chunks:
+          type: integer
+        successful_count:
+          type: integer
+        failed_count:
+          type: integer
+        cached_count:
+          type: integer
+        computed_count:
+          type: integer
+        text_chunks:
+          type: integer
+        table_chunks:
+          type: integer
+        image_chunks:
+          type: integer
+        code_chunks:
+          type: integer
+        processing_time_ms:
+          type: number
+        avg_chunk_time_ms:
+          type: number
+        cache_hit_rate:
+          type: number
+        multimodal_stats:
+          $ref: '#/components/schemas/MultimodalStats'
+
+    MultimodalStats:
+      type: object
+      properties:
+        image_success:
+          type: integer
+          description: 图片直接向量化成功数
+        image_fallback:
+          type: integer
+          description: 图片降级为文本向量化数
+        image_failed:
+          type: integer
+          description: 图片向量化失败数
+
+    CancelResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        status:
+          type: string
+          enum: [cancelled]
+        partial_result_id:
+          type: string
+          description: 部分完成的结果 ID（如有）
+
+    EmbeddingResultDetail:
+      type: object
+      properties:
+        result_id:
+          type: string
+        task_id:
+          type: string
+        document_id:
+          type: string
+        chunking_result_id:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+          enum: [SUCCESS, PARTIAL_SUCCESS, FAILED]
+        is_active:
+          type: boolean
+        statistics:
+          $ref: '#/components/schemas/EmbeddingStatistics'
+        json_file_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        error_message:
+          type: string
+
+    EmbeddingResultList:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmbeddingResultSummary'
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    EmbeddingResultSummary:
+      type: object
+      properties:
+        result_id:
+          type: string
+        document_id:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+        is_active:
+          type: boolean
+        successful_count:
+          type: integer
+        total_chunks:
+          type: integer
+        processing_time_ms:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+    CacheStatus:
+      type: object
+      properties:
+        total_entries:
+          type: integer
+          description: 缓存条目总数
+        max_entries:
+          type: integer
+          description: 最大缓存容量
+        memory_usage_mb:
+          type: number
+          description: 内存使用量（MB）
+        hit_rate_7d:
+          type: number
+          description: 7 天缓存命中率
+        models:
+          type: object
+          additionalProperties:
+            type: integer
+          description: 各模型缓存数量
+
+    CompareResponse:
+      type: object
+      properties:
+        document_id:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComparisonResult'
+
+    ComparisonResult:
+      type: object
+      properties:
+        result_id:
+          type: string
+        model:
+          type: string
+        dimension:
+          type: integer
+        processing_time_ms:
+          type: number
+        success_rate:
+          type: number
+        cache_hit_rate:
+          type: number
+        image_success_rate:
+          type: number
+        avg_chunk_time_ms:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              detail:
+                type: string

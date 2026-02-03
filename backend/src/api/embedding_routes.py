@@ -397,6 +397,166 @@ async def embed_batch_texts(
 
 
 @router.get(
+    "/documents",
+    status_code=status.HTTP_200_OK,
+)
+async def get_documents_with_chunking(
+    page: int = 1,
+    page_size: int = 100,
+    db: Session = Depends(get_db),
+):
+    """
+    Get documents that have completed chunking and are ready for embedding.
+    
+    Returns a list of documents with their chunking results that can be used
+    for vectorization.
+    """
+    from ..models.chunking_result import ChunkingResult, ResultStatus
+    from ..models.chunking_task import ChunkingTask
+    from ..models.document import Document
+    from sqlalchemy import func, distinct, cast, String
+    
+    try:
+        # 查询有已完成分块结果的文档
+        # 注意：数据库中存储的是枚举名称（大写），使用 cast 转换后比较
+        subquery = db.query(
+            distinct(ChunkingTask.source_document_id).label('document_id')
+        ).join(
+            ChunkingResult,
+            ChunkingTask.task_id == ChunkingResult.task_id
+        ).filter(
+            cast(ChunkingResult.status, String) == "COMPLETED"
+        ).subquery()
+        
+        # 获取总数
+        total = db.query(func.count()).select_from(subquery).scalar() or 0
+        
+        # 分页查询文档
+        offset = (page - 1) * page_size
+        document_ids = db.query(subquery.c.document_id).offset(offset).limit(page_size).all()
+        document_ids = [d[0] for d in document_ids]
+        
+        # 获取文档详情
+        documents = []
+        for doc_id in document_ids:
+            # Document 模型的主键是 id，不是 document_id
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if doc:
+                # 获取该文档的最新活动分块结果
+                latest_chunking = db.query(ChunkingResult).join(
+                    ChunkingTask,
+                    ChunkingResult.task_id == ChunkingTask.task_id
+                ).filter(
+                    ChunkingTask.source_document_id == doc_id,
+                    cast(ChunkingResult.status, String) == "COMPLETED"
+                ).order_by(ChunkingResult.created_at.desc()).first()
+                
+                # Document 模型字段: id, filename, format, size_bytes, upload_time
+                documents.append({
+                    "document_id": doc.id,
+                    "filename": doc.filename,
+                    "file_type": doc.format,
+                    "file_size": doc.size_bytes,
+                    "created_at": doc.upload_time.isoformat() if doc.upload_time else None,
+                    "chunking_result": {
+                        "result_id": latest_chunking.result_id if latest_chunking else None,
+                        "total_chunks": latest_chunking.total_chunks if latest_chunking else 0,
+                        "created_at": latest_chunking.created_at.isoformat() if latest_chunking and latest_chunking.created_at else None,
+                    } if latest_chunking else None
+                })
+        
+        return success_response(
+            data={
+                "documents": documents,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (total + page_size - 1) // page_size if page_size > 0 else 0
+            }
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": f"Failed to get documents: {str(exc)}",
+                }
+            },
+        ) from exc
+
+
+@router.get(
+    "/documents/{document_id}/latest",
+    status_code=status.HTTP_200_OK,
+    responses={
+        404: {"model": ErrorResponse, "description": "No embedding result found"},
+    },
+)
+async def get_latest_embedding_by_document(
+    document_id: str,
+    model: str = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Get the latest embedding result for a document.
+    
+    This endpoint returns the most recent embedding result for a given document,
+    optionally filtered by model. Useful for loading previous embedding results
+    when selecting a document.
+    
+    Args:
+        document_id: Document unique identifier
+        model: Optional model filter (e.g., "bge-m3")
+    
+    Returns:
+        Latest embedding result with vectors and metadata
+    """
+    try:
+        embedding_db = EmbeddingResultDB(db)
+        result = embedding_db.get_latest_by_document(document_id, model=model)
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": {
+                        "code": "EMBEDDING_RESULT_NOT_FOUND",
+                        "message": f"No embedding result found for document '{document_id}'",
+                    }
+                },
+            )
+        
+        # Return result as dictionary
+        return success_response(
+            data={
+                "result_id": result.result_id,
+                "document_id": result.document_id,
+                "chunking_result_id": result.chunking_result_id,
+                "model": result.model,
+                "status": result.status,
+                "successful_count": result.successful_count,
+                "failed_count": result.failed_count,
+                "processing_time_ms": result.processing_time_ms,
+                "created_at": result.created_at.isoformat() if result.created_at else None,
+                "json_file_path": result.json_file_path,
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": f"Failed to get latest embedding result: {str(exc)}",
+                }
+            },
+        ) from exc
+
+
+@router.get(
     "/models",
     status_code=status.HTTP_200_OK,
 )

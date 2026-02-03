@@ -1,163 +1,380 @@
 /**
- * Embedding API client
+ * Embedding service for frontend.
+ * 
+ * Provides:
+ * - Document embedding operations
+ * - Result export functionality
+ * - Statistics queries
  */
-import apiClient from './api'
 
-const API_KEY = import.meta.env.VITE_EMBEDDING_API_KEY
+const API_BASE = '/api/v1'
 
-const buildHeaders = () => {
-  if (!API_KEY) {
-    return {}
+/**
+ * Start document embedding
+ * @param {Object} params - Embedding parameters
+ * @returns {Promise<Object>} - Task information
+ */
+export async function startEmbedding(params) {
+  const response = await fetch(`${API_BASE}/embedding/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to start embedding')
   }
-  return {
-    'X-API-Key': API_KEY,
+  
+  return response.json()
+}
+
+/**
+ * Get embedding task status
+ * @param {string} taskId - Task ID
+ * @returns {Promise<Object>} - Task status
+ */
+export async function getTaskStatus(taskId) {
+  const response = await fetch(`${API_BASE}/embedding/tasks/${taskId}`)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to get task status')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Cancel embedding task
+ * @param {string} taskId - Task ID
+ * @returns {Promise<Object>} - Cancellation result
+ */
+export async function cancelTask(taskId) {
+  const response = await fetch(`${API_BASE}/embedding/tasks/${taskId}/cancel`, {
+    method: 'POST',
+  })
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to cancel task')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Get embedding result
+ * @param {string} resultId - Result ID
+ * @returns {Promise<Object>} - Embedding result
+ */
+export async function getResult(resultId) {
+  const response = await fetch(`${API_BASE}/embedding/results/${resultId}`)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to get result')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Get embedding results for document
+ * @param {string} documentId - Document ID
+ * @returns {Promise<Array>} - List of results
+ */
+export async function getDocumentResults(documentId) {
+  const response = await fetch(`${API_BASE}/embedding/documents/${documentId}/results`)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to get document results')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Set active embedding result
+ * @param {string} resultId - Result ID to activate
+ * @returns {Promise<Object>} - Activation result
+ */
+export async function activateResult(resultId) {
+  const response = await fetch(`${API_BASE}/embedding/results/${resultId}/activate`, {
+    method: 'POST',
+  })
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to activate result')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Delete embedding result (only non-active results)
+ * @param {string} resultId - Result ID to delete
+ * @returns {Promise<Object>} - Deletion result
+ */
+export async function deleteResult(resultId) {
+  const response = await fetch(`${API_BASE}/embedding/results/${resultId}`, {
+    method: 'DELETE',
+  })
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to delete result')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Compare embedding results
+ * @param {Array<string>} resultIds - Result IDs to compare
+ * @returns {Promise<Object>} - Comparison data
+ */
+export async function compareResults(resultIds) {
+  const response = await fetch(`${API_BASE}/embedding/compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ result_ids: resultIds }),
+  })
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to compare results')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Get embedding statistics
+ * @param {string} resultId - Result ID
+ * @returns {Promise<Object>} - Statistics data
+ */
+export async function getStatistics(resultId) {
+  const response = await fetch(`${API_BASE}/embedding/results/${resultId}/statistics`)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to get statistics')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Export embedding result to JSON
+ * @param {string} resultId - Result ID
+ * @param {Object} options - Export options
+ * @returns {Promise<Blob>} - JSON file blob
+ */
+export async function exportToJson(resultId, options = {}) {
+  const params = new URLSearchParams()
+  if (options.includeVectors !== undefined) {
+    params.set('include_vectors', options.includeVectors)
+  }
+  if (options.includeMetadata !== undefined) {
+    params.set('include_metadata', options.includeMetadata)
+  }
+  
+  const url = `${API_BASE}/embedding/results/${resultId}/export?${params.toString()}`
+  const response = await fetch(url)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to export result')
+  }
+  
+  return response.blob()
+}
+
+/**
+ * Download export as file
+ * @param {string} resultId - Result ID
+ * @param {string} filename - Optional filename
+ * @param {Object} options - Export options
+ */
+export async function downloadExport(resultId, filename = null, options = {}) {
+  try {
+    const blob = await exportToJson(resultId, options)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename || `embedding-${resultId}-${Date.now()}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Download failed:', error)
+    throw error
   }
 }
 
-const embeddingService = {
-  /**
-   * 获取有分块结果的文档列表
-   * @param {Object} params - 请求参数
-   */
-  async getDocumentsWithChunking(params = {}) {
-    return apiClient.get('/documents', {
-      params: {
-        has_chunking_result: true,
-        page: params.page || 1,
-        page_size: params.page_size || 100
-      }
-    })
-  },
-
-  /**
-   * 从分块结果进行向量化
-   * @param {Object} params - 请求参数
-   * @param {string} params.result_id - 分块结果ID
-   * @param {string} params.model - 向量模型名称
-   * @param {number} params.max_retries - 最大重试次数
-   * @param {number} params.timeout - 超时时间（秒）
-   */
-  async embedFromChunkingResult({ result_id, model, max_retries = 3, timeout = 60 }) {
-    return apiClient.post(
-      '/embedding/from-chunking-result',
-      {
-        result_id,
-        model,
-        max_retries,
-        timeout,
-      },
-      { headers: buildHeaders() },
-    )
-  },
-
-  /**
-   * 从文档进行向量化（使用最新的活跃分块结果）
-   * @param {Object} params - 请求参数
-   * @param {number} params.document_id - 文档ID
-   * @param {string} params.model - 向量模型名称
-   * @param {string} params.strategy_type - 可选的分块策略过滤
-   * @param {number} params.max_retries - 最大重试次数
-   * @param {number} params.timeout - 超时时间（秒）
-   */
-  async embedFromDocument({ document_id, model, strategy_type = null, max_retries = 3, timeout = 60 }) {
-    const payload = {
-      document_id,
-      model,
-      max_retries,
-      timeout,
-    }
-    
-    if (strategy_type) {
-      payload.strategy_type = strategy_type
-    }
-    
-    return apiClient.post(
-      '/embedding/from-document',
-      payload,
-      { headers: buildHeaders() },
-    )
-  },
-
-  /**
-   * 单文本向量化（backend-only API）
-   */
-  async embedSingle({ text, model, max_retries = 3, timeout = 60 }) {
-    return apiClient.post(
-      '/embedding/single',
-      {
-        text,
-        model,
-        max_retries,
-        timeout,
-      },
-      { headers: buildHeaders() },
-    )
-  },
-
-  /**
-   * 批量文本向量化（backend-only API）
-   */
-  async embedBatch({ texts, model, max_retries = 3, timeout = 60 }) {
-    return apiClient.post(
-      '/embedding/batch',
-      {
-        texts,
-        model,
-        max_retries,
-        timeout,
-      },
-      { headers: buildHeaders() },
-    )
-  },
-
-  /**
-   * 获取所有可用的向量模型
-   */
-  async listModels() {
-    return apiClient.get('/embedding/models')
-  },
-
-  /**
-   * 获取特定模型信息
-   * @param {string} modelName - 模型名称
-   */
-  async getModelInfo(modelName) {
-    return apiClient.get(`/embedding/models/${modelName}`)
-  },
-
-  /**
-   * 获取文档的最新向量化结果
-   * @param {number} documentId - 文档ID
-   * @param {string} model - 可选的模型过滤
-   */
-  async getLatestByDocument(documentId, model = null) {
-    const params = model ? { model } : {}
-    return apiClient.get(`/embedding/results/by-document/${documentId}`, { params })
-  },
-
-  /**
-   * 根据结果ID获取向量化结果
-   * @param {string} resultId - 结果ID
-   */
-  async getResultById(resultId) {
-    return apiClient.get(`/embedding/results/${resultId}`)
-  },
-
-  /**
-   * 列出向量化结果（带分页和过滤）
-   * @param {Object} params - 查询参数
-   */
-  async listResults(params = {}) {
-    return apiClient.get('/embedding/results', { params })
-  },
-
-  /**
-   * 删除向量化结果
-   * @param {string} resultId - 结果ID
-   */
-  async deleteResult(resultId) {
-    return apiClient.delete(`/embedding/results/${resultId}`)
-  },
+/**
+ * Get available embedding models
+ * @returns {Promise<Array>} - List of models
+ */
+export async function getAvailableModels() {
+  const response = await fetch(`${API_BASE}/embedding/models`)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to get models')
+  }
+  
+  return response.json()
 }
 
-export default embeddingService
+/**
+ * Get documents that have been chunked (ready for embedding)
+ * @param {Object} params - Query parameters
+ * @returns {Promise<Object>} - Documents list with pagination
+ */
+export async function getDocumentsWithChunking(params = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.page) searchParams.set('page', params.page)
+  if (params.page_size) searchParams.set('page_size', params.page_size)
+  
+  const url = `${API_BASE}/embedding/documents?${searchParams.toString()}`
+  const response = await fetch(url)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to get documents')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Start embedding from a document
+ * @param {Object} params - Embedding parameters
+ * @returns {Promise<Object>} - Embedding result or task info
+ */
+export async function embedFromDocument(params) {
+  const response = await fetch(`${API_BASE}/embedding/embed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to start embedding')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Get latest embedding result for a document
+ * @param {string} documentId - Document ID
+ * @param {string} modelFilter - Optional model filter
+ * @returns {Promise<Object>} - Latest embedding result
+ */
+export async function getLatestByDocument(documentId, modelFilter = null) {
+  const searchParams = new URLSearchParams()
+  if (modelFilter) searchParams.set('model', modelFilter)
+  
+  const queryString = searchParams.toString()
+  const url = `${API_BASE}/embedding/documents/${documentId}/latest${queryString ? '?' + queryString : ''}`
+  const response = await fetch(url)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    const err = new Error(error.detail || 'Failed to get latest result')
+    err.status = response.status
+    throw err
+  }
+  
+  return response.json()
+}
+
+/**
+ * List embedding results with pagination
+ * @param {Object} params - Query parameters
+ * @returns {Promise<Object>} - Results list with pagination
+ */
+export async function listResults(params = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.page) searchParams.set('page', params.page)
+  if (params.page_size) searchParams.set('page_size', params.page_size)
+  if (params.document_id) searchParams.set('document_id', params.document_id)
+  
+  const url = `${API_BASE}/embedding/results?${searchParams.toString()}`
+  const response = await fetch(url)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to list results')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Get embedding result by ID
+ * @param {string} resultId - Result ID
+ * @returns {Promise<Object>} - Embedding result details
+ */
+export async function getResultById(resultId) {
+  const response = await fetch(`${API_BASE}/embedding/results/${resultId}`)
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to get result')
+  }
+  
+  return response.json()
+}
+
+/**
+ * Format bytes to human readable string
+ * @param {number} bytes - Bytes value
+ * @returns {string} - Formatted string
+ */
+export function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * Format duration in milliseconds
+ * @param {number} ms - Duration in milliseconds
+ * @returns {string} - Formatted string
+ */
+export function formatDuration(ms) {
+  if (!ms) return '-'
+  if (ms < 1000) return `${ms.toFixed(0)}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${(ms / 60000).toFixed(1)}min`
+}
+
+export default {
+  startEmbedding,
+  getTaskStatus,
+  cancelTask,
+  getResult,
+  getDocumentResults,
+  activateResult,
+  deleteResult,
+  compareResults,
+  getStatistics,
+  exportToJson,
+  downloadExport,
+  getAvailableModels,
+  getDocumentsWithChunking,
+  embedFromDocument,
+  getLatestByDocument,
+  listResults,
+  getResultById,
+  formatBytes,
+  formatDuration,
+}

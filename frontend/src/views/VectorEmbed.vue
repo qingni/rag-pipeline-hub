@@ -36,7 +36,7 @@ const batchFileName = ref('')
 
 const fetchModels = async () => {
   try {
-    const response = await embeddingService.listModels()
+    const response = await embeddingService.getAvailableModels()
     models.value = response.models || []
     if (!selectedModel.value && models.value.length) {
       selectedModel.value = models.value[0].name

@@ -1,4 +1,4 @@
-"""Application configuration."""
+"""Configuration module for embedding optimization."""
 from pydantic_settings import BaseSettings
 from typing import Optional
 

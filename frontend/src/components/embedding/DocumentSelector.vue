@@ -27,11 +27,11 @@
       </div>
       <div class="info-row">
         <span class="info-label">上传时间:</span>
-        <span class="info-value">{{ formatDateTime(selectedDocInfo.upload_time) }}</span>
+        <span class="info-value">{{ formatDateTime(selectedDocInfo.created_at || selectedDocInfo.upload_time) }}</span>
       </div>
       <div class="info-row">
         <span class="info-label">文件大小:</span>
-        <span class="info-value">{{ formatFileSize(selectedDocInfo.size_bytes) }}</span>
+        <span class="info-value">{{ formatFileSize(selectedDocInfo.file_size || selectedDocInfo.size_bytes) }}</span>
       </div>
     </div>
   </div>
@@ -62,19 +62,31 @@ const localSelectedDocument = ref(props.modelValue)
 
 // 格式化文档选项: "DocumentName · 已分块 · YYYY-MM-DD"
 const formattedDocuments = computed(() => {
+  console.log('[DocumentSelector] Documents:', props.documents)
   return props.documents.map(doc => ({
     label: formatDocumentLabel(doc),
-    value: doc.id
+    // 兼容 document_id 和 id 两种字段名
+    value: doc.document_id || doc.id
   }))
 })
 
 const selectedDocInfo = computed(() => {
   if (!localSelectedDocument.value) return null
-  return props.documents.find(doc => doc.id === localSelectedDocument.value)
+  // 兼容 document_id 和 id 两种字段名
+  return props.documents.find(doc => (doc.document_id || doc.id) === localSelectedDocument.value)
 })
 
 function formatDocumentLabel(doc) {
-  const uploadDate = new Date(doc.upload_time)
+  // 兼容 created_at 和 upload_time 两种字段名
+  const dateValue = doc.created_at || doc.upload_time
+  if (!dateValue) {
+    return `${doc.filename} · 已分块`
+  }
+  const uploadDate = new Date(dateValue)
+  // 检查日期是否有效
+  if (isNaN(uploadDate.getTime())) {
+    return `${doc.filename} · 已分块`
+  }
   const dateStr = uploadDate.toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -84,7 +96,9 @@ function formatDocumentLabel(doc) {
 }
 
 function formatDateTime(dateString) {
+  if (!dateString) return '-'
   const date = new Date(dateString)
+  if (isNaN(date.getTime())) return '-'
   return date.toLocaleString('zh-CN')
 }
 

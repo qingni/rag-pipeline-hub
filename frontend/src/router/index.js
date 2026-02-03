@@ -38,6 +38,15 @@ const routes = [
     path: '/generation',
     name: 'Generation',
     component: () => import('../views/Generation.vue')
+  },
+  {
+    path: '/admin/model-capability',
+    name: 'ModelCapabilityAdmin',
+    component: () => import('../views/ModelCapabilityAdmin.vue'),
+    meta: {
+      title: '模型能力管理',
+      requiresAdmin: true
+    }
   }
 ]
 

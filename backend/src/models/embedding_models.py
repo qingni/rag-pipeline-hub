@@ -9,7 +9,7 @@ from typing import List, Optional, Literal
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator, ConfigDict
-from sqlalchemy import Column, String, Integer, Float, DateTime, CheckConstraint, Index
+from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, CheckConstraint, Index
 from sqlalchemy.sql import func
 import hashlib
 import uuid
@@ -155,6 +155,13 @@ class EmbeddingResult(Base):
         comment="Detailed error for FAILED or PARTIAL_SUCCESS status"
     )
     
+    # Multi-model comparison support (FR-030)
+    is_active = Column(
+        Boolean,
+        default=False,
+        comment="Whether this result is active for retrieval (only one per document)"
+    )
+    
     # Constraints (FR-021)
     __table_args__ = (
         # Composite index for "latest embedding by document+model" query (FR-028)
@@ -253,6 +260,9 @@ class BatchEmbeddingRequest(BaseModel):
     result_id: Optional[str] = Field(None, description="Optional chunking result ID for tracking")
     max_retries: int = Field(default=3, ge=0, le=10, description="Maximum retry attempts")
     timeout: int = Field(default=60, ge=1, le=300, description="Request timeout in seconds")
+    # New: Batch processing configuration
+    batch_size: int = Field(default=50, ge=1, le=1000, description="Items per batch for processing")
+    concurrency: int = Field(default=5, ge=1, le=20, description="Maximum concurrent requests")
     
     @field_validator('texts')
     @classmethod
@@ -293,6 +303,12 @@ class DocumentEmbeddingRequest(BaseModel):
     strategy_type: Optional[str] = Field(None, description="Filter by chunking strategy type")
     max_retries: int = Field(default=3, ge=0, le=10, description="Maximum retry attempts")
     timeout: int = Field(default=60, ge=1, le=300, description="Request timeout in seconds")
+    # New: Batch processing configuration
+    batch_size: int = Field(default=50, ge=1, le=1000, description="Items per batch for processing")
+    concurrency: int = Field(default=5, ge=1, le=20, description="Maximum concurrent requests")
+    # New: Multimodal configuration
+    enable_multimodal: bool = Field(default=True, description="Enable multimodal embedding for image chunks")
+    image_fallback: str = Field(default="caption", description="Fallback for images: 'caption' or 'skip'")
     
     @field_validator('model')
     @classmethod

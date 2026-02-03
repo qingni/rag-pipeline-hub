@@ -1,0 +1,167 @@
+# 模型能力配置文件
+# 用于智能模型推荐的模型能力评分
+# 评分范围: 0.0 - 1.0
+
+models:
+  # BGE-M3 多语言模型
+  bge-m3:
+    name: "BGE-M3"
+    provider: "bge"
+    dimension: 1024
+    max_sequence_length: 8192
+    model_type: "text"
+    description: "BGE-M3 多语言模型，支持密集检索、多向量检索和稀疏检索"
+    
+    # 语言支持度评分 (0.0-1.0)
+    language_scores:
+      zh: 0.95  # 中文
+      en: 0.90  # 英文
+      ja: 0.80  # 日语
+      ko: 0.80  # 韩语
+      default: 0.70  # 其他语言
+    
+    # 领域专长评分 (0.0-1.0)
+    domain_scores:
+      general: 0.85  # 通用领域
+      technical: 0.80  # 技术文档
+      legal: 0.75  # 法律合同
+      medical: 0.70  # 医疗健康
+      financial: 0.75  # 金融财经
+      academic: 0.80  # 学术论文
+      news: 0.80  # 新闻资讯
+      default: 0.75  # 其他领域
+    
+    # 多模态能力评分
+    multimodal_score: 0.0  # 不支持多模态
+    
+    # 性能指标
+    performance:
+      throughput: 0.85  # 吞吐量
+      latency: 0.80  # 延迟表现
+      cost: 0.90  # 成本效益
+
+  # 通义千问 Embedding 8B
+  qwen3-embedding-8b:
+    name: "Qwen3-Embedding-8B"
+    provider: "qwen"
+    dimension: 4096
+    max_sequence_length: 32768
+    model_type: "text"
+    description: "通义千问 Embedding 8B，高精度、长文本支持、动态维度输出"
+    
+    language_scores:
+      zh: 0.98  # 中文 - 最佳
+      en: 0.92  # 英文
+      ja: 0.75  # 日语
+      ko: 0.75  # 韩语
+      default: 0.65  # 其他语言
+    
+    domain_scores:
+      general: 0.90  # 通用领域
+      technical: 0.95  # 技术文档 - 最佳
+      legal: 0.85  # 法律合同
+      medical: 0.80  # 医疗健康
+      financial: 0.85  # 金融财经
+      academic: 0.90  # 学术论文
+      news: 0.85  # 新闻资讯
+      default: 0.80  # 其他领域
+    
+    multimodal_score: 0.0  # 不支持多模态
+    
+    performance:
+      throughput: 0.75  # 吞吐量
+      latency: 0.70  # 延迟表现 (模型较大)
+      cost: 0.70  # 成本效益
+
+  # 腾讯混元 Embedding
+  hunyuan-embedding:
+    name: "Hunyuan-Embedding"
+    provider: "hunyuan"
+    dimension: 1024
+    max_sequence_length: 1024
+    model_type: "text"
+    description: "腾讯混元提供的 Embedding 模型"
+    
+    language_scores:
+      zh: 0.92  # 中文
+      en: 0.85  # 英文
+      ja: 0.60  # 日语
+      ko: 0.60  # 韩语
+      default: 0.50  # 其他语言
+    
+    domain_scores:
+      general: 0.85  # 通用领域
+      technical: 0.80  # 技术文档
+      legal: 0.85  # 法律合同
+      medical: 0.75  # 医疗健康
+      financial: 0.85  # 金融财经
+      academic: 0.75  # 学术论文
+      news: 0.85  # 新闻资讯
+      default: 0.75  # 其他领域
+    
+    multimodal_score: 0.0  # 不支持多模态
+    
+    performance:
+      throughput: 0.90  # 吞吐量
+      latency: 0.85  # 延迟表现
+      cost: 0.85  # 成本效益
+
+  # 通义千问多模态 Embedding 8B
+  qwen3-vl-embedding-8b:
+    name: "Qwen3-VL-Embedding-8B"
+    provider: "qwen"
+    dimension: 4096
+    min_dimension: 64
+    max_dimension: 4096
+    max_sequence_length: 32768
+    model_type: "multimodal"
+    description: "通义千问多模态 Embedding 8B，支持文本、图像、视频及多模态组合"
+    
+    language_scores:
+      zh: 0.95  # 中文
+      en: 0.90  # 英文
+      ja: 0.70  # 日语
+      ko: 0.70  # 韩语
+      default: 0.60  # 其他语言
+    
+    domain_scores:
+      general: 0.90  # 通用领域
+      technical: 0.90  # 技术文档
+      legal: 0.75  # 法律合同
+      medical: 0.85  # 医疗健康 (支持医学图像)
+      financial: 0.80  # 金融财经
+      academic: 0.85  # 学术论文
+      news: 0.85  # 新闻资讯
+      default: 0.80  # 其他领域
+    
+    multimodal_score: 0.95  # 强多模态能力
+    
+    # 支持的输入类型
+    supported_inputs:
+      - text
+      - image
+      - video
+      - text+image
+    
+    performance:
+      throughput: 0.65  # 吞吐量 (多模态处理较慢)
+      latency: 0.60  # 延迟表现
+      cost: 0.55  # 成本效益 (多模态计算成本高)
+
+# 推荐算法权重配置
+recommendation_weights:
+  language_match: 0.40  # 语言匹配度权重
+  domain_match: 0.35   # 领域匹配度权重
+  multimodal_support: 0.25  # 多模态支持度权重
+
+# 异常检测配置
+outlier_detection:
+  default_threshold: 0.3  # 默认偏离度阈值
+  min_threshold: 0.1
+  max_threshold: 0.5
+
+# 默认模型（当无法确定最佳模型时）
+default_model: "bge-m3"
+
+# 多模态文档的默认模型
+default_multimodal_model: "qwen3-vl-embedding-8b"

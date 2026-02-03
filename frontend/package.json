@@ -8,7 +8,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
     "axios": "^1.6.2",
+    "echarts": "^5.4.0",
+    "element-plus": "^2.13.2",
     "lucide-vue-next": "^0.468.0",
     "marked": "^17.0.1",
     "pinia": "^2.1.7",
@@ -20,6 +23,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.5.0",
     "autoprefixer": "^10.4.16",
+    "baseline-browser-mapping": "^2.9.19",
     "postcss": "^8.4.32",
     "tailwindcss": "^3.3.6",
     "vite": "^5.0.4"
