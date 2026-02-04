@@ -7,7 +7,7 @@
 
 ## Summary
 
-Implement a vector embedding module that converts document chunks into vector representations using multiple embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Jina-Embeddings-v4). The module includes:
+Implement a vector embedding module that converts document chunks into vector representations using multiple embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Qwen3-VL-Embedding-8B). The module includes:
 - Backend API endpoints for vectorizing chunking results and documents
 - Database storage for embedding metadata with JSON file persistence for vectors
 - Unified frontend interface at `/documents/embed` with automatic display of historical results
@@ -45,7 +45,7 @@ Implement a vector embedding module that converts document chunks into vector re
 | Principle | Compliance | Evidence |
 |-----------|------------|----------|
 | **I. 模块化架构** | ✅ PASS | Embedding module has independent service layer (`embedding_service.py`), clear API routes (`embedding_routes.py`, `embedding_query_routes.py`), and separate storage layer (`embedding_db.py`, `embedding_storage_dual.py`) |
-| **II. 多提供商支持** | ✅ PASS | Supports 4 embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Jina-Embeddings-v4) via OpenAI-compatible protocol, allowing future provider additions |
+| **II. 多提供商支持** | ✅ PASS | Supports 4 embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Qwen3-VL-Embedding-8B) via OpenAI-compatible protocol, allowing future provider additions |
 | **III. 结果持久化 (NON-NEGOTIABLE)** | ✅ PASS | All embedding results stored as JSON files with naming convention `{document_id}_{timestamp}.json`, metadata stored in `embedding_results` database table with file path reference |
 | **IV. 用户体验优先** | ✅ PASS | Frontend uses Vue3 + TDesign Vue Next, unified `/documents/embed` route, two-column layout (left: controls, right: results), automatic display of historical results on document selection |
 | **V. API标准化** | ✅ PASS | FastAPI-based RESTful endpoints with standardized error handling, OpenAPI documentation, unified response format, health check endpoint |

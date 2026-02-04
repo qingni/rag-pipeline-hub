@@ -82,9 +82,9 @@ class HybridChunker(BaseChunker):
         self._min_table_rows = params.get('min_table_rows', 2)
         self._min_code_lines = params.get('min_code_lines', 3)
         
-        # Image extraction
+        # Image extraction - NOTE: _image_extractor is initialized in validate_params()
         self._image_base_path = params.get('image_base_path')
-        self._image_extractor: Optional[ImageExtractor] = None
+        # self._image_extractor 在 validate_params() 中初始化，不要在这里覆盖
     
     def validate_params(self) -> None:
         """
@@ -140,6 +140,8 @@ class HybridChunker(BaseChunker):
                 image_base_path=self._image_base_path,
                 include_images=self._include_images
             )
+        else:
+            self._image_extractor = None
     
     def _get_text_chunker(self):
         """Get or create the text chunker based on configuration."""

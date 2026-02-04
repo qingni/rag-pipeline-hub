@@ -105,6 +105,7 @@ class ImageExtractor:
         
         # Get pre-loaded image data from document loading stage
         images_data = metadata.get("images", [])
+        logger.info(f"ImageExtractor: Found {len(images_data)} images in metadata")
         
         # Method 1: Extract placeholder format [IMAGE_N: description]
         placeholder_chunks, placeholder_regions = self._extract_placeholder_images(
@@ -156,18 +157,31 @@ class ImageExtractor:
         page_number: Optional[int],
         chunk_start_index: int
     ) -> Tuple[List[Dict[str, Any]], List[Tuple[int, int, str]]]:
-        """Extract images using placeholder format [IMAGE_N: description]."""
+        """Extract images using placeholder format [IMAGE_N: description].
+        
+        Note: 占位符中的索引从 1 开始（如 [IMAGE_1: xxx]），
+        而 images 数组中的 image_index 从 0 开始，需要进行索引转换。
+        """
         chunks = []
         regions = []
         
-        for match in self.PLACEHOLDER_IMAGE_PATTERN.finditer(text):
-            image_index = int(match.group(1))
+        # 调试日志：显示所有找到的占位符
+        all_matches = list(self.PLACEHOLDER_IMAGE_PATTERN.finditer(text))
+        logger.info(f"ImageExtractor: Found {len(all_matches)} placeholder matches in text")
+        
+        for match in all_matches:
+            placeholder_index = int(match.group(1))  # 占位符中的索引（从1开始）
             placeholder_text = match.group(2).strip()
             start_pos = match.start()
             end_pos = match.end()
             
+            # 索引转换：占位符从1开始，images数组的image_index从0开始
+            image_index = placeholder_index - 1
+            
             # Find corresponding image data from loading stage
             image_info = self._find_image_by_index(images_data, image_index, page_number)
+            
+            logger.info(f"ImageExtractor: Placeholder IMAGE_{placeholder_index} -> image_index={image_index}, found image_info: {image_info is not None}")
             
             if image_info:
                 # Create image chunk with full metadata
@@ -182,6 +196,7 @@ class ImageExtractor:
                 )
             else:
                 # Create basic image chunk (no metadata available)
+                # 注意：这里使用的是转换后的索引（0-based）
                 image_chunk = self._create_placeholder_image_chunk(
                     placeholder_text=placeholder_text,
                     image_index=image_index,

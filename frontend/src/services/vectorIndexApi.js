@@ -43,7 +43,7 @@ export async function getEmbeddingTasks(params = {}) {
  * @param {Object} data - 创建参数
  * @param {string} data.embedding_result_id - 向量化任务结果ID
  * @param {string} data.name - 索引名称（可选）
- * @param {string} data.provider - 向量数据库 (FAISS/MILVUS)
+ * @param {string} data.provider - 向量数据库 (MILVUS)
  * @param {string} data.index_type - 索引算法类型
  * @param {string} data.metric_type - 相似度度量方法
  * @param {Object} data.index_params - 索引参数
@@ -119,7 +119,7 @@ export async function findMatchingIndex(params) {
  * @param {Object} indexData - 索引数据
  * @param {string} indexData.index_name - 索引名称
  * @param {number} indexData.dimension - 向量维度
- * @param {string} indexData.index_type - 索引类型 (MILVUS/FAISS)
+ * @param {string} indexData.index_type - 索引类型 (MILVUS)
  * @param {string} indexData.algorithm_type - 算法类型
  * @param {string} indexData.metric_type - 度量类型 (cosine/euclidean/dot_product)
  * @param {string} indexData.description - 索引描述

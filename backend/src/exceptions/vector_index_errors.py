@@ -104,17 +104,6 @@ class MilvusOperationError(ProviderError):
         )
 
 
-class FAISSError(ProviderError):
-    """Raised when a FAISS operation fails"""
-    
-    def __init__(self, operation: str, message: str):
-        super().__init__(
-            "faiss",
-            f"FAISS {operation} failed: {message}",
-            {"operation": operation}
-        )
-
-
 class IndexPersistenceError(VectorIndexError):
     """Raised when index persistence fails"""
     

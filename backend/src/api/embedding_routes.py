@@ -772,38 +772,30 @@ async def embed_from_chunking_result(
             timestamp=datetime.utcnow(),
         )
 
-        # Get chunking_result_id from the service (it already found the latest result)
+        # Get chunking_result and document_id from the result_id
         from ..models.chunking_result import ChunkingResult, ResultStatus
-        from ..models.chunking_task import ChunkingTask, StrategyType
+        from ..models.chunking_task import ChunkingTask
         
-        # Build query for latest active result
-        query = db.query(ChunkingResult).join(
-            ChunkingTask,
-            ChunkingResult.task_id == ChunkingTask.task_id
-        ).filter(
-            ChunkingTask.source_document_id == request.document_id,
-            ChunkingResult.status == ResultStatus.COMPLETED,
-            ChunkingResult.is_active == True
-        )
+        # Query the chunking result to get document_id
+        chunking_result = db.query(ChunkingResult).filter(
+            ChunkingResult.result_id == request.result_id
+        ).first()
         
-        # Apply strategy filter if provided
-        if request.strategy_type:
-            try:
-                strategy_enum = StrategyType[request.strategy_type.upper()]
-                query = query.filter(ChunkingTask.chunking_strategy == strategy_enum)
-            except KeyError:
-                pass
-        
-        # Get the most recent result
-        chunking_result = query.order_by(ChunkingResult.created_at.desc()).first()
-        chunking_result_id = chunking_result.result_id if chunking_result else None
+        document_id = None
+        if chunking_result:
+            # Get document_id from the associated task
+            task = db.query(ChunkingTask).filter(
+                ChunkingTask.task_id == chunking_result.task_id
+            ).first()
+            if task:
+                document_id = task.source_document_id
         
         # Save with dual-write (JSON + Database)
         db_record = storage.save_with_database(
             session=db,
             response=response,
-            document_id=request.document_id,
-            chunking_result_id=chunking_result_id,
+            document_id=document_id,
+            chunking_result_id=request.result_id,
             model=request.model
         )
         

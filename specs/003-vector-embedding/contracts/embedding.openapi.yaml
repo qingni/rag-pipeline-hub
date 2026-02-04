@@ -124,7 +124,7 @@ paths:
                   example: "人工智能是什么"
                 model:
                   type: string
-                  enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+                  enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
                   description: Embedding model to use
       responses:
         '200':
@@ -184,7 +184,7 @@ paths:
                   example: ["文本一", "文本二", "文本三"]
                 model:
                   type: string
-                  enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+                  enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
       responses:
         '200':
           description: Batch vectorization completed (may include failures)
@@ -262,11 +262,11 @@ paths:
                   provider: "qwen"
                   supports_multilingual: true
                   max_batch_size: 1000
-                jina-embeddings-v4:
-                  name: "jina-embeddings-v4"
-                  dimension: 2048
-                  description: "Jina AI Embeddings v4，多语言支持，语义理解强"
-                  provider: "jina"
+                qwen3-vl-embedding-8b:
+                  name: "qwen3-vl-embedding-8b"
+                  dimension: 4096
+                  description: "通义千问多模态 Embedding 模型，支持图文理解"
+                  provider: "qwen"
                   supports_multilingual: true
                   max_batch_size: 1000
 
@@ -301,7 +301,7 @@ components:
           example: "chunk-a3b7c9f2"
         model:
           type: string
-          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
           description: Embedding model to use
 
     VectorizationFromDocumentRequest:
@@ -316,7 +316,7 @@ components:
           example: "doc-123"
         model:
           type: string
-          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
           description: Embedding model to use
         strategy:
           type: string

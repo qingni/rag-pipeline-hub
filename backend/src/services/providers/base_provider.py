@@ -32,7 +32,7 @@ class BaseProvider(ABC):
     """
     Abstract base class for vector index providers
     
-    All provider implementations (Milvus, FAISS) must inherit from this class
+    All provider implementations (Milvus) must inherit from this class
     and implement all abstract methods.
     """
     

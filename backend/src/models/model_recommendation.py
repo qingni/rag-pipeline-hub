@@ -97,7 +97,15 @@ class ModelRecommendation:
 
 @dataclass
 class DocumentAnalysis:
-    """Analysis result for a single document."""
+    """
+    Analysis result for a single document.
+    
+    【业界最佳实践】多模态检测采用二值判断:
+    - has_images: 是否包含图片（硬性要求多模态模型）
+    - has_tables: 是否包含较多表格（软性建议多模态模型）
+    
+    参考: LlamaIndex, LangChain, Unstructured.io
+    """
     document_id: str
     document_name: str
     
@@ -106,7 +114,7 @@ class DocumentAnalysis:
     language_confidence: float
     detected_domain: str
     domain_confidence: float
-    multimodal_ratio: float  # 0.0 - 1.0
+    multimodal_ratio: float  # 0.0 - 1.0（保留用于统计展示）
     
     # Content statistics
     total_chunks: int = 0
@@ -117,6 +125,10 @@ class DocumentAnalysis:
     
     # Feature vector for comparison
     feature_vector: List[float] = field(default_factory=list)
+    
+    # 【新增】二值判断标志（业界最佳实践）
+    has_images: bool = False  # 有图片 → 必须用多模态模型（硬性要求）
+    has_tables: bool = False  # 表格超过3个 → 推荐多模态模型（软性建议）
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -133,6 +145,9 @@ class DocumentAnalysis:
             "image_chunks": self.image_chunks,
             "table_chunks": self.table_chunks,
             "code_chunks": self.code_chunks,
+            # 【新增】二值判断标志
+            "has_images": self.has_images,
+            "has_tables": self.has_tables,
         }
 
 

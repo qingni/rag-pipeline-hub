@@ -251,10 +251,6 @@ const getMoreOptions = (row) => {
     { content: '查看历史', value: 'history' }
   ];
   
-  if (row.status === 'READY' && row.index_type === 'FAISS') {
-    options.push({ content: '持久化', value: 'persist' });
-  }
-  
   options.push({ content: '删除', value: 'delete', theme: 'error' });
   
   return options;

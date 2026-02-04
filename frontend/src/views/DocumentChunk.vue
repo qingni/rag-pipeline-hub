@@ -62,6 +62,14 @@
                       </t-tag>
                     </t-space>
                   </div>
+                  <!-- 结果文件路径 -->
+                  <div v-if="currentResult?.file_path" class="result-file-path">
+                    <t-icon name="file" size="14px" />
+                    <span class="file-path-label">结果文件:</span>
+                    <t-tooltip :content="currentResult.file_path" placement="top">
+                      <span class="file-path-text">{{ currentResult.file_path }}</span>
+                    </t-tooltip>
+                  </div>
                 </t-card>
 
                 <!-- 可视化视图 -->
@@ -347,6 +355,38 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-start;
   align-items: center;
+}
+
+/* 结果文件路径样式 */
+.result-file-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--td-component-stroke);
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+}
+
+.result-file-path .file-path-label {
+  color: var(--td-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.result-file-path .file-path-text {
+  color: var(--td-text-color-secondary);
+  font-family: 'SF Mono', Monaco, Menlo, Consolas, monospace;
+  font-size: 12px;
+  max-width: 500px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.result-file-path .file-path-text:hover {
+  color: var(--td-brand-color);
 }
 
 /* 可视化容器 */

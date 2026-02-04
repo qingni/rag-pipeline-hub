@@ -32,12 +32,9 @@ class Settings(BaseSettings):
     MILVUS_PASSWORD: str = ""
     MILVUS_TIMEOUT: int = 30
     
-    # FAISS
-    FAISS_INDEX_DIR: str = "data/faiss_indexes"
-    
     # Vector Index
     VECTOR_INDEX_RESULTS_DIR: str = "results/vector_index"
-    VECTOR_INDEX_DEFAULT_PROVIDER: str = "milvus"  # milvus 或 faiss
+    VECTOR_INDEX_DEFAULT_PROVIDER: str = "milvus"
     
     # Pinecone
     PINECONE_API_KEY: Optional[str] = None

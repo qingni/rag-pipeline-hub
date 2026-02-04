@@ -89,6 +89,21 @@
           </span>
         </div>
         
+        <!-- JSON文件路径 -->
+        <div v-if="item.json_file_path" class="json-file-path">
+          <FileJson :size="12" class="path-icon" />
+          <span class="path-text" :title="item.json_file_path">{{ item.json_file_path }}</span>
+          <t-button
+            theme="default"
+            variant="text"
+            size="small"
+            class="copy-btn"
+            @click.stop="copyPath(item.json_file_path)"
+          >
+            <Copy :size="10" />
+          </t-button>
+        </div>
+        
         <div class="item-actions">
           <t-button
             theme="primary"
@@ -153,7 +168,9 @@ import {
   Clock,
   Eye,
   Download,
-  Trash2
+  Trash2,
+  FileJson,
+  Copy
 } from 'lucide-vue-next'
 import { useEmbeddingStore } from '@/stores/embedding'
 
@@ -289,6 +306,15 @@ function formatTime(timestamp) {
     minute: '2-digit'
   })
 }
+
+async function copyPath(path) {
+  try {
+    await navigator.clipboard.writeText(path)
+    MessagePlugin.success('路径已复制到剪贴板')
+  } catch (err) {
+    MessagePlugin.error('复制失败')
+  }
+}
 </script>
 
 <style scoped>
@@ -421,6 +447,43 @@ function formatTime(timestamp) {
 
 .meta-item svg {
   flex-shrink: 0;
+}
+
+.json-file-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+}
+
+.path-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.path-text {
+  font-size: 11px;
+  color: #475569;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.copy-btn {
+  flex-shrink: 0;
+  padding: 2px 4px !important;
+  min-width: auto !important;
+  height: auto !important;
+}
+
+.copy-btn:hover {
+  color: #3b82f6;
 }
 
 .item-actions {

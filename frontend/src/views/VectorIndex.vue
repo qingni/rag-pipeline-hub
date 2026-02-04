@@ -83,12 +83,6 @@
                   <div class="select-option-desc">分布式向量数据库，适合生产环境和大规模数据</div>
                 </div>
               </t-option>
-              <t-option value="FAISS" label="FAISS - 本地内存索引">
-                <div class="select-option-item">
-                  <div class="select-option-name">FAISS</div>
-                  <div class="select-option-desc">本地内存索引，适合开发测试和中小规模数据</div>
-                </div>
-              </t-option>
             </t-select>
           </div>
 

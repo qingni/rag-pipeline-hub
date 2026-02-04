@@ -186,7 +186,7 @@ As a developer or API user, I need backend API support for batch text vectorizat
 
 ### User Story 6 - Multi-Model Support (Priority: P1)
 
-As a system administrator, I need to choose from multiple embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Jina-Embeddings-v4) so that I can optimize for different use cases (multilingual support, dimension size, performance).
+As a system administrator, I need to choose from multiple embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Qwen3-VL-Embedding-8B) so that I can optimize for different use cases (multilingual support, dimension size, performance, multimodal support).
 
 **Why this priority**: Different use cases require different models. This flexibility is essential for production deployment across various scenarios.
 
@@ -197,7 +197,7 @@ As a system administrator, I need to choose from multiple embedding models (BGE-
 1. **Given** the model name "qwen3-embedding-8b", **When** service is initialized, **Then** vectors are generated with 4096 dimensions
 2. **Given** the model name "bge-m3", **When** service is initialized, **Then** vectors are generated with 1024 dimensions
 3. **Given** the model name "hunyuan-embedding", **When** service is initialized, **Then** vectors are generated with 1024 dimensions
-4. **Given** the model name "jina-embeddings-v4", **When** service is initialized, **Then** vectors are generated with 2048 dimensions
+4. **Given** the model name "qwen3-vl-embedding-8b", **When** service is initialized, **Then** vectors are generated with 4096 dimensions
 5. **Given** an unsupported model name, **When** service initialization is attempted, **Then** the system returns a clear error listing supported models
 
 ---
@@ -259,7 +259,7 @@ As a system operator, I need the embedding service to automatically retry failed
 - **FR-003**: System MUST support optional filtering by chunking strategy type when vectorizing by document ID (backend API)
 - **FR-004**: System MUST support single text vectorization for ad-hoc queries (backend API only, not exposed in frontend)
 - **FR-005**: System MUST support batch vectorization of arbitrary text strings (max 1000 texts per batch) with partial success handling (backend API only, not exposed in frontend)
-- **FR-006**: System MUST support four embedding models: BGE-M3 (1024-dim), Qwen3-Embedding-8B (4096-dim), Hunyuan-Embedding (1024-dim), and Jina-Embeddings-v4 (2048-dim)
+- **FR-006**: System MUST support four embedding models: BGE-M3 (1024-dim), Qwen3-Embedding-8B (4096-dim), Hunyuan-Embedding (1024-dim), and Qwen3-VL-Embedding-8B (4096-dim, multimodal)
 - **FR-007**: System MUST validate model names and reject unsupported models with clear error messages
 - **FR-008**: System MUST connect to embedding API using OpenAI-compatible protocol
 - **FR-009**: System MUST accept configurable API credentials and base URL

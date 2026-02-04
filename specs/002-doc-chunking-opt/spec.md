@@ -167,8 +167,13 @@
 - **FR-008**: 系统必须支持图片独立分块，提取图片引用信息并生成独立的分块
 - **FR-009**: 图片分块元数据必须包含：图片路径、页码、区域坐标、图片描述/caption（如有）、图片尺寸
 - **FR-009a**: 图片分块必须采用"占位符+结构化元数据"方案：
-  - 文档加载阶段：文本中保留占位符 `[IMAGE_N: 描述]`，images 数组包含完整图片数据（file_path 用于展示，base64_data 用于多模态嵌入）
-  - 分块阶段：多模态分块器根据占位符正则匹配 `\[IMAGE_(\d+):\s*([^\]]*)\]`，关联 images 数组中的对应图片数据
+  - **文档加载阶段**：
+    - 文本中保留占位符 `[IMAGE_N: 描述]`，其中 **N 统一从 1 开始**（人类可读友好）
+    - images 数组包含完整图片数据（file_path 用于展示，base64_data 用于多模态嵌入），其中 `image_index` **从 0 开始**
+    - **重要约定**：所有文档加载器（docling_serve_client、unstructured_loader、docx_loader、html_loader 等）必须遵循此规范，占位符索引 = image_index + 1
+  - **分块阶段**：
+    - 多模态分块器根据占位符正则匹配 `\[IMAGE_(\d+):\s*([^\]]*)\]`
+    - **注意索引转换**：占位符索引（从1开始）与 images 数组的 image_index（从0开始）存在偏移，需将占位符索引减 1 后再关联 images 数组中的对应图片数据
   - 图片块元数据包含：image_path、image_base64、alt_text、caption、width、height、mime_type、context_before、context_after
 - **FR-010**: 分块结果必须通过类型字段（type: text/table/image/code）区分不同类型的分块
 
@@ -501,3 +506,5 @@ class ChunkTypeEnum:
 | 2026-01-30 | BugFix | 修复 `validate_hybrid_params` 验证器丢失 `embedding_model` 参数的问题，导致混合分块策略中语义分块始终使用默认的 bge-m3 模型而非用户选择的模型 | FR-017, FR-020a |
 | 2026-02-02 | Feature | 新增分块结果可视化功能需求（FR-024 ~ FR-027），支持线性视图、树状视图、统计视图三种展示模式，以及 Mermaid 图导出功能 | FR-024, FR-025, FR-026, FR-027 |
 | 2026-02-02 | BugFix | [VIBE] 修复父子分块统计视图中平均父块大小显示为0、块大小分布总数只统计前50个分块的问题，在后端添加 `avg_parent_size` 和 `size_distribution` 计算逻辑 | FR-026 |
+| 2026-02-04 | BugFix | 修复 ImageExtractor 图片索引偏移问题：占位符 `[IMAGE_N]` 中 N 从 1 开始，而 images 数组的 `image_index` 从 0 开始，导致图片无法正确关联。修复方法：在 `_extract_placeholder_images` 中将占位符索引减 1 后再匹配 | FR-009a |
+| 2026-02-04 | BugFix | 统一所有文档加载器的图片占位符索引从 1 开始：修复 unstructured_loader（2处）、docx_loader（1处）、docling_serve_client（1处）中占位符使用 0-based 索引的问题，确保与 ImageExtractor 的索引转换逻辑一致 | FR-009a |

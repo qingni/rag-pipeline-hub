@@ -55,7 +55,7 @@ def create_embedding_results_table():
     print()
     print("Constraints:")
     print("  - Check: status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS')")
-    print("  - Check: model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'jina-embeddings-v4')")
+    print("  - Check: model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'qwen3-vl-embedding-8b')")
     print("  - Check: successful_count >= 0")
     print("  - Check: failed_count >= 0")
     print("  - Check: vector_dimension > 0")

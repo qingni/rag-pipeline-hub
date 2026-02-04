@@ -16,30 +16,18 @@
             :loading="loadingDocs"
           />
           
-          <!-- 智能推荐按钮 -->
-          <div class="recommend-section" v-if="store.selectedDocumentId">
-            <t-button
-              variant="outline"
-              :loading="isGettingRecommendation"
-              @click="handleGetRecommendation"
-            >
-              <template #icon>
-                <Sparkles :size="16" />
-              </template>
-              智能推荐模型
-            </t-button>
-          </div>
-          
           <!-- 推荐卡片 -->
-          <ModelRecommendCard
-            v-if="showRecommendation && recommendStore.hasRecommendations"
-            :recommendations="recommendStore.recommendations"
-            :document-analysis="recommendStore.documentAnalysis"
-            :top-recommendation="recommendStore.topRecommendation"
-            :show-actions="false"
-            :initial-model="recommendStore.selectedModel"
-            @select="handleSelectRecommendation"
-          />
+          <t-loading :loading="isGettingRecommendation" size="small" text="正在分析文档特征...">
+            <ModelRecommendCard
+              v-if="showRecommendation && recommendStore.hasRecommendations"
+              :recommendations="recommendStore.recommendations"
+              :document-analysis="recommendStore.documentAnalysis"
+              :top-recommendation="recommendStore.topRecommendation"
+              :show-actions="false"
+              :initial-model="recommendStore.selectedModel"
+              @select="handleSelectRecommendation"
+            />
+          </t-loading>
           
           <!-- 模型选择器 -->
           <ModelSelector
@@ -135,7 +123,6 @@
           <!-- Tab 2: 历史记录 -->
           <t-tab-panel value="history" label="历史记录" class="tab-panel-content">
             <EmbeddingHistoryList
-              :document-id="store.selectedDocumentId"
               @view="handleViewHistory"
               @delete="handleDeleteHistory"
               @download="handleDownloadHistory"
@@ -150,7 +137,7 @@
 <script setup>
 import { onMounted, ref, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { Hash, Zap, AlertCircle, Sparkles } from 'lucide-vue-next'
+import { Hash, Zap, AlertCircle } from 'lucide-vue-next'
 import { useEmbeddingStore } from '@/stores/embedding'
 import { useModelRecommendStore } from '@/stores/modelRecommendStore'
 import DocumentSelector from '@/components/embedding/DocumentSelector.vue'
@@ -200,21 +187,26 @@ const currentDocumentInfo = computed(() => {
   )
 })
 
-// 监听文档选择变化，自动加载历史向量化结果
+// 监听文档选择变化，自动加载历史向量化结果和智能推荐
 watch(
   () => store.selectedDocumentId,
   async (newDocumentId, oldDocumentId) => {
     if (!newDocumentId) {
       store.clearResults()
+      showRecommendation.value = false
       return
     }
     
     // 文档切换时才加载（避免初始化重复加载）
     if (oldDocumentId !== undefined && newDocumentId !== oldDocumentId) {
       await loadLatestResult(newDocumentId)
+      // 自动触发智能推荐
+      await handleGetRecommendation()
     } else if (oldDocumentId === undefined) {
       // 首次选择文档
       await loadLatestResult(newDocumentId)
+      // 自动触发智能推荐
+      await handleGetRecommendation()
     }
   }
 )

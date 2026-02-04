@@ -333,12 +333,12 @@ print(result['data']['embedding'])
         "description": "中文优化嵌入模型"
       },
       {
-        "name": "jina-embeddings-v4",
-        "display_name": "Jina Embeddings v4",
-        "dimension": 2048,
+        "name": "qwen3-vl-embedding-8b",
+        "display_name": "Qwen3 VL Embedding 8B",
+        "dimension": 4096,
         "max_tokens": 8192,
-        "provider": "Jina AI",
-        "description": "多语言高性能嵌入模型"
+        "provider": "通义千问",
+        "description": "多模态图文嵌入模型"
       }
     ]
   }
@@ -460,7 +460,7 @@ print(result['data']['embedding'])
   "detail": {
     "error_code": "E001",
     "model": "unknown-model",
-    "available_models": ["bge-m3", "qwen3-embedding-8b", "hunyuan-embedding", "jina-embeddings-v4"]
+    "available_models": ["bge-m3", "qwen3-embedding-8b", "hunyuan-embedding", "qwen3-vl-embedding-8b"]
   }
 }
 ```

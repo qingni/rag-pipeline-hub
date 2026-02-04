@@ -124,7 +124,7 @@ rag-framework-spec/
 
 将文本块转换为向量表示：
 
-- **模型支持**: bge-m3、qwen3-embedding-8b、hunyuan-embedding、jina-embeddings-v4
+- **模型支持**: bge-m3、qwen3-embedding-8b、hunyuan-embedding、qwen3-vl-embedding-8b
 - **批量处理**: 支持大规模文档的批量向量化
 - **维度**: 1024-4096 维（根据模型不同）
 

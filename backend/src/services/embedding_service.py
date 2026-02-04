@@ -6,8 +6,9 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
+import httpx
 from langchain_openai import OpenAIEmbeddings
 
 from ..models.embedding_models import (
@@ -186,14 +187,22 @@ class EmbeddingService:
             max_delay=32.0,
         )
 
-        self.embeddings = embeddings_client or OpenAIEmbeddings(
-            model=model,
-            openai_api_key=api_key,
-            openai_api_base=base_url,
-            max_retries=0,
-            request_timeout=request_timeout,
-            **kwargs,
-        )
+        # 保存 API 配置用于多模态模型直接调用
+        self._api_key = api_key
+        self._base_url = base_url.rstrip('/') if base_url else ""
+        
+        # 多模态模型使用直接 HTTP 调用，文本模型使用 LangChain
+        if self._is_multimodal_model():
+            self.embeddings = None  # 多模态模型不使用 LangChain
+        else:
+            self.embeddings = embeddings_client or OpenAIEmbeddings(
+                model=model,
+                openai_api_key=api_key,
+                openai_api_base=base_url,
+                max_retries=0,
+                request_timeout=request_timeout,
+                **kwargs,
+            )
 
     def embed_query(self, text: str, request_id: Optional[str] = None) -> SingleEmbeddingResult:
         """Vectorize a single text with validation, retries, and logging."""
@@ -217,7 +226,11 @@ class EmbeddingService:
             nonlocal retry_count, rate_limit_hits, api_start
             api_start = time.time()
             try:
-                return self.embeddings.embed_query(validated_text)
+                # 多模态模型使用专门的调用方法
+                if self._is_multimodal_model():
+                    return self._embed_query_multimodal(validated_text)
+                else:
+                    return self.embeddings.embed_query(validated_text)
             except Exception as raw_error:  # pragma: no cover - defensive
                 service_error = self._to_service_error(raw_error, request_id)
                 if isinstance(service_error, (RateLimitError, APITimeoutError, NetworkError)):
@@ -322,8 +335,12 @@ class EmbeddingService:
             def _embed_batch() -> List[List[float]]:
                 nonlocal total_retry_count, total_rate_limit_hits
                 try:
-                    # 使用真正的批量 API：一次请求处理所有文本
-                    return self.embeddings.embed_documents(validated_texts)
+                    # 多模态模型使用专门的调用方法
+                    if self._is_multimodal_model():
+                        return self._embed_documents_multimodal(validated_texts)
+                    else:
+                        # 使用真正的批量 API：一次请求处理所有文本
+                        return self.embeddings.embed_documents(validated_texts)
                 except Exception as raw_error:  # pragma: no cover - defensive
                     service_error = self._to_service_error(raw_error, batch_request_id)
                     if isinstance(service_error, (RateLimitError, APITimeoutError, NetworkError)):
@@ -563,44 +580,345 @@ class EmbeddingService:
         """Check if current model supports multimodal inputs."""
         return self.model in MULTIMODAL_EMBEDDING_MODELS
 
+    def _build_multimodal_input(
+        self,
+        text: str,
+        image_url: Optional[str] = None,
+        image_base64: Optional[str] = None,
+        mime_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        构建多模态模型的输入格式。
+        
+        根据 qwen3-vl-embedding-8b API 文档，输入格式为:
+        [
+            { "type": "image_url", "image_url": {"url": "..."} },  # 可选
+            { "type": "text", "text": "..." }  # 必需
+        ]
+        
+        Args:
+            text: 文本内容（必需）
+            image_url: 图片 URL（可选）
+            image_base64: 图片 base64 编码（可选，会转换为 data URL）
+            mime_type: 图片 MIME 类型（可选，默认 image/png）
+            
+        Returns:
+            多模态输入列表
+        """
+        input_items: List[Dict[str, Any]] = []
+        
+        # 添加图片输入（如果有）
+        if image_url:
+            input_items.append({
+                "type": "image_url",
+                "image_url": {"url": image_url}
+            })
+        elif image_base64:
+            # 将 base64 转换为 data URL 格式
+            # 使用传入的 MIME 类型，或根据常见格式默认为 image/png
+            actual_mime_type = mime_type or "image/png"
+            data_url = f"data:{actual_mime_type};base64,{image_base64}"
+            input_items.append({
+                "type": "image_url",
+                "image_url": {"url": data_url}
+            })
+        
+        # 添加文本输入（必需）
+        input_items.append({
+            "type": "text",
+            "text": text
+        })
+        
+        return input_items
+
+    def _call_multimodal_embedding_api(
+        self,
+        inputs: List[Union[str, List[Dict[str, Any]]]],
+        request_id: str,
+    ) -> List[List[float]]:
+        """
+        直接调用多模态 embedding API。
+        
+        使用 OpenAI 兼容格式调用 qwen3-vl-embedding-8b:
+        POST /embeddings
+        {
+            "model": "qwen3-vl-embedding-8b",
+            "input": [...],  # 多模态输入格式
+            "encoding_format": "float"
+        }
+        
+        Args:
+            inputs: 输入列表，每个元素是多模态格式的输入
+            request_id: 请求 ID 用于日志
+            
+        Returns:
+            向量列表
+        """
+        url = f"{self._base_url}/embeddings"
+        
+        # 构建请求体
+        request_body = {
+            "model": self.model,
+            "input": inputs,
+            "encoding_format": "float"
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        # === DEBUG 日志：打印发送给API的输入结构 ===
+        embedding_logger.logger.info(f"[DEBUG] Multimodal API call - request_id: {request_id}")
+        embedding_logger.logger.info(f"[DEBUG] Number of inputs: {len(inputs)}")
+        for idx, inp in enumerate(inputs):
+            if isinstance(inp, list):
+                # 多模态输入
+                has_image = any(item.get("type") == "image_url" for item in inp)
+                has_text = any(item.get("type") == "text" for item in inp)
+                if has_image:
+                    # 找到图片项
+                    for item in inp:
+                        if item.get("type") == "image_url":
+                            image_url = item.get("image_url", {}).get("url", "")
+                            if image_url.startswith("data:"):
+                                # data URL 格式
+                                mime_type = image_url.split(";")[0].split(":")[1] if ";" in image_url else "unknown"
+                                base64_len = len(image_url.split(",")[1]) if "," in image_url else 0
+                                embedding_logger.logger.info(
+                                    f"[DEBUG] Input[{idx}]: MULTIMODAL (image + text), "
+                                    f"mime_type={mime_type}, image_base64_len={base64_len}"
+                                )
+                            else:
+                                embedding_logger.logger.info(
+                                    f"[DEBUG] Input[{idx}]: MULTIMODAL (image URL + text), url={image_url[:100]}..."
+                                )
+                            break
+                else:
+                    text_content = ""
+                    for item in inp:
+                        if item.get("type") == "text":
+                            text_content = item.get("text", "")[:100]
+                            break
+                    embedding_logger.logger.info(
+                        f"[DEBUG] Input[{idx}]: TEXT ONLY in multimodal format, text={text_content}..."
+                    )
+            else:
+                embedding_logger.logger.info(f"[DEBUG] Input[{idx}]: PLAIN TEXT, text={str(inp)[:100]}...")
+        
+        try:
+            with httpx.Client(timeout=self.request_timeout) as client:
+                response = client.post(url, json=request_body, headers=headers)
+                
+                if response.status_code == 429:
+                    # 速率限制
+                    retry_after = response.headers.get("Retry-After", "60")
+                    raise RateLimitError(
+                        f"Rate limit exceeded: {response.text}",
+                        retry_after=float(retry_after)
+                    )
+                elif response.status_code == 401:
+                    raise AuthenticationError(f"Authentication failed: {response.text}")
+                elif response.status_code >= 400:
+                    # 其他错误
+                    error_msg = f"API error {response.status_code}: {response.text}"
+                    embedding_logger.logger.error(f"Multimodal API error: {error_msg}")
+                    raise NetworkError(error_msg)
+                
+                result = response.json()
+                
+                # 提取向量
+                vectors = []
+                for item in result.get("data", []):
+                    vectors.append(item.get("embedding", []))
+                
+                return vectors
+                
+        except httpx.TimeoutException as e:
+            raise APITimeoutError(f"Request timeout: {str(e)}")
+        except httpx.RequestError as e:
+            raise NetworkError(f"Network error: {str(e)}")
+
+    def _embed_query_multimodal(
+        self,
+        text: str,
+        image_url: Optional[str] = None,
+        image_base64: Optional[str] = None,
+    ) -> List[float]:
+        """
+        使用多模态模型进行单个文本/图文嵌入。
+        
+        Args:
+            text: 文本内容
+            image_url: 图片 URL（可选）
+            image_base64: 图片 base64（可选）
+            
+        Returns:
+            嵌入向量
+        """
+        multimodal_input = self._build_multimodal_input(text, image_url, image_base64)
+        vectors = self._call_multimodal_embedding_api(
+            inputs=[multimodal_input],
+            request_id=str(uuid.uuid4())
+        )
+        return vectors[0] if vectors else []
+
+    def _embed_documents_multimodal(
+        self,
+        texts: List[str],
+        image_urls: Optional[List[Optional[str]]] = None,
+        image_base64s: Optional[List[Optional[str]]] = None,
+    ) -> List[List[float]]:
+        """
+        使用多模态模型进行批量文本/图文嵌入。
+        
+        Args:
+            texts: 文本列表
+            image_urls: 图片 URL 列表（可选，与 texts 长度对应）
+            image_base64s: 图片 base64 列表（可选，与 texts 长度对应）
+            
+        Returns:
+            嵌入向量列表
+        """
+        # 构建多模态输入列表
+        inputs = []
+        for i, text in enumerate(texts):
+            img_url = image_urls[i] if image_urls and i < len(image_urls) else None
+            img_b64 = image_base64s[i] if image_base64s and i < len(image_base64s) else None
+            multimodal_input = self._build_multimodal_input(text, img_url, img_b64)
+            inputs.append(multimodal_input)
+        
+        return self._call_multimodal_embedding_api(
+            inputs=inputs,
+            request_id=str(uuid.uuid4())
+        )
+
     def _load_image_base64(self, image_path: str) -> Optional[str]:
         """
-        Load image from file path and convert to base64.
+        Load original image from file path and convert to base64.
         
         This is called during embedding phase for image chunks when using
         multimodal models. The image data is loaded on-demand rather than
         being stored in the chunking result.
         
+        Note: thumbnail_base64 in chunk metadata is only for preview purposes,
+        the original image should be used for multimodal embedding to preserve
+        full image quality and details.
+        
         Args:
-            image_path: Path to the image file
+            image_path: Path to the image file (can be relative or absolute)
             
         Returns:
             Base64 encoded image string, or None if loading failed
         """
         import base64
         import os
+        from pathlib import Path
         
-        if not image_path or not os.path.exists(image_path):
-            embedding_logger.logger.warning(f"Image file not found: {image_path}")
+        if not image_path:
+            embedding_logger.logger.warning("Image path is empty")
+            return None
+        
+        # 解析路径：处理相对路径和绝对路径
+        resolved_path = self._resolve_image_path(image_path)
+        
+        if not resolved_path or not os.path.exists(resolved_path):
+            embedding_logger.logger.warning(f"Image file not found: {image_path} (resolved: {resolved_path})")
             return None
         
         try:
-            with open(image_path, 'rb') as f:
-                return base64.b64encode(f.read()).decode('utf-8')
+            with open(resolved_path, 'rb') as f:
+                image_data = base64.b64encode(f.read()).decode('utf-8')
+                embedding_logger.logger.info(
+                    f"Loaded original image for multimodal embedding: {resolved_path} "
+                    f"(size: {len(image_data)} chars)"
+                )
+                return image_data
         except Exception as e:
-            embedding_logger.logger.warning(f"Failed to load image {image_path}: {e}")
+            embedding_logger.logger.warning(f"Failed to load image {resolved_path}: {e}")
             return None
+    
+    def _resolve_image_path(self, image_path: str) -> Optional[str]:
+        """
+        Resolve image path to absolute path.
+        
+        Handles multiple path formats:
+        - Absolute paths: return as-is
+        - Relative paths starting with '../uploads': resolve relative to backend/results
+        - Other relative paths: try multiple base directories
+        
+        Args:
+            image_path: Path to resolve
+            
+        Returns:
+            Resolved absolute path, or None if invalid
+        """
+        import os
+        from pathlib import Path
+        
+        if not image_path:
+            return None
+        
+        # 如果已经是绝对路径且文件存在，直接返回
+        if os.path.isabs(image_path):
+            if os.path.exists(image_path):
+                return image_path
+            else:
+                embedding_logger.logger.warning(f"Absolute path not found: {image_path}")
+                return None
+        
+        # 获取项目根目录（backend 目录）
+        # 当前文件在 backend/src/services/ 下，需要向上3级到达 backend/
+        current_file = Path(__file__).resolve()
+        backend_dir = current_file.parent.parent.parent
+        
+        # 尝试多种路径解析策略
+        possible_paths = []
+        
+        # 策略1：相对于 results 目录的路径（适用于 ../uploads/... 格式）
+        if image_path.startswith('../'):
+            possible_paths.append(backend_dir / 'results' / image_path)
+            # 也尝试直接去掉 ../ 前缀
+            clean_path = image_path.lstrip('../')
+            possible_paths.append(backend_dir / clean_path)
+        
+        # 策略2：直接相对于 backend 目录
+        possible_paths.append(backend_dir / image_path)
+        
+        # 策略3：如果路径包含 uploads/xx/figures，尝试替换为 figures
+        # 因为有些系统可能将图片存储在不同的位置
+        if 'uploads/' in image_path and '/figures/' in image_path:
+            # 提取 figures 之后的部分
+            figures_idx = image_path.find('/figures/')
+            if figures_idx != -1:
+                figures_path = image_path[figures_idx + 1:]  # 保留 'figures/...'
+                possible_paths.append(backend_dir / figures_path)
+        
+        # 尝试所有可能的路径
+        for path in possible_paths:
+            resolved = path.resolve()
+            if resolved.exists():
+                embedding_logger.logger.debug(f"Resolved image path: {image_path} -> {resolved}")
+                return str(resolved)
+        
+        # 记录所有尝试过的路径，方便调试
+        tried_paths = [str(p.resolve()) for p in possible_paths]
+        embedding_logger.logger.warning(
+            f"Could not resolve image path: {image_path}. Tried: {tried_paths}"
+        )
+        return None
 
     def _prepare_chunk_for_embedding(
         self, 
         chunk, 
         is_multimodal: bool
-    ) -> Tuple[Optional[str], str, Optional[str]]:
+    ) -> Tuple[Optional[str], str, Optional[str], Optional[str]]:
         """
         Prepare a chunk for embedding, handling both text and image chunks.
         
         For multimodal models with image chunks:
-        - Load image base64 from file_path on demand
+        - Load original image base64 from file_path on demand (NOT thumbnail)
+        - Use context information to enhance text description
         - Return both content and image_base64 for multimodal embedding
         
         Args:
@@ -608,25 +926,372 @@ class EmbeddingService:
             is_multimodal: Whether using a multimodal embedding model
             
         Returns:
-            Tuple of (text_content, chunk_type, image_base64)
+            Tuple of (text_content, chunk_type, image_base64, mime_type)
         """
-        chunk_type = chunk.chunk_type or 'text'
+        # 获取 chunk_type，如果是枚举类型则获取其 value
+        # 注意：chunk_type 可能是 ChunkType 枚举对象（来自 Pydantic 模型）或字符串（来自数据库查询）
+        # 枚举对象与字符串直接比较会返回 False，例如 ChunkType.IMAGE == 'image' 为 False
+        # 因此需要统一转换为字符串进行后续的类型判断
+        raw_chunk_type = chunk.chunk_type or 'text'
+        if hasattr(raw_chunk_type, 'value'):
+            chunk_type = raw_chunk_type.value  # 枚举类型，获取字符串值
+        else:
+            chunk_type = raw_chunk_type  # 已经是字符串
+        
         text_content = chunk.content
         image_base64 = None
+        mime_type = None
+        
+        # === DEBUG 日志：打印 chunk 基本信息 ===
+        embedding_logger.logger.info(
+            f"[DEBUG] _prepare_chunk_for_embedding: chunk_type={chunk_type}, "
+            f"is_multimodal={is_multimodal}, content_preview={text_content[:50] if text_content else 'None'}..."
+        )
         
         if is_multimodal and chunk_type == 'image':
-            # For multimodal models, load image data on demand
-            metadata = chunk.metadata or {}
+            # For multimodal models, load original image data on demand
+            # 注意：Chunk 模型的字段名是 chunk_metadata（JSON 字段），不是 metadata
+            raw_metadata = getattr(chunk, 'chunk_metadata', None) or getattr(chunk, 'metadata', None) or {}
+            
+            # 处理 metadata 可能是字典或 Pydantic 对象的情况
+            # 注意：从数据库查询返回的 chunk.chunk_metadata 可能是：
+            # 1. dict 类型（SQLAlchemy 直接返回）
+            # 2. Pydantic BaseModel 对象（通过 Pydantic 模型构造）
+            # 3. Pydantic v2 的 BaseModel 对象（需要用 model_dump() 转换）
+            # 由于 Pydantic 对象没有 .get() 方法，直接调用会报 "'MetaData' object has no attribute 'get'" 错误
+            # 因此需要统一转换为字典格式
+            if hasattr(raw_metadata, 'dict'):
+                metadata = raw_metadata.dict()  # Pydantic v1 对象
+            elif hasattr(raw_metadata, 'model_dump'):
+                metadata = raw_metadata.model_dump()  # Pydantic v2 对象
+            elif isinstance(raw_metadata, dict):
+                metadata = raw_metadata  # 已经是字典
+            else:
+                metadata = {}  # 无法识别的类型，使用空字典
+            
             image_path = metadata.get('image_path')
+            mime_type = metadata.get('mime_type')
+            
+            # === DEBUG 日志：打印图片元数据 ===
+            embedding_logger.logger.info(
+                f"[DEBUG] Image chunk metadata: image_path={image_path}, mime_type={mime_type}, "
+                f"has_thumbnail={bool(metadata.get('thumbnail_base64'))}, "
+                f"context_before_len={len(metadata.get('context_before', ''))}, "
+                f"context_after_len={len(metadata.get('context_after', ''))}"
+            )
             
             if image_path:
+                # 加载原始图片（不是缩略图 thumbnail_base64）
                 image_base64 = self._load_image_base64(image_path)
+                
                 if image_base64:
+                    # 构建增强的文本描述，包含图片上下文信息
+                    text_content = self._build_image_text_description(metadata, chunk.content)
                     embedding_logger.logger.info(
-                        f"Loaded image for multimodal embedding: {image_path}"
+                        f"[DEBUG] Image loaded successfully: path={image_path}, "
+                        f"base64_len={len(image_base64)}, enhanced_text_len={len(text_content)}"
+                    )
+                else:
+                    # 图片加载失败时，使用上下文信息作为降级文本
+                    text_content = self._build_image_fallback_text(metadata, chunk.content)
+                    embedding_logger.logger.warning(
+                        f"[DEBUG] Image load failed, using fallback text: path={image_path}, "
+                        f"fallback_text_len={len(text_content)}"
+                    )
+            else:
+                embedding_logger.logger.warning(
+                    f"[DEBUG] Image chunk has no image_path in metadata!"
+                )
+        
+        return text_content, chunk_type, image_base64, mime_type
+    
+    def _build_image_text_description(self, metadata: dict, original_content: str) -> str:
+        """
+        Build enhanced text description for image chunk using context.
+        
+        This creates a richer text representation to pair with the image
+        for better multimodal embedding quality.
+        
+        Args:
+            metadata: Image chunk metadata containing context, alt_text, caption
+            original_content: Original chunk content (usually "[Image: ...]")
+            
+        Returns:
+            Enhanced text description
+        """
+        parts = []
+        
+        # 添加图片描述
+        alt_text = metadata.get('alt_text')
+        caption = metadata.get('caption')
+        
+        if caption:
+            parts.append(f"图片标题: {caption}")
+        if alt_text and alt_text != 'Image':
+            parts.append(f"图片描述: {alt_text}")
+        
+        # 添加上下文信息（帮助模型理解图片在文档中的位置和语义）
+        context_before = metadata.get('context_before')
+        context_after = metadata.get('context_after')
+        
+        if context_before:
+            # 截取上下文的最后部分，避免过长
+            context_before = context_before[-200:] if len(context_before) > 200 else context_before
+            parts.append(f"前文: {context_before}")
+        
+        if context_after:
+            # 截取上下文的开始部分
+            context_after = context_after[:200] if len(context_after) > 200 else context_after
+            parts.append(f"后文: {context_after}")
+        
+        # 如果没有任何有用的信息，返回原始内容
+        if not parts:
+            return original_content
+        
+        return "\n".join(parts)
+    
+    def _build_image_fallback_text(self, metadata: dict, original_content: str) -> str:
+        """
+        Build fallback text description when image loading fails.
+        
+        Uses all available text information to create a reasonable
+        text-only representation for embedding.
+        
+        Args:
+            metadata: Image chunk metadata
+            original_content: Original chunk content
+            
+        Returns:
+            Fallback text for embedding
+        """
+        parts = []
+        
+        # 尽可能收集所有文本信息
+        alt_text = metadata.get('alt_text')
+        caption = metadata.get('caption')
+        context_before = metadata.get('context_before', '')
+        context_after = metadata.get('context_after', '')
+        
+        if caption:
+            parts.append(caption)
+        if alt_text and alt_text != 'Image':
+            parts.append(alt_text)
+        if context_before:
+            parts.append(context_before[-150:])
+        if context_after:
+            parts.append(context_after[:150])
+        
+        if parts:
+            return " ".join(parts)
+        
+        return original_content
+
+    def _embed_chunks_multimodal(
+        self,
+        chunks: List[Any],
+        request_id: Optional[str] = None
+    ) -> BatchEmbeddingResult:
+        """
+        使用多模态模型对 chunks 进行批量嵌入。
+        
+        真正实现多模态向量化：
+        - 图片块：从 image_path 加载图片数据，使用图文组合输入
+        - 文本块：直接使用文本内容
+        
+        Args:
+            chunks: Chunk 对象列表
+            request_id: 请求 ID
+            
+        Returns:
+            BatchEmbeddingResult 批量嵌入结果
+        """
+        if not chunks:
+            raise InvalidTextError("chunks must contain at least 1 item")
+        
+        batch_request_id = request_id or str(uuid.uuid4())
+        embedding_logger.log_request_start(
+            request_id=batch_request_id,
+            model=self.model,
+            batch_size=len(chunks),
+            is_single=False,
+        )
+        
+        start_time = time.time()
+        vectors: List[DocumentVectorResult] = []
+        failures: List[DocumentFailureResult] = []
+        total_retry_count = 0
+        total_rate_limit_hits = 0
+        
+        # 准备多模态输入
+        multimodal_inputs = []
+        valid_indices = []
+        chunk_texts = []  # 用于记录原始文本
+        
+        for index, chunk in enumerate(chunks):
+            try:
+                text_content, chunk_type, image_base64, mime_type = self._prepare_chunk_for_embedding(
+                    chunk, is_multimodal=True
+                )
+                
+                # 验证文本
+                validated_text = self._validate_text(text_content)
+                
+                # 构建多模态输入
+                if chunk_type == 'image' and image_base64:
+                    # 图片块：使用图文组合输入（传入正确的MIME类型）
+                    multimodal_input = self._build_multimodal_input(
+                        text=validated_text,
+                        image_base64=image_base64,
+                        mime_type=mime_type
+                    )
+                    embedding_logger.logger.info(
+                        f"Chunk {index}: Using multimodal input (image + text, mime: {mime_type})"
+                    )
+                else:
+                    # 文本块：使用纯文本输入
+                    multimodal_input = self._build_multimodal_input(text=validated_text)
+                
+                multimodal_inputs.append(multimodal_input)
+                valid_indices.append(index)
+                chunk_texts.append(validated_text)
+                
+            except InvalidTextError as err:
+                failures.append(
+                    self._build_failure(
+                        index=index,
+                        error_type=ErrorType.INVALID_TEXT_ERROR,
+                        error_message=str(err),
+                        retry_recommended=False,
+                        retry_count=0,
+                        text_preview=chunk.content[:50] if chunk.content else "",
+                    )
+                )
+        
+        # 批量调用多模态 API
+        if multimodal_inputs:
+            def _embed_multimodal_batch() -> List[List[float]]:
+                nonlocal total_retry_count, total_rate_limit_hits
+                try:
+                    return self._call_multimodal_embedding_api(
+                        inputs=multimodal_inputs,
+                        request_id=batch_request_id
+                    )
+                except Exception as raw_error:
+                    service_error = self._to_service_error(raw_error, batch_request_id)
+                    if isinstance(service_error, (RateLimitError, APITimeoutError, NetworkError)):
+                        total_retry_count += 1
+                        if isinstance(service_error, RateLimitError):
+                            total_rate_limit_hits += 1
+                    raise service_error
+            
+            try:
+                batch_start = time.time()
+                all_vectors = self.retry_handler.execute(
+                    _embed_multimodal_batch,
+                    retryable_exceptions=(RateLimitError, APITimeoutError, NetworkError),
+                    on_retry=self._create_retry_callback(batch_request_id),
+                )
+                batch_duration_ms = (time.time() - batch_start) * 1000
+                avg_duration_per_doc = batch_duration_ms / len(multimodal_inputs) if multimodal_inputs else 0
+                
+                # 处理结果
+                for i, (vector, original_index) in enumerate(zip(all_vectors, valid_indices)):
+                    validated_text = chunk_texts[i]
+                    try:
+                        vector = self._validate_vector_dimensions(vector, batch_request_id)
+                        vectors.append(
+                            DocumentVectorResult(
+                                index=original_index,
+                                vector=vector,
+                                text_hash=self._hash_text(validated_text),
+                                text_length=len(validated_text),
+                                processing_time_ms=avg_duration_per_doc,
+                                source_text=validated_text,
+                            )
+                        )
+                    except VectorDimensionMismatchError as err:
+                        failures.append(
+                            self._build_failure(
+                                index=original_index,
+                                error_type=ErrorType.DIMENSION_MISMATCH_ERROR,
+                                error_message=str(err),
+                                retry_recommended=False,
+                                retry_count=0,
+                                text_preview=validated_text[:50],
+                            )
+                        )
+            except (RateLimitError, APITimeoutError, NetworkError, AuthenticationError) as err:
+                # 批量请求失败
+                for i, original_index in enumerate(valid_indices):
+                    failures.append(
+                        self._build_failure(
+                            index=original_index,
+                            error_type=self._map_error_type(err),
+                            error_message=str(err),
+                            retry_recommended=isinstance(
+                                err, (RateLimitError, APITimeoutError, NetworkError)
+                            ),
+                            retry_count=total_retry_count,
+                            text_preview=chunk_texts[i][:50],
+                        )
+                    )
+            except Exception as err:
+                for i, original_index in enumerate(valid_indices):
+                    failures.append(
+                        self._build_failure(
+                            index=original_index,
+                            error_type=ErrorType.UNKNOWN_ERROR,
+                            error_message=str(err),
+                            retry_recommended=False,
+                            retry_count=total_retry_count,
+                            text_preview=chunk_texts[i][:50],
+                        )
                     )
         
-        return text_content, chunk_type, image_base64
+        processing_time_ms = (time.time() - start_time) * 1000
+        successful_count = len(vectors)
+        failed_count = len(failures)
+        
+        embedding_logger.log_request_complete(
+            request_id=batch_request_id,
+            model=self.model,
+            duration_ms=processing_time_ms,
+            batch_size=len(chunks),
+            successful_count=successful_count,
+            failed_count=failed_count,
+            retry_count=total_retry_count,
+            rate_limit_hits=total_rate_limit_hits,
+        )
+        
+        if failed_count and successful_count:
+            failure_summary = Counter(f.error_type for f in failures)
+            embedding_logger.log_partial_success(
+                request_id=batch_request_id,
+                model=self.model,
+                batch_size=len(chunks),
+                successful_count=successful_count,
+                failed_count=failed_count,
+                failure_types={k.value: v for k, v in failure_summary.items()},
+            )
+        elif failed_count and not successful_count:
+            embedding_logger.log_request_failed(
+                request_id=batch_request_id,
+                model=self.model,
+                duration_ms=processing_time_ms,
+                error_type="BATCH_FAILED",
+                error_message="All documents failed to embed",
+                retry_count=total_retry_count,
+            )
+        
+        return BatchEmbeddingResult(
+            request_id=batch_request_id,
+            batch_size=len(chunks),
+            vectors=vectors,
+            failures=failures,
+            processing_time_ms=processing_time_ms,
+            retry_count=total_retry_count,
+            rate_limit_hits=total_rate_limit_hits,
+        )
 
     def embed_chunking_result(
         self,
@@ -663,27 +1328,33 @@ class EmbeddingService:
         
         is_multimodal = self._is_multimodal_model()
         
-        # 准备向量化数据
+        # === DEBUG 日志：打印模型和多模态判断信息 ===
+        embedding_logger.logger.info(
+            f"[DEBUG] embed_chunking_result: model={self.model}, "
+            f"is_multimodal={is_multimodal}, num_chunks={len(chunks)}"
+        )
+        # 统计 chunk 类型
+        chunk_types = {}
+        for chunk in chunks:
+            ct = chunk.chunk_type or 'text'
+            chunk_types[ct] = chunk_types.get(ct, 0) + 1
+        embedding_logger.logger.info(f"[DEBUG] Chunk types distribution: {chunk_types}")
+        
+        # 多模态模型使用专门的批量嵌入方法
+        if is_multimodal:
+            embedding_logger.logger.info("[DEBUG] Using multimodal embedding path")
+            return self._embed_chunks_multimodal(chunks, request_id)
+        
+        embedding_logger.logger.info("[DEBUG] Using text-only embedding path")
+        # 文本模型：使用普通的批量嵌入
         embedding_inputs = []
         for chunk in chunks:
-            text_content, chunk_type, image_base64 = self._prepare_chunk_for_embedding(
-                chunk, is_multimodal
+            text_content, chunk_type, _, _ = self._prepare_chunk_for_embedding(
+                chunk, is_multimodal=False
             )
-            
-            if chunk_type == 'image':
-                if is_multimodal and image_base64:
-                    # 多模态模型：使用图片数据
-                    # TODO: 当 API 支持图片输入时，传递 image_base64
-                    # 目前先使用图片描述文本作为占位
-                    embedding_inputs.append(text_content)
-                elif not is_multimodal:
-                    # 文本模型：使用图片描述文本
-                    embedding_inputs.append(text_content)
-            else:
-                # 文本块：直接使用内容
-                embedding_inputs.append(text_content)
+            # 文本模型：所有块都使用文本内容
+            embedding_inputs.append(text_content)
         
-        # 调用批量嵌入
         return self.embed_documents(embedding_inputs, request_id=request_id)
 
     def embed_document_latest_chunks(
@@ -741,27 +1412,19 @@ class EmbeddingService:
         
         is_multimodal = self._is_multimodal_model()
         
-        # 准备向量化数据
+        # 多模态模型使用专门的批量嵌入方法
+        if is_multimodal:
+            return self._embed_chunks_multimodal(chunks, request_id)
+        
+        # 文本模型：使用普通的批量嵌入
         embedding_inputs = []
         for chunk in chunks:
-            text_content, chunk_type, image_base64 = self._prepare_chunk_for_embedding(
-                chunk, is_multimodal
+            text_content, chunk_type, _, _ = self._prepare_chunk_for_embedding(
+                chunk, is_multimodal=False
             )
-            
-            if chunk_type == 'image':
-                if is_multimodal and image_base64:
-                    # 多模态模型：使用图片数据
-                    # TODO: 当 API 支持图片输入时，传递 image_base64
-                    # 目前先使用图片描述文本作为占位
-                    embedding_inputs.append(text_content)
-                elif not is_multimodal:
-                    # 文本模型：使用图片描述文本
-                    embedding_inputs.append(text_content)
-            else:
-                # 文本块：直接使用内容
-                embedding_inputs.append(text_content)
+            # 文本模型：所有块都使用文本内容
+            embedding_inputs.append(text_content)
         
-        # 调用批量嵌入
         return self.embed_documents(embedding_inputs, request_id=request_id)
 
 

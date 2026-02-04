@@ -327,7 +327,8 @@ class DocxLoader:
                         for img_idx in paragraph_image_map[idx]:
                             if img_idx < len(images):
                                 img_info = images[img_idx]
-                                placeholder = f"[IMAGE_{img_idx}: {img_info.get('alt_text') or '图片'}]"
+                                # 占位符索引从1开始（人类可读），images数组的image_index从0开始
+                                placeholder = f"[IMAGE_{img_idx + 1}: {img_info.get('alt_text') or '图片'}]"
                                 full_text.append(placeholder)
                                 
                 elif block_type == 'table':

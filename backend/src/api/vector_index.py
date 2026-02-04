@@ -39,7 +39,7 @@ class CreateIndexRequest(BaseModel):
     """创建索引请求"""
     index_name: str = Field(..., description="索引名称")
     dimension: int = Field(..., gt=0, description="向量维度")
-    index_type: IndexProvider = Field(default=IndexProvider.FAISS, description="索引类型")
+    index_type: IndexProvider = Field(default=IndexProvider.MILVUS, description="索引类型")
     algorithm_type: str = Field(default="FLAT", description="索引算法类型")
     metric_type: str = Field(default="cosine", description="相似度度量类型")
     description: Optional[str] = Field(None, description="索引描述")
@@ -201,7 +201,7 @@ async def find_matching_index(
         try:
             provider_enum = IndexProvider(provider.upper())
         except ValueError:
-            provider_enum = IndexProvider.FAISS
+            provider_enum = IndexProvider.MILVUS
         
         matching_index = service.find_matching_index(
             embedding_result_id=embedding_result_id,
@@ -727,7 +727,7 @@ async def health_check(
     try:
         # 检查提供者健康状态
         providers_health = {}
-        for provider_name in ["faiss", "milvus"]:
+        for provider_name in ["milvus"]:
             try:
                 provider = service.registry.get_provider(provider_name)
                 providers_health[provider_name] = provider.health_check()
@@ -757,8 +757,6 @@ async def persist_index(
 ):
     """
     持久化索引到磁盘
-    
-    仅支持 FAISS 索引
     """
     try:
         result = service.persist_index(index_id)
@@ -789,8 +787,6 @@ async def recover_index(
 ):
     """
     从磁盘恢复索引
-    
-    仅支持 FAISS 索引
     """
     try:
         result = service.recover_index(index_id)
@@ -836,8 +832,6 @@ async def delete_vectors(
 ):
     """
     从索引中删除向量
-    
-    注意：FAISS 不支持真正的向量删除，只会从元数据中移除
     """
     try:
         result = service.delete_vectors(index_id, request.vector_ids)

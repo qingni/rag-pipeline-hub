@@ -4,43 +4,43 @@
     <div class="manager-header">
       <h3>模型能力配置</h3>
       <div class="header-actions">
-        <el-button @click="refreshModels" :loading="loading">
-          <el-icon><Refresh /></el-icon>
+        <t-button @click="refreshModels" :loading="loading" variant="outline">
+          <template #icon><RefreshCw :size="16" /></template>
           刷新
-        </el-button>
-        <el-button type="primary" @click="reloadConfig" :loading="reloading">
-          <el-icon><Upload /></el-icon>
+        </t-button>
+        <t-button theme="primary" @click="reloadConfig" :loading="reloading">
+          <template #icon><Upload :size="16" /></template>
           重新加载配置
-        </el-button>
+        </t-button>
       </div>
     </div>
     
     <!-- 模型列表 -->
     <div class="model-list">
-      <el-collapse v-model="expandedModels" accordion>
-        <el-collapse-item
+      <t-collapse v-model="expandedModels" :expand-mutex="true">
+        <t-collapse-panel
           v-for="model in models"
           :key="model.model_name"
-          :name="model.model_name"
+          :value="model.model_name"
         >
-          <template #title>
+          <template #header>
             <div class="model-item-header">
               <div class="model-info">
                 <span class="model-name">{{ model.display_name || model.model_name }}</span>
-                <el-tag
-                  :type="model.is_enabled ? 'success' : 'info'"
+                <t-tag
+                  :theme="model.is_enabled ? 'success' : 'default'"
                   size="small"
-                  effect="light"
+                  variant="light"
                 >
                   {{ model.is_enabled ? '启用' : '禁用' }}
-                </el-tag>
-                <el-tag
-                  :type="model.model_type === 'multimodal' ? 'warning' : 'primary'"
+                </t-tag>
+                <t-tag
+                  :theme="model.model_type === 'multimodal' ? 'warning' : 'primary'"
                   size="small"
-                  effect="plain"
+                  variant="outline"
                 >
                   {{ model.model_type === 'multimodal' ? '多模态' : '文本' }}
-                </el-tag>
+                </t-tag>
               </div>
               <div class="model-dimension">
                 维度: {{ model.dimension }}
@@ -51,139 +51,179 @@
           <!-- 模型详情编辑 -->
           <div class="model-detail">
             <!-- 基本信息 -->
-            <el-form :model="getEditingModel(model.model_name)" label-width="100px" size="small">
-              <el-form-item label="启用状态">
-                <el-switch
+            <t-form :data="getEditingModel(model.model_name)" label-width="100px">
+              <t-form-item label="启用状态">
+                <t-switch
                   v-model="getEditingModel(model.model_name).is_enabled"
-                  active-text="启用"
-                  inactive-text="禁用"
                 />
-              </el-form-item>
+                <span class="switch-label">{{ getEditingModel(model.model_name).is_enabled ? '启用' : '禁用' }}</span>
+              </t-form-item>
               
-              <el-form-item label="描述">
-                <el-input
+              <t-form-item label="描述">
+                <t-textarea
                   v-model="getEditingModel(model.model_name).description"
-                  type="textarea"
-                  :rows="2"
+                  :autosize="{ minRows: 2, maxRows: 4 }"
+                  placeholder="请输入模型描述"
                 />
-              </el-form-item>
+              </t-form-item>
               
               <!-- 语言评分 -->
-              <el-divider content-position="left">语言支持评分</el-divider>
+              <t-divider align="left">语言支持评分</t-divider>
               <div class="score-grid">
-                <el-form-item
+                <t-form-item
                   v-for="lang in languages"
                   :key="lang.key"
                   :label="lang.label"
                 >
-                  <el-slider
-                    v-model="getEditingModel(model.model_name).language_scores[lang.key]"
-                    :min="0"
-                    :max="1"
-                    :step="0.05"
-                    :format-tooltip="formatPercent"
-                  />
-                </el-form-item>
+                  <div class="slider-wrapper">
+                    <t-slider
+                      v-model="getEditingModel(model.model_name).language_scores[lang.key]"
+                      :min="0"
+                      :max="1"
+                      :step="0.05"
+                      :label="formatPercent"
+                    />
+                    <span class="slider-value">{{ formatPercent(getEditingModel(model.model_name).language_scores[lang.key]) }}</span>
+                  </div>
+                </t-form-item>
               </div>
               
               <!-- 领域评分 -->
-              <el-divider content-position="left">领域专长评分</el-divider>
+              <t-divider align="left">领域专长评分</t-divider>
               <div class="score-grid">
-                <el-form-item
+                <t-form-item
                   v-for="domain in domains"
                   :key="domain.key"
                   :label="domain.label"
                 >
-                  <el-slider
-                    v-model="getEditingModel(model.model_name).domain_scores[domain.key]"
-                    :min="0"
-                    :max="1"
-                    :step="0.05"
-                    :format-tooltip="formatPercent"
-                  />
-                </el-form-item>
+                  <div class="slider-wrapper">
+                    <t-slider
+                      v-model="getEditingModel(model.model_name).domain_scores[domain.key]"
+                      :min="0"
+                      :max="1"
+                      :step="0.05"
+                      :label="formatPercent"
+                    />
+                    <span class="slider-value">{{ formatPercent(getEditingModel(model.model_name).domain_scores[domain.key]) }}</span>
+                  </div>
+                </t-form-item>
               </div>
               
               <!-- 多模态评分 -->
-              <el-divider content-position="left">多模态能力</el-divider>
-              <el-form-item label="多模态评分">
-                <el-slider
-                  v-model="getEditingModel(model.model_name).multimodal_score"
-                  :min="0"
-                  :max="1"
-                  :step="0.05"
-                  :format-tooltip="formatPercent"
-                />
-              </el-form-item>
+              <t-divider align="left">多模态能力</t-divider>
+              <t-form-item label="多模态评分">
+                <div class="slider-wrapper">
+                  <t-slider
+                    v-model="getEditingModel(model.model_name).multimodal_score"
+                    :min="0"
+                    :max="1"
+                    :step="0.05"
+                    :label="formatPercent"
+                  />
+                  <span class="slider-value">{{ formatPercent(getEditingModel(model.model_name).multimodal_score) }}</span>
+                </div>
+              </t-form-item>
               
               <!-- 操作按钮 -->
-              <el-form-item>
-                <el-button
-                  type="primary"
-                  @click="saveModel(model.model_name)"
-                  :loading="savingModel === model.model_name"
-                >
-                  保存更改
-                </el-button>
-                <el-button @click="resetModel(model.model_name)">
-                  重置
-                </el-button>
-              </el-form-item>
-            </el-form>
+              <t-form-item>
+                <t-space>
+                  <t-button
+                    theme="primary"
+                    @click="saveModel(model.model_name)"
+                    :loading="savingModel === model.model_name"
+                  >
+                    保存更改
+                  </t-button>
+                  <t-button variant="outline" @click="resetModel(model.model_name)">
+                    重置
+                  </t-button>
+                </t-space>
+              </t-form-item>
+            </t-form>
           </div>
-        </el-collapse-item>
-      </el-collapse>
+        </t-collapse-panel>
+      </t-collapse>
     </div>
     
     <!-- 推荐权重配置 -->
     <div class="weights-section">
       <h4>推荐算法权重</h4>
-      <el-form :model="weights" label-width="140px" size="small">
-        <el-form-item label="语言匹配权重">
-          <el-slider
-            v-model="weights.language_match"
-            :min="0"
-            :max="1"
-            :step="0.05"
-            :format-tooltip="formatPercent"
-            show-input
-          />
-        </el-form-item>
-        <el-form-item label="领域匹配权重">
-          <el-slider
-            v-model="weights.domain_match"
-            :min="0"
-            :max="1"
-            :step="0.05"
-            :format-tooltip="formatPercent"
-            show-input
-          />
-        </el-form-item>
-        <el-form-item label="多模态支持权重">
-          <el-slider
-            v-model="weights.multimodal_support"
-            :min="0"
-            :max="1"
-            :step="0.05"
-            :format-tooltip="formatPercent"
-            show-input
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-tag :type="weightsSumValid ? 'success' : 'danger'">
+      <t-form :data="weights" label-width="140px">
+        <t-form-item label="语言匹配权重">
+          <div class="weight-slider">
+            <t-slider
+              v-model="weights.language_match"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              :label="formatPercent"
+            />
+            <t-input-number
+              v-model="weights.language_match"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              :decimal-places="2"
+              theme="normal"
+              style="width: 100px; margin-left: 16px;"
+            />
+          </div>
+        </t-form-item>
+        <t-form-item label="领域匹配权重">
+          <div class="weight-slider">
+            <t-slider
+              v-model="weights.domain_match"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              :label="formatPercent"
+            />
+            <t-input-number
+              v-model="weights.domain_match"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              :decimal-places="2"
+              theme="normal"
+              style="width: 100px; margin-left: 16px;"
+            />
+          </div>
+        </t-form-item>
+        <t-form-item label="多模态支持权重">
+          <div class="weight-slider">
+            <t-slider
+              v-model="weights.multimodal_support"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              :label="formatPercent"
+            />
+            <t-input-number
+              v-model="weights.multimodal_support"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              :decimal-places="2"
+              theme="normal"
+              style="width: 100px; margin-left: 16px;"
+            />
+          </div>
+        </t-form-item>
+        <t-form-item>
+          <t-tag :theme="weightsSumValid ? 'success' : 'danger'" variant="light">
             权重总和: {{ weightsSum.toFixed(2) }}
             {{ weightsSumValid ? '✓' : '(建议为1.0)' }}
-          </el-tag>
-        </el-form-item>
-      </el-form>
+          </t-tag>
+        </t-form-item>
+      </t-form>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Refresh, Upload } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { RefreshCw, Upload } from 'lucide-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 
 const props = defineProps({
   /**
@@ -221,7 +261,7 @@ const reloading = ref(false)
 const savingModel = ref('')
 const models = ref([])
 const editingModels = reactive({})
-const expandedModels = ref('')
+const expandedModels = ref([])
 const weights = reactive({
   language_match: 0.40,
   domain_match: 0.35,
@@ -295,7 +335,7 @@ async function refreshModels() {
     }
   } catch (error) {
     console.error('Failed to refresh models:', error)
-    ElMessage.error('获取模型列表失败')
+    MessagePlugin.error('获取模型列表失败')
   } finally {
     loading.value = false
   }
@@ -319,12 +359,12 @@ async function saveModel(modelName) {
     
     if (!response.ok) throw new Error('Failed to update model')
     
-    ElMessage.success('模型配置已更新')
+    MessagePlugin.success('模型配置已更新')
     emit('model-updated', modelName)
     await refreshModels()
   } catch (error) {
     console.error('Failed to save model:', error)
-    ElMessage.error('保存失败')
+    MessagePlugin.error('保存失败')
   } finally {
     savingModel.value = ''
   }
@@ -338,12 +378,12 @@ async function reloadConfig() {
     })
     if (!response.ok) throw new Error('Failed to reload config')
     
-    ElMessage.success('配置已重新加载')
+    MessagePlugin.success('配置已重新加载')
     emit('config-reloaded')
     await refreshModels()
   } catch (error) {
     console.error('Failed to reload config:', error)
-    ElMessage.error('重新加载失败')
+    MessagePlugin.error('重新加载失败')
   } finally {
     reloading.value = false
   }
@@ -412,10 +452,43 @@ onMounted(() => {
   padding: 16px 0;
 }
 
+.switch-label {
+  margin-left: 8px;
+  color: #666;
+}
+
 .score-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 0 24px;
+}
+
+.slider-wrapper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.slider-wrapper .t-slider {
+  flex: 1;
+}
+
+.slider-value {
+  min-width: 50px;
+  text-align: right;
+  margin-left: 12px;
+  color: #666;
+  font-size: 14px;
+}
+
+.weight-slider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.weight-slider .t-slider {
+  flex: 1;
 }
 
 /* 权重配置 */

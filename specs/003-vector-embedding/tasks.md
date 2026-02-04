@@ -47,9 +47,9 @@
 
 ## Phase 3: User Story 6 - Multi-Model Support (Priority: P1) 🎯 FOUNDATION
 
-**Goal**: Configure and validate all four embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Jina-Embeddings-v4) with OpenAI-compatible protocol
+**Goal**: Configure and validate all four embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Qwen3-VL-Embedding-8B) with OpenAI-compatible protocol
 
-**Independent Test**: Initialize service with each model and verify vectors generated with correct dimensions (1024 for bge-m3/hunyuan, 4096 for qwen3, 768 for jina)
+**Independent Test**: Initialize service with each model and verify vectors generated with correct dimensions (1024 for bge-m3/hunyuan, 4096 for qwen3/qwen3-vl)
 
 ### Implementation for User Story 6
 

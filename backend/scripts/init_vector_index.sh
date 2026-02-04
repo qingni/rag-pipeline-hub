@@ -80,10 +80,6 @@ detect_environment() {
 setup_directories() {
     print_header "Directory Setup"
     
-    # Create data directories
-    mkdir -p data/faiss_indexes
-    print_success "Created: data/faiss_indexes"
-    
     mkdir -p logs
     print_success "Created: logs"
     
@@ -226,7 +222,6 @@ check_dependencies() {
     print_info "Checking critical packages..."
     
     python3 -c "import pymilvus" 2>/dev/null && print_success "pymilvus installed" || print_warning "pymilvus not found (run: pip install -r requirements.txt)"
-    python3 -c "import faiss" 2>/dev/null && print_success "faiss installed" || print_warning "faiss not found (run: pip install -r requirements.txt)"
     python3 -c "import fastapi" 2>/dev/null && print_success "fastapi installed" || print_warning "fastapi not found (run: pip install -r requirements.txt)"
     python3 -c "import sqlalchemy" 2>/dev/null && print_success "sqlalchemy installed" || print_warning "sqlalchemy not found (run: pip install -r requirements.txt)"
     
@@ -241,7 +236,6 @@ verify_setup() {
     print_header "Setup Verification"
     
     # Check directories
-    [ -d "data/faiss_indexes" ] && print_success "✓ FAISS index directory" || print_error "✗ FAISS index directory"
     [ -d "logs" ] && print_success "✓ Logs directory" || print_error "✗ Logs directory"
     [ -d "results" ] && print_success "✓ Results directory" || print_error "✗ Results directory"
     

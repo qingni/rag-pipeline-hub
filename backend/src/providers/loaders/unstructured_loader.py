@@ -365,7 +365,8 @@ class UnstructuredLoader:
                             for img_idx in docx_paragraph_image_map[idx]:
                                 if img_idx < len(docx_images):
                                     img_info = docx_images[img_idx]
-                                    placeholder = f"[IMAGE_{img_idx}: {img_info.get('alt_text') or '图片'}]"
+                                    # 占位符索引从1开始（人类可读），images数组的image_index从0开始
+                                    placeholder = f"[IMAGE_{img_idx + 1}: {img_info.get('alt_text') or '图片'}]"
                                     pages_text[page_num].append(placeholder)
                                     full_text.append(placeholder)
                     
@@ -433,7 +434,8 @@ class UnstructuredLoader:
                         if image_info:
                             images.append(image_info)
                             # 在文本中插入图片占位符
-                            placeholder = f"[IMAGE_{image_index}: {image_info.get('caption') or '图片'}]"
+                            # 占位符索引从1开始（人类可读），images数组的image_index从0开始
+                            placeholder = f"[IMAGE_{image_index + 1}: {image_info.get('caption') or '图片'}]"
                             pages_text[page_num].append(placeholder)
                             full_text.append(placeholder)
                             image_index += 1

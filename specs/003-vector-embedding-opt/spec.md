@@ -31,7 +31,7 @@
 - **单文本向量化**：对单个文本进行向量化（仅后端 API）
 - **批量文本向量化**：对多个文本批量向量化（仅后端 API）
 - **文档分块向量化**：基于分块结果进行向量化
-- **多模型支持**：BGE-M3、Qwen3-Embedding-8B、Hunyuan-Embedding、Jina-Embeddings-v4
+- **多模型支持**：BGE-M3、Qwen3-Embedding-8B、Hunyuan-Embedding、Qwen3-VL-Embedding-8B
 
 ### 优化方向
 
@@ -554,4 +554,5 @@
 
 | 日期 | 类型 | 变更内容 | 影响需求 |
 |------|------|----------|----------|
+| 2026-02-03 | UX_IMPROVEMENT | 文档向量化模块选择文档后自动触发智能推荐，移除手动点击按钮 | US8 |
 | 2026-02-02 | 初始版本 | 创建 003-vector-embedding-opt 功能规格文档 | - |

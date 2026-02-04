@@ -204,13 +204,12 @@ paths:
                     description: "BGE-M3 多语言模型,支持中英文,性能优秀"
                     provider: "bge"
                     supports_multilingual: true
-                  - name: "jina-embeddings-v4"
-                    dimension: 2048
-                    description: "Jina Embeddings v4"
-                    provider: "jina"
+                  - name: "qwen3-vl-embedding-8b"
+                    dimension: 4096
+                    description: "通义千问多模态 Embedding 模型"
+                    provider: "qwen"
                     supports_multilingual: true
-                count: 4
-
+                    max_batch_size: 1000
   /models/{model_name}:
     get:
       summary: Get model details
@@ -248,7 +247,7 @@ paths:
               example:
                 error:
                   code: "MODEL_NOT_FOUND"
-                  message: "Model 'unknown-model' not found. Supported models: qwen3-embedding-8b, bge-m3, hunyuan-embedding, jina-embeddings-v4"
+                  message: "Model 'unknown-model' not found. Supported models: qwen3-embedding-8b, bge-m3, hunyuan-embedding, qwen3-vl-embedding-8b"
 
   /health:
     get:
@@ -298,7 +297,7 @@ components:
             - qwen3-embedding-8b
             - bge-m3
             - hunyuan-embedding
-            - jina-embeddings-v4
+            - qwen3-vl-embedding-8b
           description: Embedding model to use
           example: "qwen3-embedding-8b"
         max_retries:
@@ -338,7 +337,7 @@ components:
             - qwen3-embedding-8b
             - bge-m3
             - hunyuan-embedding
-            - jina-embeddings-v4
+            - qwen3-vl-embedding-8b
           description: Embedding model to use
           example: "qwen3-embedding-8b"
         max_retries:
@@ -611,7 +610,7 @@ components:
               value:
                 error:
                   code: "MODEL_NOT_FOUND"
-                  message: "Model 'invalid' not found. Supported: qwen3-embedding-8b, bge-m3, hunyuan-embedding, jina-embeddings-v4"
+                  message: "Model 'invalid' not found. Supported: qwen3-embedding-8b, bge-m3, hunyuan-embedding, qwen3-vl-embedding-8b"
 
     Unauthorized:
       description: Authentication failure

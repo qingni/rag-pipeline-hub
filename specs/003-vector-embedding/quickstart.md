@@ -185,8 +185,7 @@ Expected response:
     "qwen3-embedding-8b",
     "bge-m3",
     "hunyuan-embedding",
-    "jina-embeddings-v4"
-  ],
+    "qwen3-vl-embedding-8b"  ],
   "authentication": "valid",
   "timestamp": "2025-12-17T10:30:45Z"
 }

@@ -258,7 +258,7 @@ export async function getDocumentsWithChunking(params = {}) {
  * @returns {Promise<Object>} - Embedding result or task info
  */
 export async function embedFromDocument(params) {
-  const response = await fetch(`${API_BASE}/embedding/embed`, {
+  const response = await fetch(`${API_BASE}/embedding/from-document`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),

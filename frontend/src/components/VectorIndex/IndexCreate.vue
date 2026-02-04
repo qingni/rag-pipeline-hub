@@ -52,10 +52,6 @@
 
           <t-form-item label="索引类型" name="index_type">
             <t-radio-group v-model="formData.index_type">
-              <t-radio value="FAISS">
-                FAISS
-                <span class="radio-desc">（本地内存索引，快速）</span>
-              </t-radio>
               <t-radio value="MILVUS">
                 Milvus
                 <span class="radio-desc">（分布式向量数据库，推荐）</span>
@@ -201,10 +197,6 @@
 
           <t-form-item label="索引类型" name="provider">
             <t-radio-group v-model="embeddingFormData.provider">
-              <t-radio value="FAISS">
-                FAISS
-                <span class="radio-desc">（本地内存索引）</span>
-              </t-radio>
               <t-radio value="MILVUS">
                 Milvus
                 <span class="radio-desc">（分布式数据库）</span>
@@ -269,7 +261,7 @@ const validDimensions = [128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096];
 const formData = reactive({
   index_name: '',
   dimension: 1536,
-  index_type: 'FAISS',
+  index_type: 'MILVUS',
   algorithm_type: 'FLAT',
   metric_type: 'cosine',
   description: ''
@@ -279,7 +271,7 @@ const formData = reactive({
 const embeddingFormData = reactive({
   embedding_result_id: '',
   name: '',
-  provider: 'FAISS',
+  provider: 'MILVUS',
   index_type: 'FLAT',
   metric_type: 'cosine',
   index_params: {}

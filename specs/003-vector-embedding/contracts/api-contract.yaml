@@ -282,10 +282,10 @@ paths:
                     provider: "qwen"
                     supports_multilingual: true
                     max_batch_size: 1000
-                  - name: "jina-embeddings-v4"
-                    dimension: 2048
-                    description: "Jina Embeddings v4"
-                    provider: "jina"
+                  - name: "qwen3-vl-embedding-8b"
+                    dimension: 4096
+                    description: "通义千问多模态 Embedding 模型"
+                    provider: "qwen"
                     supports_multilingual: true
                     max_batch_size: 1000
                 count: 4
@@ -302,7 +302,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+            enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
           description: Model identifier
       responses:
         '200':
@@ -320,7 +320,7 @@ paths:
               example:
                 error:
                   code: "MODEL_NOT_FOUND"
-                  message: "Model 'invalid-model' not found. Supported models: bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4"
+                  message: "Model 'invalid-model' not found. Supported models: bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b"
 
   /embedding/health:
     get:
@@ -689,7 +689,7 @@ components:
 
     ModelName:
       type: string
-      enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, jina-embeddings-v4]
+      enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
       description: Supported embedding model identifier
 
     ResponseStatus:

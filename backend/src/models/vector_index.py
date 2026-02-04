@@ -21,7 +21,6 @@ from ..storage.database import Base
 class IndexProvider(str, Enum):
     """Vector index provider types (大写枚举值)"""
     MILVUS = "MILVUS"
-    FAISS = "FAISS"
 
 
 class IndexStatus(str, Enum):
@@ -66,7 +65,7 @@ class VectorIndex(Base):
     
     # Index information
     index_name = Column(String(255), nullable=False, unique=True)
-    index_type = Column(SQLEnum(IndexProvider), nullable=False, default=IndexProvider.FAISS)
+    index_type = Column(SQLEnum(IndexProvider), nullable=False, default=IndexProvider.MILVUS)
     algorithm_type = Column(String(50), nullable=True, default="FLAT")  # FLAT, IVF_FLAT, IVF_PQ, HNSW
     dimension = Column(Integer, nullable=False)
     metric_type = Column(String(50), nullable=False, default="cosine")
@@ -81,7 +80,7 @@ class VectorIndex(Base):
     provider_index_id = Column(String(255), nullable=True)  # ID in the vector provider
     namespace = Column(String(255), nullable=True, default="default")  # 命名空间
     index_params = Column(JSON, nullable=True, default={})  # 索引算法参数
-    file_path = Column(String(512), nullable=True)  # FAISS索引文件路径
+    file_path = Column(String(512), nullable=True)  # 索引文件路径
     milvus_collection = Column(String(255), nullable=True)  # Milvus Collection名称
     
     # Statistics
@@ -150,7 +149,7 @@ class VectorIndexSchema(BaseModel):
     
     id: Optional[int] = None
     index_name: str = Field(..., min_length=1, max_length=255, description="Index name")
-    index_type: IndexProvider = Field(default=IndexProvider.FAISS, description="Vector database provider")
+    index_type: IndexProvider = Field(default=IndexProvider.MILVUS, description="Vector database provider")
     algorithm_type: Optional[str] = Field(default="FLAT", description="Index algorithm type")
     dimension: int = Field(..., description="Vector dimension")
     metric_type: str = Field(default="cosine", description="Similarity metric")
@@ -195,7 +194,7 @@ class CreateIndexRequest(BaseModel):
     
     index_name: str = Field(..., min_length=1, max_length=255)
     dimension: int = Field(..., gt=0)
-    index_type: IndexProvider = Field(default=IndexProvider.FAISS)
+    index_type: IndexProvider = Field(default=IndexProvider.MILVUS)
     algorithm_type: str = Field(default="FLAT")
     metric_type: str = Field(default="cosine")
     description: Optional[str] = None
@@ -221,7 +220,7 @@ class CreateIndexFromEmbeddingRequest(BaseModel):
     
     embedding_result_id: str = Field(..., description="Embedding result ID")
     name: Optional[str] = Field(None, description="Index name (auto-generated if not provided)")
-    provider: IndexProvider = Field(default=IndexProvider.FAISS, description="Vector database provider")
+    provider: IndexProvider = Field(default=IndexProvider.MILVUS, description="Vector database provider")
     index_type: str = Field(default="FLAT", description="Index algorithm type")
     metric_type: str = Field(default="cosine", description="Similarity metric")
     index_params: Optional[Dict[str, Any]] = Field(default={}, description="Index parameters")

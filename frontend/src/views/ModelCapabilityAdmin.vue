@@ -7,15 +7,15 @@
       </p>
     </div>
     
-    <el-card class="main-card">
+    <t-card class="main-card" :bordered="true">
       <ModelCapabilityManager
         @model-updated="onModelUpdated"
         @config-reloaded="onConfigReloaded"
       />
-    </el-card>
+    </t-card>
     
     <!-- 使用说明 -->
-    <el-card class="help-card">
+    <t-card class="help-card" :bordered="true">
       <template #header>
         <span>使用说明</span>
       </template>
@@ -39,26 +39,26 @@
           <li>建议定期根据实际使用效果调整配置</li>
         </ul>
         
-        <el-alert type="info" :closable="false">
-          <template #title>
+        <t-alert theme="info" :close="false">
+          <template #message>
             注意：修改配置后，新的推荐请求将使用更新后的评分。已完成的推荐结果不受影响。
           </template>
-        </el-alert>
+        </t-alert>
       </div>
-    </el-card>
+    </t-card>
   </div>
 </template>
 
 <script setup>
-import { ElMessage } from 'element-plus'
+import { MessagePlugin } from 'tdesign-vue-next'
 import ModelCapabilityManager from '@/components/embedding/ModelCapabilityManager.vue'
 
 function onModelUpdated(modelName) {
-  ElMessage.success(`模型 ${modelName} 配置已更新`)
+  MessagePlugin.success(`模型 ${modelName} 配置已更新`)
 }
 
 function onConfigReloaded() {
-  ElMessage.success('配置已重新加载')
+  MessagePlugin.success('配置已重新加载')
 }
 </script>
 

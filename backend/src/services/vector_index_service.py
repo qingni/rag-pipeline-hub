@@ -15,9 +15,7 @@ from sqlalchemy.orm import Session
 from .providers.base_provider import BaseProvider, IndexConfig, SearchResult
 from .providers import (
     MilvusProvider,
-    FAISSProvider,
     MILVUS_AVAILABLE,
-    FAISS_AVAILABLE
 )
 from .index_registry import IndexRegistry
 from ..models.vector_index import VectorIndex, IndexStatus, IndexProvider, VALID_DIMENSIONS
@@ -64,16 +62,8 @@ class VectorIndexService:
         logger.info("VectorIndexService initialized")
 
     def _register_providers(self) -> None:
-        """注册所有向量存储提供者"""
+        """注册向量存储提供者"""
         try:
-            # 注册 FAISS（如果可用）
-            if FAISS_AVAILABLE and FAISSProvider is not None:
-                faiss_provider = FAISSProvider()
-                self.registry.register_provider("faiss", faiss_provider)
-                logger.info("Registered FAISS provider")
-            else:
-                logger.warning("FAISS provider not available (faiss-cpu not installed)")
-            
             # 注册 Milvus（如果可用）
             if MILVUS_AVAILABLE and MilvusProvider is not None:
                 try:
@@ -311,17 +301,7 @@ class VectorIndexService:
                 self.db.commit()
                 self.db.refresh(vector_index)
                 
-                # 13. 自动持久化索引信息到磁盘
-                if vector_index.index_type == IndexProvider.FAISS and len(vectors) > 0:
-                    try:
-                        file_path = vector_provider.save_index(provider_index_id)
-                        vector_index.file_path = file_path
-                        self.db.commit()
-                        logger.info(f"Auto-persisted FAISS index to {file_path}")
-                    except Exception as persist_error:
-                        logger.warning(f"Failed to auto-persist index: {persist_error}")
-                
-                # Milvus 索引元数据文件路径
+                # 13. 保存索引元数据
                 if vector_index.index_type == IndexProvider.MILVUS:
                     try:
                         file_path = vector_provider.get_metadata_file_path(provider_index_id)
@@ -501,7 +481,7 @@ class VectorIndexService:
         Args:
             index_name: 索引名称
             dimension: 向量维度
-            index_type: 索引类型（MILVUS 或 FAISS）
+            index_type: 索引类型（MILVUS）
             metric_type: 相似度度量类型
             description: 索引描述
             algorithm_type: 索引算法类型
@@ -1073,7 +1053,7 @@ class VectorIndexService:
 
     def persist_index(self, index_id: int) -> Dict[str, Any]:
         """
-        持久化索引到磁盘
+        持久化索引元数据
         
         Args:
             index_id: 索引 ID
@@ -1083,43 +1063,36 @@ class VectorIndexService:
         """
         try:
             vector_index = self._get_index_by_id(index_id)
-            
-            if vector_index.index_type != IndexProvider.FAISS:
-                raise IndexBuildError("Only FAISS indexes support local persistence")
-            
             provider = self._get_provider_for_index(vector_index)
             
             # 检查索引是否在内存中
-            if not vector_index.provider_index_id or \
-               vector_index.provider_index_id not in provider._indexes:
-                # 索引不在内存中，可能是服务重启后丢失
-                # 检查是否已经有持久化文件
+            if not vector_index.provider_index_id:
+                # 索引不在内存中
                 if vector_index.file_path:
                     return {
                         "index_id": index_id,
                         "file_path": vector_index.file_path,
-                        "message": "Index already persisted",
+                        "message": "Index metadata already saved",
                         "timestamp": datetime.now().isoformat()
                     }
                 else:
                     raise IndexBuildError(
-                        "Index not found in memory. The index may have been lost after service restart. "
-                        "Please recreate the index from the embedding result."
+                        "Index not found. Please recreate the index from the embedding result."
                     )
             
             with self.operation_logger.track_operation(
                 operation_type=OperationType.PERSIST,
                 index_id=index_id
             ):
-                # 调用 FAISS provider 的持久化方法
-                file_path = provider.save_index(vector_index.provider_index_id)
+                # 获取 Milvus 索引元数据路径
+                file_path = provider.get_metadata_file_path(vector_index.provider_index_id)
                 
                 # 更新数据库记录
                 vector_index.file_path = file_path
                 vector_index.updated_at = datetime.now()
                 self.db.commit()
             
-            logger.info(f"Persisted index {index_id} to {file_path}")
+            logger.info(f"Persisted index metadata {index_id} to {file_path}")
             
             return {
                 "index_id": index_id,
@@ -1135,7 +1108,7 @@ class VectorIndexService:
 
     def recover_index(self, index_id: int) -> Dict[str, Any]:
         """
-        从磁盘恢复索引
+        恢复索引连接
         
         Args:
             index_id: 索引 ID
@@ -1146,33 +1119,19 @@ class VectorIndexService:
         try:
             vector_index = self._get_index_by_id(index_id)
             
-            if vector_index.index_type != IndexProvider.FAISS:
-                raise IndexBuildError("Only FAISS indexes support local recovery")
-            
-            if not vector_index.file_path:
+            if not vector_index.provider_index_id:
                 raise IndexBuildError(
-                    "No persisted file found for this index. "
-                    "Please persist the index first or recreate it from the embedding result."
+                    "No provider index ID found. Please recreate the index from the embedding result."
                 )
             
             provider = self._get_provider_for_index(vector_index)
-            
-            # 检查索引是否已经在内存中
-            if vector_index.provider_index_id and \
-               vector_index.provider_index_id in provider._indexes:
-                return {
-                    "index_id": index_id,
-                    "status": "already_loaded",
-                    "message": "Index is already loaded in memory",
-                    "timestamp": datetime.now().isoformat()
-                }
             
             with self.operation_logger.track_operation(
                 operation_type=OperationType.RECOVER,
                 index_id=index_id
             ):
-                # 调用 FAISS provider 的加载方法
-                provider.load_index(vector_index.provider_index_id)
+                # 检查 Milvus 连接并尝试重新建立
+                health = provider.health_check()
                 
                 # 更新状态
                 vector_index.status = IndexStatus.READY
@@ -1184,6 +1143,7 @@ class VectorIndexService:
             return {
                 "index_id": index_id,
                 "status": "recovered",
+                "provider_health": health,
                 "timestamp": datetime.now().isoformat()
             }
             
@@ -1222,7 +1182,7 @@ class VectorIndexService:
                 # 调用 provider 的删除方法
                 provider.delete_vectors(vector_ids)
                 
-                # 更新向量计数（注意：FAISS 不支持真正删除，只是标记）
+                # 更新向量计数
                 vector_index.updated_at = datetime.now()
                 self.db.commit()
             

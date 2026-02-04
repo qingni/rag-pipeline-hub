@@ -47,6 +47,38 @@
         </t-list-item>
       </t-list>
     </t-card>
+
+    <!-- 系统管理区域 -->
+    <div class="admin-section">
+      <div class="admin-header">
+        <Settings :size="18" class="admin-header-icon" />
+        <span class="admin-header-title">系统管理</span>
+      </div>
+      <t-row :gutter="[16, 16]">
+        <t-col 
+          v-for="admin in adminFeatures" 
+          :key="admin.path"
+          :xs="12" :sm="6" :md="4" :lg="4"
+        >
+          <t-card 
+            :bordered="true"
+            hover-shadow
+            class="admin-card"
+            @click="navigateTo(admin.path)"
+          >
+            <div class="admin-content">
+              <div class="admin-icon">
+                <component :is="admin.iconComponent" :size="22" :stroke-width="1.5" />
+              </div>
+              <div class="admin-info">
+                <h4 class="admin-title">{{ admin.title }}</h4>
+                <p class="admin-desc">{{ admin.description }}</p>
+              </div>
+            </div>
+          </t-card>
+        </t-col>
+      </t-row>
+    </div>
   </div>
 </template>
 
@@ -54,7 +86,7 @@
 import { useRouter } from 'vue-router'
 import { Card as TCard, Row as TRow, Col as TCol, List as TList, ListItem as TListItem } from 'tdesign-vue-next'
 import { 
-  FileText, Scissors, Hash, Database, Search, Sparkles, Rocket as RocketIcon
+  FileText, Scissors, Hash, Database, Search, Sparkles, Rocket as RocketIcon, Settings, Cpu
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -104,6 +136,15 @@ const quickstartSteps = [
   '进行文档分块和向量嵌入',
   '创建向量索引并执行智能搜索',
   '使用AI生成摘要和内容'
+]
+
+const adminFeatures = [
+  {
+    path: '/admin/model-capability',
+    iconComponent: Cpu,
+    title: '模型能力管理',
+    description: '查看和调整嵌入模型的能力评分与推荐权重'
+  }
 ]
 
 function navigateTo(path) {
@@ -211,5 +252,70 @@ function navigateTo(path) {
 .step-text {
   color: rgba(0, 0, 0, 0.7);
   font-size: 14px;
+}
+
+/* 系统管理区域样式 */
+.admin-section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.admin-header-icon {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.admin-header-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.admin-card {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.admin-card:hover {
+  transform: translateY(-2px);
+}
+
+.admin-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.6);
+  flex-shrink: 0;
+}
+
+.admin-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.9);
+  margin: 0 0 4px 0;
+}
+
+.admin-desc {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.5);
+  margin: 0;
+  line-height: 1.4;
 }
 </style>

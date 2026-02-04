@@ -47,7 +47,7 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
     selectedTask: null,
     
     // 配置选项
-    selectedDatabase: 'MILVUS',  // MILVUS | FAISS (默认使用 Milvus)
+    selectedDatabase: 'MILVUS',  // 仅支持 Milvus
     selectedAlgorithm: 'FLAT',  // FLAT | HNSW | IVF_FLAT | IVF_PQ
     algorithmParams: {},
     metricType: 'cosine',
@@ -116,7 +116,7 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
       if (state.selectedDatabase === 'MILVUS') {
         return ['FLAT', 'IVF_FLAT', 'IVF_PQ', 'HNSW'];
       }
-      return ['FLAT', 'IVF_FLAT', 'IVF_PQ'];  // FAISS 不支持 HNSW
+      return ['FLAT', 'IVF_FLAT', 'IVF_PQ', 'HNSW'];
     },
 
     /**

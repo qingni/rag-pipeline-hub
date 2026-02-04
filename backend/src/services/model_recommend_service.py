@@ -6,8 +6,17 @@ Recommends the best embedding model based on document features:
 - Domain expertise
 - Multimodal support
 
-Uses weighted scoring algorithm:
-Total Score = Language × 40% + Domain × 35% + Multimodal × 25%
+【业界最佳实践】采用“分层决策”策略:
+Layer 1: 二值判断 - 是否需要多模态能力
+  - has_images = True → 必须用多模态模型（硬性要求）
+  - has_tables = True → 推荐多模态模型（软性建议）
+Layer 2: 如果需要多模态，选择最适合的多模态模型
+Layer 3: 如果不需要多模态，选择最适合的文本模型
+
+参考: LlamaIndex, LangChain, Unstructured.io, OpenAI
+- LlamaIndex: 检测到图片 → 用 MultiModalLLM
+- LangChain: 按 MIME 类型路由
+- OpenAI: 有图就用 vision 模型
 """
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -40,8 +49,16 @@ class ModelRecommendService:
     Intelligent model recommendation engine.
     
     Analyzes document features and recommends the best embedding model
-    using a weighted scoring algorithm.
+    using a layered decision strategy.
+    
+    【业界最佳实践】分层决策策略:
+    - Layer 1: 二值判断（有图片就用多模态）
+    - Layer 2: 在确定的模型类型内选择最佳模型
+    - 摒弃复杂的比例计算，采用简单直接的判断逻辑
     """
+    
+    # 表格数量阈值：超过该数量时软性建议多模态模型
+    TABLE_THRESHOLD_FOR_MULTIMODAL = 3
     
     def __init__(
         self,
@@ -195,56 +212,74 @@ class ModelRecommendService:
         """
         Score a model for given document features.
         
-        Uses weighted scoring:
-        - Language: 40%
-        - Domain: 35%
-        - Multimodal: 25%
+        【业界最佳实践】分层决策策略:
+        1. 二值判断: 根据 has_images/has_tables 确定是否需要多模态
+        2. 在确定的模型类型内，按语言和领域匹配度评分
+        3. 简单直接，不使用复杂的比例计算
         """
         weights = self.capability_service.get_recommendation_weights()
         
+        # 基础权重
+        language_weight = weights.get('language_match', 0.40)
+        domain_weight = weights.get('domain_match', 0.35)
+        multimodal_weight = weights.get('multimodal_support', 0.25)
+        
         # Calculate language score
         language_score = model.language_scores.get_score(analysis.primary_language)
-        # Adjust by confidence
         language_score *= (0.5 + 0.5 * analysis.language_confidence)
         
         # Calculate domain score
         domain_score = model.domain_scores.get_score(analysis.detected_domain)
-        # Adjust by confidence
         domain_score *= (0.5 + 0.5 * analysis.domain_confidence)
         
-        # Calculate multimodal score
-        if analysis.multimodal_ratio > 0:
-            # Document has multimodal content
-            multimodal_score = model.multimodal_score
-            # Boost score if model supports multimodal
-            if multimodal_score > 0.5:
-                multimodal_score *= (1 + analysis.multimodal_ratio * 0.5)
+        # 【业界最佳实践】二值判断计算多模态得分
+        needs_multimodal = analysis.has_images  # 有图片 = 硬性要求
+        prefers_multimodal = analysis.has_tables  # 有表格 = 软性建议
+        is_multimodal_model = model.multimodal_score >= 0.5
+        
+        if needs_multimodal:
+            # 【硬性要求】文档包含图片，必须使用多模态模型
+            if is_multimodal_model:
+                multimodal_score = 1.0  # 多模态模型满分
             else:
-                # Penalize text-only models for multimodal content
-                multimodal_score = max(0.3, 1.0 - analysis.multimodal_ratio)
+                multimodal_score = 0.1  # 纯文本模型严重惩罚
+            # 提高多模态权重到 50%
+            multimodal_weight = 0.50
+            language_weight = 0.25
+            domain_weight = 0.25
+        elif prefers_multimodal:
+            # 【软性建议】文档包含较多表格，推荐多模态模型
+            if is_multimodal_model:
+                multimodal_score = 0.9  # 多模态模型加分
+            else:
+                multimodal_score = 0.6  # 纯文本模型也可以，略微降分
+            # 适度提高多模态权重
+            multimodal_weight = 0.35
+            language_weight = 0.35
+            domain_weight = 0.30
         else:
-            # No multimodal content - all models equally suitable
-            multimodal_score = 0.8
+            # 【纯文本】文档是纯文本，所有模型都适用
+            multimodal_score = 0.8  # 统一较高分，不影响决策
         
         # Calculate weighted total
         dimension_scores = [
             DimensionScore(
                 dimension='language',
                 score=language_score,
-                weight=weights.get('language_match', 0.40),
-                weighted_score=language_score * weights.get('language_match', 0.40),
+                weight=language_weight,
+                weighted_score=language_score * language_weight,
             ),
             DimensionScore(
                 dimension='domain',
                 score=domain_score,
-                weight=weights.get('domain_match', 0.35),
-                weighted_score=domain_score * weights.get('domain_match', 0.35),
+                weight=domain_weight,
+                weighted_score=domain_score * domain_weight,
             ),
             DimensionScore(
                 dimension='multimodal',
                 score=multimodal_score,
-                weight=weights.get('multimodal_support', 0.25),
-                weighted_score=multimodal_score * weights.get('multimodal_support', 0.25),
+                weight=multimodal_weight,
+                weighted_score=multimodal_score * multimodal_weight,
             ),
         ]
         
@@ -314,19 +349,32 @@ class ModelRecommendService:
                 impact='positive',
             ))
         
-        # Multimodal reason
-        if analysis.multimodal_ratio > 0.1:
+        # Multimodal reason - 使用二值判断逻辑
+        if analysis.has_images:
             if model_score.multimodal_score >= 0.8:
                 reasons.append(RecommendationReason(
-                    key='multimodal_support',
-                    description='支持多模态内容（图片、表格）向量化',
+                    key='multimodal_required',
+                    description='文档包含图片，该模型支持多模态向量化',
                     impact='positive',
                 ))
             elif model_score.multimodal_score < 0.5:
                 reasons.append(RecommendationReason(
-                    key='multimodal_limited',
-                    description='对多模态内容支持有限，将使用文本描述',
+                    key='multimodal_unsupported',
+                    description='文档包含图片，但该模型不支持多模态，将使用文本描述',
                     impact='negative',
+                ))
+        elif analysis.has_tables:
+            if model_score.multimodal_score >= 0.8:
+                reasons.append(RecommendationReason(
+                    key='multimodal_preferred',
+                    description='文档包含较多表格，多模态模型效果更好',
+                    impact='positive',
+                ))
+            else:
+                reasons.append(RecommendationReason(
+                    key='table_text_mode',
+                    description='文档包含表格，将以文本形式处理',
+                    impact='neutral',
                 ))
         
         return reasons

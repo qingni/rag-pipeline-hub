@@ -134,9 +134,23 @@ const emit = defineEmits(['select', 'confirm', 'show-detail']);
 // State
 const selectedModel = ref(props.initialModel || props.topRecommendation?.model?.model_name || '');
 
-// Watch for changes
+// Watch for changes - 当推荐列表变化时（切换文档），自动选中第一个推荐的模型
+watch(() => props.recommendations, (newVal, oldVal) => {
+  // 推荐列表有变化（切换文档或重新推荐），自动选中第一个
+  if (newVal && newVal.length > 0) {
+    // 检查是否是新的推荐列表（通过比较第一个元素的 model_name）
+    const isNewRecommendations = !oldVal || oldVal.length === 0 || 
+      (oldVal[0]?.model?.model_name !== newVal[0]?.model?.model_name);
+    
+    if (isNewRecommendations && props.topRecommendation) {
+      selectedModel.value = props.topRecommendation.model?.model_name || '';
+    }
+  }
+}, { immediate: true });
+
+// 同时监听 topRecommendation 的变化
 watch(() => props.topRecommendation, (newVal) => {
-  if (newVal && !selectedModel.value) {
+  if (newVal) {
     selectedModel.value = newVal.model?.model_name || '';
   }
 });

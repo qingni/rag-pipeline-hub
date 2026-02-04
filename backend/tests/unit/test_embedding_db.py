@@ -300,7 +300,7 @@ class TestCountByModel:
         
         assert counts['bge-m3'] == 5
         assert counts['qwen3-embedding-8b'] == 3
-        assert counts['jina-embeddings-v4'] == 2
+        assert counts['hunyuan-embedding'] == 2
     
     def test_count_with_document_filter(self, embedding_db, sample_results):
         """Should count models for specific document."""

@@ -53,7 +53,6 @@ tiktoken==0.12.0
 # Vector stores
 pymilvus==2.3.4
 pinecone-client==2.2.4
-faiss-cpu==1.7.4
 
 # Utilities
 python-dotenv==1.0.0

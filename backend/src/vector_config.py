@@ -1,15 +1,15 @@
 """
 向量索引配置类
 
-提供 Milvus 和 FAISS 的配置管理
+提供 Milvus 的配置管理
 """
 from dataclasses import dataclass
 from typing import Optional
 import os
 
 
-# 默认向量数据库提供者（milvus 或 faiss）
-DEFAULT_VECTOR_PROVIDER = os.getenv("VECTOR_INDEX_DEFAULT_PROVIDER", "milvus").lower()
+# 默认向量数据库提供者（仅支持 milvus）
+DEFAULT_VECTOR_PROVIDER = "milvus"
 
 
 @dataclass
@@ -36,20 +36,3 @@ class MilvusConfig:
         self.user = user or os.getenv("MILVUS_USER", "")
         self.password = password or os.getenv("MILVUS_PASSWORD", "")
         self.timeout = timeout or int(os.getenv("MILVUS_TIMEOUT", "30"))
-
-
-@dataclass
-class FAISSConfig:
-    """FAISS 配置类"""
-    
-    index_dir: str = "results/vector_index/faiss"
-    
-    def __init__(
-        self,
-        index_dir: Optional[str] = None
-    ):
-        """从环境变量或参数初始化配置"""
-        self.index_dir = index_dir or os.getenv("FAISS_INDEX_DIR", "results/vector_index/faiss")
-        
-        # 确保目录存在
-        os.makedirs(self.index_dir, exist_ok=True)

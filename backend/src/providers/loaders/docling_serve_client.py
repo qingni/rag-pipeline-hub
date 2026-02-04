@@ -1038,10 +1038,12 @@ class DoclingServeLoader(BaseLoader):
         if ctx_hints:
             detail_parts.append(f'context="{"; ".join(ctx_hints)}"')
         
+        # 占位符索引从1开始（人类可读），images数组的image_index从0开始
+        placeholder_idx = idx + 1
         if detail_parts:
-            return f"\n[IMAGE_{idx}] ({' '.join(detail_parts)})\n"
+            return f"\n[IMAGE_{placeholder_idx}] ({' '.join(detail_parts)})\n"
         else:
-            return f"\n[IMAGE_{idx}]\n"
+            return f"\n[IMAGE_{placeholder_idx}]\n"
     
     def reset_availability_cache(self):
         """重置可用性缓存，强制重新检查"""
