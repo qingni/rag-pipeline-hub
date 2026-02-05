@@ -837,6 +837,7 @@ async def get_chunking_result(
                 "id": chunk.id,
                 "sequence_number": chunk.sequence_number,
                 "content": chunk.content,
+                "chunk_type": chunk.chunk_type,
                 "metadata": chunk.chunk_metadata,
                 "start_position": chunk.start_position,
                 "end_position": chunk.end_position,

@@ -276,14 +276,17 @@ export async function embedFromDocument(params) {
  * Get latest embedding result for a document
  * @param {string} documentId - Document ID
  * @param {string} modelFilter - Optional model filter
- * @returns {Promise<Object>} - Latest embedding result
+ * @returns {Promise<Object>} - Latest embedding result with vectors and metadata
  */
 export async function getLatestByDocument(documentId, modelFilter = null) {
   const searchParams = new URLSearchParams()
   if (modelFilter) searchParams.set('model', modelFilter)
+  // 默认包含向量数据
+  searchParams.set('include_vectors', 'true')
   
   const queryString = searchParams.toString()
-  const url = `${API_BASE}/embedding/documents/${documentId}/latest${queryString ? '?' + queryString : ''}`
+  // 使用 /embedding/results/by-document 端点，该端点会加载完整的向量数据和元数据
+  const url = `${API_BASE}/embedding/results/by-document/${documentId}${queryString ? '?' + queryString : ''}`
   const response = await fetch(url)
   
   if (!response.ok) {
