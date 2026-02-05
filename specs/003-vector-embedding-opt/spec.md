@@ -386,7 +386,6 @@
             "error_message": str   # 仅失败时
         }
     ],
-    "json_file_path": str,
     "created_at": str
 }
 ```
@@ -554,5 +553,6 @@
 
 | 日期 | 类型 | 变更内容 | 影响需求 |
 |------|------|----------|----------|
+| 2026-02-05 | DATA_STRUCTURE | [VIBE] 移除 EmbeddingResult JSON 输出中的 json_file_path 冗余字段 | 无 |
 | 2026-02-03 | UX_IMPROVEMENT | 文档向量化模块选择文档后自动触发智能推荐，移除手动点击按钮 | US8 |
 | 2026-02-02 | 初始版本 | 创建 003-vector-embedding-opt 功能规格文档 | - |

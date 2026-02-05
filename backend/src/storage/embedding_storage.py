@@ -134,15 +134,11 @@ class EmbeddingStorage:
         filename = self._generate_filename(response.request_id, response.timestamp)
         filepath = daily_dir / filename
         
-        # 生成相对路径，方便查看和引用
-        relative_path = str(filepath.relative_to(self.results_dir.parent if self.results_dir.name == "embedding" else self.results_dir.parent.parent))
-        
         # Convert response to dict
         data = {
             "request_id": response.request_id,
             "status": response.status,
             "timestamp": response.timestamp.isoformat() + "Z",
-            "json_file_path": relative_path,  # 添加JSON文件路径，方便查看
             "metadata": {
                 "model": response.metadata.model,
                 "model_dimension": response.metadata.model_dimension,
@@ -206,15 +202,11 @@ class EmbeddingStorage:
         filename = self._generate_filename(response.request_id, response.timestamp)
         filepath = daily_dir / filename
         
-        # 生成相对路径，方便查看和引用
-        relative_path = str(filepath.relative_to(self.results_dir.parent if self.results_dir.name == "embedding" else self.results_dir.parent.parent))
-        
         # Convert response to dict
         data = {
             "request_id": response.request_id,
             "status": response.status,
             "timestamp": response.timestamp.isoformat() + "Z",
-            "json_file_path": relative_path,  # 添加JSON文件路径，方便查看
             "metadata": {
                 "model": response.metadata.model,
                 "model_dimension": response.metadata.model_dimension,
