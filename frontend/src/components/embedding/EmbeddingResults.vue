@@ -9,113 +9,70 @@
     </template>
     
     <template v-else>
-      <!-- 文档来源信息 -->
-      <div class="source-info">
-        <div class="source-header">
-          <FileText :size="20" class="header-icon" />
-          <span class="header-text">文档来源信息</span>
+      <!-- 顶部信息区 - 水平布局 -->
+      <div class="top-info-row">
+        <!-- 文档来源信息 - 精简版 -->
+        <div class="source-info horizontal">
+          <div class="source-header">
+            <FileText :size="18" class="header-icon" />
+            <span class="header-text">文档来源</span>
+          </div>
+          <div class="info-inline">
+            <span class="info-value filename" :title="result.documentInfo?.filename || '未知'">{{ result.documentInfo?.filename || '未知' }}</span>
+            <span class="info-divider">|</span>
+            <span class="info-tag"><span class="info-label">维度</span>{{ result.metadata?.model_dimension || 0 }}</span>
+            <span class="info-divider">|</span>
+            <span class="info-tag"><span class="info-label">耗时</span>{{ formatDuration(result.metadata?.processing_time_ms) }}</span>
+          </div>
         </div>
         
-        <div class="info-grid">
-          <div class="info-item">
-            <span class="info-label">文档名称</span>
-            <span class="info-value">{{ result.documentInfo?.filename || '未知' }}</span>
+        <!-- 处理结果摘要 - 水平布局 -->
+        <div class="result-summary horizontal" :class="statusClass">
+          <div class="summary-left">
+            <component :is="statusIcon" :size="18" class="status-icon" />
+            <span class="summary-title">{{ statusTitle }}</span>
+            <div class="summary-stats">
+              <div class="stat-badge success">
+                <CheckCircle2 :size="12" />
+                <span>{{ result.metadata?.successful_count || 0 }}</span>
+              </div>
+              <div class="stat-badge" :class="{ 'error': result.metadata?.failed_count > 0, 'neutral': result.metadata?.failed_count === 0 }">
+                <XCircle :size="12" />
+                <span>{{ result.metadata?.failed_count || 0 }}</span>
+              </div>
+            </div>
           </div>
-          
-          <div class="info-item">
-            <span class="info-label">向量数量</span>
-            <span class="info-value highlight">{{ result.vectors?.length || 0 }} 个</span>
-          </div>
-          
-          <div class="info-item" v-if="result.source?.total_chunks">
-            <span class="info-label">分块数量</span>
-            <span class="info-value highlight">{{ result.source?.total_chunks || 0 }} 个</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">向量维度</span>
-            <span class="info-value highlight">{{ result.metadata?.model_dimension || 0 }} 维</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">处理时间</span>
-            <span class="info-value">{{ formatDuration(result.metadata?.processing_time_ms) }}</span>
+          <div class="summary-right">
+            <span class="detail-tag"><span class="detail-label">模型</span>{{ result.metadata?.model }}</span>
+            <span class="detail-tag highlight"><span class="detail-label">速度</span>{{ result.metadata?.vectors_per_second?.toFixed(2) }} 个/秒</span>
+            <span class="detail-tag" v-if="result.metadata?.retry_count > 0"><span class="detail-label">重试</span>{{ result.metadata?.retry_count }}</span>
           </div>
         </div>
       </div>
       
-      <!-- 状态卡片 -->
-      <div class="status-card" :class="statusClass">
-        <div class="status-content">
-          <component :is="statusIcon" :size="20" class="status-icon" />
-          <div class="status-text">
-            <div class="status-title">{{ statusTitle }}</div>
-            <div class="status-subtitle">{{ statusSubtitle }}</div>
+      <!-- 多模态向量统计 - 独立出来，仅在有多种类型时显示 -->
+      <div v-if="hasMultimodalStats" class="multimodal-stats standalone">
+        <div class="multimodal-header">多模态向量统计</div>
+        <div class="multimodal-grid">
+          <div class="multimodal-item" v-if="multimodalStats.text > 0">
+            <span class="multimodal-icon">📝</span>
+            <span class="multimodal-label">文本</span>
+            <span class="multimodal-value">{{ multimodalStats.text }}</span>
           </div>
-        </div>
-      </div>
-      
-      <!-- 元数据 -->
-      <div class="metadata-section">
-        <h3 class="section-title">处理元数据</h3>
-        <div class="metadata-grid">
-          <div class="metadata-item">
-            <span class="metadata-label">模型</span>
-            <span class="metadata-value">{{ result.metadata?.model }}</span>
+          <div class="multimodal-item" v-if="multimodalStats.table > 0">
+            <span class="multimodal-icon">📊</span>
+            <span class="multimodal-label">表格</span>
+            <span class="multimodal-value">{{ multimodalStats.table }}</span>
           </div>
-          
-          <div class="metadata-item">
-            <span class="metadata-label">批次大小</span>
-            <span class="metadata-value">{{ result.metadata?.batch_size }}</span>
+          <div class="multimodal-item" v-if="multimodalStats.image > 0">
+            <span class="multimodal-icon">🖼️</span>
+            <span class="multimodal-label">图片</span>
+            <span class="multimodal-value">{{ multimodalStats.image }}</span>
           </div>
-          
-          <div class="metadata-item">
-            <span class="metadata-label">成功数量</span>
-            <span class="metadata-value">{{ result.metadata?.successful_count }}</span>
-          </div>
-          
-          <div class="metadata-item">
-            <span class="metadata-label">失败数量</span>
-            <span class="metadata-value">{{ result.metadata?.failed_count }}</span>
-          </div>
-          
-          <div class="metadata-item">
-            <span class="metadata-label">重试次数</span>
-            <span class="metadata-value">{{ result.metadata?.retry_count }}</span>
-          </div>
-          
-          <div class="metadata-item">
-            <span class="metadata-label">处理速度</span>
-            <span class="metadata-value">
-              {{ result.metadata?.vectors_per_second?.toFixed(2) }} 个/秒
-            </span>
-          </div>
-        </div>
-        
-        <!-- 多模态向量统计 -->
-        <div v-if="hasMultimodalStats" class="multimodal-stats">
-          <div class="multimodal-header">多模态向量统计</div>
-          <div class="multimodal-grid">
-            <div class="multimodal-item" v-if="multimodalStats.text > 0">
-              <span class="multimodal-icon">📝</span>
-              <span class="multimodal-label">文本</span>
-              <span class="multimodal-value">{{ multimodalStats.text }}</span>
-            </div>
-            <div class="multimodal-item" v-if="multimodalStats.table > 0">
-              <span class="multimodal-icon">📊</span>
-              <span class="multimodal-label">表格</span>
-              <span class="multimodal-value">{{ multimodalStats.table }}</span>
-            </div>
-            <div class="multimodal-item" v-if="multimodalStats.image > 0">
-              <span class="multimodal-icon">🖼️</span>
-              <span class="multimodal-label">图片</span>
-              <span class="multimodal-value">{{ multimodalStats.image }}</span>
-            </div>
-            <div class="multimodal-item" v-if="multimodalStats.code > 0">
-              <span class="multimodal-icon">💻</span>
-              <span class="multimodal-label">代码</span>
-              <span class="multimodal-value">{{ multimodalStats.code }}</span>
-            </div>
+          <div class="multimodal-item" v-if="multimodalStats.code > 0">
+            <span class="multimodal-icon">💻</span>
+            <span class="multimodal-label">代码</span>
+            <span class="multimodal-value">{{ multimodalStats.code }}</span>
           </div>
         </div>
       </div>
@@ -587,170 +544,189 @@ function downloadVectors(event) {
   margin: 0;
 }
 
-.source-info {
-  margin-bottom: 1.5rem;
-  padding: 1rem;
+/* 顶部信息区 - 水平布局 */
+.top-info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.source-info.horizontal {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
   background-color: #f9fafb;
   border-radius: 6px;
   border: 1px solid #e5e7eb;
 }
 
-.source-header {
+.source-info.horizontal .source-header {
   display: flex;
   align-items: center;
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  padding-right: 1rem;
+  border-right: 1px solid #e5e7eb;
 }
 
 .header-icon {
   color: #6b7280;
-  margin-right: 0.5rem;
 }
 
 .header-text {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #111827;
+  white-space: nowrap;
 }
 
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+.info-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.info-value.filename {
+  font-size: 13px;
+  color: #111827;
+  font-weight: 500;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-divider {
+  color: #d1d5db;
+  font-size: 12px;
+}
+
+.info-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 13px;
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.info-tag .info-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 500;
+  margin-right: 0.125rem;
+}
+
+.result-summary.horizontal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  border: 1px solid;
+  flex-wrap: wrap;
   gap: 0.75rem;
 }
 
-.info-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+.result-summary.horizontal.status-success {
+  background-color: #f0fdf4;
+  border-color: #86efac;
 }
 
-.info-label {
-  font-size: 11px;
+.result-summary.horizontal.status-warning {
+  background-color: #fefce8;
+  border-color: #fde047;
+}
+
+.result-summary.horizontal.status-error {
+  background-color: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.summary-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.summary-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+}
+
+.summary-stats {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stat-badge.success {
+  background-color: #86efac;
+  color: #16a34a;
+}
+
+.stat-badge.error {
+  background-color: #fca5a5;
+  color: #dc2626;
+}
+
+.stat-badge.neutral {
+  background-color: #e5e7eb;
+  color: #6b7280;
+}
+
+.summary-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.detail-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 12px;
+  color: #374151;
+}
+
+.detail-tag .detail-label {
+  font-size: 10px;
   color: #6b7280;
   font-weight: 500;
   text-transform: uppercase;
 }
 
-.info-value {
-  font-size: 14px;
-  color: #111827;
-  font-weight: 500;
-}
-
-.info-value.highlight {
+.detail-tag.highlight {
   color: #3b82f6;
   font-weight: 600;
 }
 
-.status-card {
-  margin-bottom: 1.5rem;
-  padding: 1rem;
-  border-radius: 6px;
-  border: 1px solid;
-}
-
-.status-card.status-success {
-  background-color: #f0fdf4;
-  border-color: #86efac;
-}
-
-.status-card.status-warning {
-  background-color: #fefce8;
-  border-color: #fde047;
-}
-
-.status-card.status-error {
-  background-color: #fef2f2;
-  border-color: #fca5a5;
-}
-
-.status-content {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.status-icon {
-  flex-shrink: 0;
-}
-
-.status-success .status-icon {
-  color: #16a34a;
-}
-
-.status-warning .status-icon {
-  color: #ca8a04;
-}
-
-.status-error .status-icon {
-  color: #dc2626;
-}
-
-.status-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #111827;
-}
-
-.status-subtitle {
-  font-size: 12px;
-  color: #6b7280;
-  margin-top: 0.125rem;
-}
-
-.metadata-section,
-.vectors-section,
-.failures-section {
-  margin-bottom: 1.5rem;
-}
-
-.section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #111827;
-  margin: 0 0 0.75rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.section-title.error {
-  color: #dc2626;
-}
-
-.count-badge {
-  display: inline-block;
-  padding: 0.125rem 0.5rem;
-  background-color: #e5e7eb;
-  color: #374151;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 12px;
-}
-
-.count-badge.error {
-  background-color: #fca5a5;
-  color: #991b1b;
-}
-
-.metadata-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.75rem;
-  padding: 1rem;
-  background-color: #f9fafb;
-  border-radius: 6px;
-}
-
-/* 多模态向量统计样式 */
 .multimodal-stats {
-  margin-top: 1rem;
+  margin-bottom: 1.5rem;
   padding: 1rem;
   background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
   border-radius: 6px;
   border: 1px solid #bae6fd;
+}
+
+.multimodal-stats.standalone {
+  margin-top: 1rem;
 }
 
 .multimodal-header {
@@ -795,25 +771,35 @@ function downloadVectors(event) {
   color: #0369a1;
 }
 
-.metadata-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.metadata-label {
-  font-size: 11px;
-  color: #6b7280;
-  font-weight: 500;
-}
-
-.metadata-value {
-  font-size: 13px;
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
   color: #111827;
-  font-weight: 500;
+  margin: 0 0 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-/* 新增：向量展示优化样式 */
+.section-title.error {
+  color: #dc2626;
+}
+
+.count-badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  background-color: #e5e7eb;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 12px;
+}
+
+.count-badge.error {
+  background-color: #fca5a5;
+  color: #991b1b;
+}
+
 .vectors-header {
   display: flex;
   justify-content: space-between;
@@ -1019,15 +1005,12 @@ function downloadVectors(event) {
   padding: 0.25rem 0.75rem;
   border-radius: 6px;
 }
-/* 新增样式结束 */
 
 .vectors-list {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
-
-/* 移除旧的向量样式，使用上面新定义的样式 */
 
 .vector-header {
   display: flex;
@@ -1092,7 +1075,6 @@ function downloadVectors(event) {
   font-weight: 500;
 }
 
-/* 原始文本预览样式 */
 .source-text-preview {
   margin-bottom: 0.75rem;
   padding: 0.75rem;
