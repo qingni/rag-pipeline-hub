@@ -327,6 +327,7 @@ class Vector(BaseModel):
     text_length: int = Field(..., gt=0, description="Character count of source text")
     processing_time_ms: Optional[float] = Field(None, ge=0, description="Processing time")
     source_text: Optional[str] = Field(None, description="Original source text for this chunk")
+    chunk_type: Optional[str] = Field("text", description="Chunk type: text, table, image, code")
     
     @field_validator('dimension')
     @classmethod
@@ -542,6 +543,7 @@ class EmbeddingResultWithVectors(EmbeddingResultDetail):
     vectors: List[Vector] = Field(default_factory=list, description="Vector data from JSON file")
     failures: List[EmbeddingFailure] = Field(default_factory=list, description="Failed vectorization items")
     metadata: Optional[dict] = Field(None, description="Additional metadata from JSON")
+    source: Optional[dict] = Field(None, description="Source information including total_chunks")
 
 
 class PaginationMeta(BaseModel):

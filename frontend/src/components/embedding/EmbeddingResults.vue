@@ -27,6 +27,11 @@
             <span class="info-value highlight">{{ result.vectors?.length || 0 }} 个</span>
           </div>
           
+          <div class="info-item" v-if="result.source?.total_chunks">
+            <span class="info-label">分块数量</span>
+            <span class="info-value highlight">{{ result.source?.total_chunks || 0 }} 个</span>
+          </div>
+          
           <div class="info-item">
             <span class="info-label">向量维度</span>
             <span class="info-value highlight">{{ result.metadata?.model_dimension || 0 }} 维</span>
@@ -84,6 +89,33 @@
             <span class="metadata-value">
               {{ result.metadata?.vectors_per_second?.toFixed(2) }} 个/秒
             </span>
+          </div>
+        </div>
+        
+        <!-- 多模态向量统计 -->
+        <div v-if="hasMultimodalStats" class="multimodal-stats">
+          <div class="multimodal-header">多模态向量统计</div>
+          <div class="multimodal-grid">
+            <div class="multimodal-item" v-if="multimodalStats.text > 0">
+              <span class="multimodal-icon">📝</span>
+              <span class="multimodal-label">文本</span>
+              <span class="multimodal-value">{{ multimodalStats.text }}</span>
+            </div>
+            <div class="multimodal-item" v-if="multimodalStats.table > 0">
+              <span class="multimodal-icon">📊</span>
+              <span class="multimodal-label">表格</span>
+              <span class="multimodal-value">{{ multimodalStats.table }}</span>
+            </div>
+            <div class="multimodal-item" v-if="multimodalStats.image > 0">
+              <span class="multimodal-icon">🖼️</span>
+              <span class="multimodal-label">图片</span>
+              <span class="multimodal-value">{{ multimodalStats.image }}</span>
+            </div>
+            <div class="multimodal-item" v-if="multimodalStats.code > 0">
+              <span class="multimodal-icon">💻</span>
+              <span class="multimodal-label">代码</span>
+              <span class="multimodal-value">{{ multimodalStats.code }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -338,6 +370,31 @@ const statusSubtitle = computed(() => {
   if (!props.result?.metadata) return ''
   const { successful_count, failed_count } = props.result.metadata
   return `成功 ${successful_count} 个，失败 ${failed_count} 个`
+})
+
+// 多模态向量统计
+const multimodalStats = computed(() => {
+  const stats = { text: 0, table: 0, image: 0, code: 0 }
+  if (!props.result?.vectors) return stats
+  
+  props.result.vectors.forEach(v => {
+    const chunkType = v.chunk_type || 'text'
+    if (chunkType === 'text') stats.text++
+    else if (chunkType === 'table') stats.table++
+    else if (chunkType === 'image') stats.image++
+    else if (chunkType === 'code') stats.code++
+    else stats.text++  // 默认归为文本
+  })
+  
+  return stats
+})
+
+// 是否显示多模态统计（当存在多种类型或有非文本类型时显示）
+const hasMultimodalStats = computed(() => {
+  const stats = multimodalStats.value
+  const typeCount = (stats.text > 0 ? 1 : 0) + (stats.table > 0 ? 1 : 0) + 
+                    (stats.image > 0 ? 1 : 0) + (stats.code > 0 ? 1 : 0)
+  return typeCount > 1 || stats.table > 0 || stats.image > 0 || stats.code > 0
 })
 
 function formatDuration(ms) {
@@ -685,6 +742,57 @@ function downloadVectors(event) {
   padding: 1rem;
   background-color: #f9fafb;
   border-radius: 6px;
+}
+
+/* 多模态向量统计样式 */
+.multimodal-stats {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: 6px;
+  border: 1px solid #bae6fd;
+}
+
+.multimodal-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0369a1;
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.multimodal-grid {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.multimodal-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e0f2fe;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.multimodal-icon {
+  font-size: 16px;
+}
+
+.multimodal-label {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.multimodal-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0369a1;
 }
 
 .metadata-item {

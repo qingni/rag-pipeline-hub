@@ -259,6 +259,7 @@ async def embed_batch_texts(
                 text_length=item.text_length,
                 processing_time_ms=item.processing_time_ms,
                 source_text=item.source_text,  # Include source text
+                chunk_type=getattr(item, 'chunk_type', 'text'),  # Include chunk type
             )
             for item in result.vectors
         ]
@@ -720,6 +721,7 @@ async def embed_from_chunking_result(
                 text_length=item.text_length,
                 processing_time_ms=item.processing_time_ms,
                 source_text=item.source_text,  # Include source text
+                chunk_type=getattr(item, 'chunk_type', 'text'),  # Include chunk type
             )
             for item in result.vectors
         ]
@@ -920,6 +922,7 @@ async def embed_from_document(
                 text_length=item.text_length,
                 processing_time_ms=item.processing_time_ms,
                 source_text=item.source_text,  # Include source text
+                chunk_type=getattr(item, 'chunk_type', 'text'),  # Include chunk type
             )
             for item in result.vectors
         ]

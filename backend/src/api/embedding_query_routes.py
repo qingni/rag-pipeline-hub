@@ -15,6 +15,7 @@ from ..models.embedding_models import (
     EmbeddingFailure,
 )
 from ..models.document import Document
+from ..models.chunking_result import ChunkingResult
 from ..storage.embedding_db import EmbeddingResultDB
 from ..storage.embedding_storage import EmbeddingStorage
 import json
@@ -114,6 +115,14 @@ async def get_embedding_result(
                 result_dict["failures"] = json_data.get("failures", [])
                 
                 json_metadata = json_data.get("metadata", {})
+                
+                # 统计多模态向量类型
+                vectors_list = json_data.get("vectors", [])
+                text_count = sum(1 for v in vectors_list if v.get('chunk_type', 'text') == 'text')
+                table_count = sum(1 for v in vectors_list if v.get('chunk_type') == 'table')
+                image_count = sum(1 for v in vectors_list if v.get('chunk_type') == 'image')
+                code_count = sum(1 for v in vectors_list if v.get('chunk_type') == 'code')
+                
                 result_dict["metadata"] = {
                     "model": json_metadata.get("model", result.model),
                     "model_dimension": json_metadata.get("model_dimension", result.vector_dimension),
@@ -123,7 +132,31 @@ async def get_embedding_result(
                     "retry_count": json_metadata.get("retry_count", 0),
                     "processing_time_ms": json_metadata.get("processing_time_ms", result.processing_time_ms),
                     "vectors_per_second": json_metadata.get("vectors_per_second"),
+                    # 多模态类型统计
+                    "text_count": text_count,
+                    "table_count": table_count,
+                    "image_count": image_count,
+                    "code_count": code_count,
                 }
+                
+                # 添加source信息
+                source_data = json_data.get("source", {})
+                if source_data or result.chunking_result_id:
+                    # 尝试获取total_chunks
+                    total_chunks = None
+                    chunking_result_id = source_data.get("chunking_result_id") or result.chunking_result_id
+                    if chunking_result_id:
+                        chunking_result = db.query(ChunkingResult).filter(
+                            ChunkingResult.result_id == chunking_result_id
+                        ).first()
+                        if chunking_result:
+                            total_chunks = chunking_result.total_chunks
+                    
+                    result_dict["source"] = {
+                        "type": source_data.get("type", "chunking_result"),
+                        "chunking_result_id": chunking_result_id,
+                        "total_chunks": total_chunks,
+                    }
             else:
                 import logging
                 logging.warning(f"JSON file not found: {json_path}")
@@ -241,6 +274,14 @@ async def get_latest_embedding_result(
                 
                 # Build metadata from JSON data
                 json_metadata = json_data.get("metadata", {})
+                
+                # 统计多模态向量类型
+                vectors_list = json_data.get("vectors", [])
+                text_count = sum(1 for v in vectors_list if v.get('chunk_type', 'text') == 'text')
+                table_count = sum(1 for v in vectors_list if v.get('chunk_type') == 'table')
+                image_count = sum(1 for v in vectors_list if v.get('chunk_type') == 'image')
+                code_count = sum(1 for v in vectors_list if v.get('chunk_type') == 'code')
+                
                 result_dict["metadata"] = {
                     "model": json_metadata.get("model", result.model),
                     "model_dimension": json_metadata.get("model_dimension", result.vector_dimension),
@@ -250,7 +291,31 @@ async def get_latest_embedding_result(
                     "retry_count": json_metadata.get("retry_count", 0),
                     "processing_time_ms": json_metadata.get("processing_time_ms", result.processing_time_ms),
                     "vectors_per_second": json_metadata.get("vectors_per_second"),
+                    # 多模态类型统计
+                    "text_count": text_count,
+                    "table_count": table_count,
+                    "image_count": image_count,
+                    "code_count": code_count,
                 }
+                
+                # 添加source信息
+                source_data = json_data.get("source", {})
+                if source_data or result.chunking_result_id:
+                    # 尝试获取total_chunks
+                    total_chunks = None
+                    chunking_result_id = source_data.get("chunking_result_id") or result.chunking_result_id
+                    if chunking_result_id:
+                        chunking_result = db.query(ChunkingResult).filter(
+                            ChunkingResult.result_id == chunking_result_id
+                        ).first()
+                        if chunking_result:
+                            total_chunks = chunking_result.total_chunks
+                    
+                    result_dict["source"] = {
+                        "type": source_data.get("type", "chunking_result"),
+                        "chunking_result_id": chunking_result_id,
+                        "total_chunks": total_chunks,
+                    }
             else:
                 # File doesn't exist, log warning and use database metadata only
                 import logging

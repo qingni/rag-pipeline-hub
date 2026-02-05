@@ -243,7 +243,8 @@ class EmbeddingStorage:
                     "text_hash": v.text_hash,
                     "text_length": v.text_length,
                     "processing_time_ms": v.processing_time_ms,
-                    "source_text": getattr(v, 'source_text', None)  # Include source text if available
+                    "source_text": getattr(v, 'source_text', None),  # Include source text if available
+                    "chunk_type": getattr(v, 'chunk_type', 'text'),  # Include chunk type for multimodal stats
                 }
                 for v in response.vectors
             ],

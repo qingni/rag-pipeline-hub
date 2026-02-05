@@ -429,7 +429,7 @@ async def batch_delete_results(
 @router.get("/export/{result_id}")
 async def export_result(
     result_id: str,
-    format: str = Query("json", regex="^(json|csv)$"),
+  format: str = Query("json", pattern="^(json|csv)$"),
     db: Session = Depends(get_db)
 ):
     """

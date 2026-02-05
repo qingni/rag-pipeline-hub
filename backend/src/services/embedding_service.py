@@ -123,6 +123,7 @@ class DocumentVectorResult:
     text_length: int
     processing_time_ms: float
     source_text: str  # Add original source text
+    chunk_type: str = "text"  # 分块类型: text, table, image, code
 
 
 @dataclass
@@ -282,7 +283,8 @@ class EmbeddingService:
             raise
 
     def embed_documents(
-        self, texts: Sequence[str], request_id: Optional[str] = None
+        self, texts: Sequence[str], request_id: Optional[str] = None,
+        chunk_types: Optional[List[str]] = None
     ) -> BatchEmbeddingResult:
         """Vectorize multiple texts with true batch API call for better performance.
         
@@ -290,6 +292,11 @@ class EmbeddingService:
         - 使用 langchain OpenAIEmbeddings.embed_documents() 进行真正的批量 API 调用
         - 将 N 次串行请求减少为 1 次批量请求，大幅提升性能
         - 保留验证失败的文本记录，批量处理有效文本
+        
+        Args:
+            texts: 要向量化的文本列表
+            request_id: 请求ID
+            chunk_types: 每个文本对应的分块类型列表 (text, table, image, code)
         """
         if not texts:
             raise InvalidTextError("texts must contain at least 1 item")
@@ -309,15 +316,21 @@ class EmbeddingService:
         total_retry_count = 0
         total_rate_limit_hits = 0
 
+        # 如果没有传入chunk_types，默认全部为text
+        if chunk_types is None:
+            chunk_types = ["text"] * len(texts)
+
         # 第一步：验证所有文本，分离有效和无效文本
         validated_texts: List[str] = []
         valid_indices: List[int] = []  # 记录有效文本的原始索引
+        valid_chunk_types: List[str] = []  # 记录有效文本对应的chunk_type
         
         for index, raw_text in enumerate(texts):
             try:
                 validated_text = self._validate_text(raw_text)
                 validated_texts.append(validated_text)
                 valid_indices.append(index)
+                valid_chunk_types.append(chunk_types[index] if index < len(chunk_types) else "text")
             except InvalidTextError as err:
                 failures.append(
                     self._build_failure(
@@ -363,6 +376,7 @@ class EmbeddingService:
                 # 处理批量结果，将向量与原始索引关联
                 for i, (vector, original_index) in enumerate(zip(all_vectors, valid_indices)):
                     validated_text = validated_texts[i]
+                    current_chunk_type = valid_chunk_types[i] if i < len(valid_chunk_types) else "text"
                     try:
                         vector = self._validate_vector_dimensions(vector, batch_request_id)
                         vectors.append(
@@ -373,6 +387,7 @@ class EmbeddingService:
                                 text_length=len(validated_text),
                                 processing_time_ms=avg_duration_per_doc,
                                 source_text=validated_text,
+                                chunk_type=current_chunk_type,
                             )
                         )
                     except VectorDimensionMismatchError as err:
@@ -976,8 +991,8 @@ class EmbeddingService:
             embedding_logger.logger.info(
                 f"[DEBUG] Image chunk metadata: image_path={image_path}, mime_type={mime_type}, "
                 f"has_thumbnail={bool(metadata.get('thumbnail_base64'))}, "
-                f"context_before_len={len(metadata.get('context_before', ''))}, "
-                f"context_after_len={len(metadata.get('context_after', ''))}"
+                f"context_before_len={len(metadata.get('context_before') or '')}, "
+                f"context_after_len={len(metadata.get('context_after') or '')}"
             )
             
             if image_path:
@@ -1126,6 +1141,7 @@ class EmbeddingService:
         multimodal_inputs = []
         valid_indices = []
         chunk_texts = []  # 用于记录原始文本
+        chunk_types_list = []  # 用于记录分块类型
         
         for index, chunk in enumerate(chunks):
             try:
@@ -1154,6 +1170,7 @@ class EmbeddingService:
                 multimodal_inputs.append(multimodal_input)
                 valid_indices.append(index)
                 chunk_texts.append(validated_text)
+                chunk_types_list.append(chunk_type or "text")  # 记录分块类型
                 
             except InvalidTextError as err:
                 failures.append(
@@ -1197,6 +1214,7 @@ class EmbeddingService:
                 # 处理结果
                 for i, (vector, original_index) in enumerate(zip(all_vectors, valid_indices)):
                     validated_text = chunk_texts[i]
+                    current_chunk_type = chunk_types_list[i] if i < len(chunk_types_list) else "text"
                     try:
                         vector = self._validate_vector_dimensions(vector, batch_request_id)
                         vectors.append(
@@ -1207,6 +1225,7 @@ class EmbeddingService:
                                 text_length=len(validated_text),
                                 processing_time_ms=avg_duration_per_doc,
                                 source_text=validated_text,
+                                chunk_type=current_chunk_type,
                             )
                         )
                     except VectorDimensionMismatchError as err:
@@ -1348,14 +1367,16 @@ class EmbeddingService:
         embedding_logger.logger.info("[DEBUG] Using text-only embedding path")
         # 文本模型：使用普通的批量嵌入
         embedding_inputs = []
+        chunk_types_list = []  # 收集每个chunk的类型
         for chunk in chunks:
             text_content, chunk_type, _, _ = self._prepare_chunk_for_embedding(
                 chunk, is_multimodal=False
             )
             # 文本模型：所有块都使用文本内容
             embedding_inputs.append(text_content)
+            chunk_types_list.append(chunk_type or "text")
         
-        return self.embed_documents(embedding_inputs, request_id=request_id)
+        return self.embed_documents(embedding_inputs, request_id=request_id, chunk_types=chunk_types_list)
 
     def embed_document_latest_chunks(
         self,
@@ -1418,14 +1439,16 @@ class EmbeddingService:
         
         # 文本模型：使用普通的批量嵌入
         embedding_inputs = []
+        chunk_types_list = []  # 收集每个chunk的类型
         for chunk in chunks:
             text_content, chunk_type, _, _ = self._prepare_chunk_for_embedding(
                 chunk, is_multimodal=False
             )
             # 文本模型：所有块都使用文本内容
             embedding_inputs.append(text_content)
+            chunk_types_list.append(chunk_type or "text")
         
-        return self.embed_documents(embedding_inputs, request_id=request_id)
+        return self.embed_documents(embedding_inputs, request_id=request_id, chunk_types=chunk_types_list)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke test
