@@ -1,8 +1,8 @@
 # API接口文档 - 文档向量化模块
 
 **生成日期**: 2025-12-26  
-**项目**: RAG Framework - 文档向量化模块  
-**API版本**: v1  
+**最后更新**: 2026-02-05  
+**项目**: RAG Framework - 文档向量化模块
 
 ---
 
@@ -312,33 +312,40 @@ print(result['data']['embedding'])
         "name": "bge-m3",
         "display_name": "BGE-M3",
         "dimension": 1024,
-        "max_tokens": 8192,
-        "provider": "SiliconFlow",
-        "description": "多语言、多任务文本嵌入模型"
+        "max_sequence_length": 8192,
+        "provider": "bge",
+        "model_type": "text",
+        "description": "BGE-M3 多语言模型，支持密集检索、多向量检索和稀疏检索"
       },
       {
         "name": "qwen3-embedding-8b",
         "display_name": "Qwen3 Embedding 8B",
         "dimension": 4096,
-        "max_tokens": 8192,
-        "provider": "SiliconFlow",
-        "description": "高维度语义理解模型"
+        "max_sequence_length": 32768,
+        "provider": "qwen",
+        "model_type": "text",
+        "description": "通义千问 Embedding 8B，高精度、长文本支持、动态维度输出"
       },
       {
         "name": "hunyuan-embedding",
         "display_name": "腾讯混元 Embedding",
         "dimension": 1024,
-        "max_tokens": 8192,
-        "provider": "腾讯云",
-        "description": "中文优化嵌入模型"
+        "max_sequence_length": 1024,
+        "provider": "hunyuan",
+        "model_type": "text",
+        "description": "腾讯混元提供的 Embedding 模型"
       },
       {
         "name": "qwen3-vl-embedding-8b",
         "display_name": "Qwen3 VL Embedding 8B",
         "dimension": 4096,
-        "max_tokens": 8192,
-        "provider": "通义千问",
-        "description": "多模态图文嵌入模型"
+        "min_dimension": 64,
+        "max_dimension": 4096,
+        "max_sequence_length": 32768,
+        "provider": "qwen",
+        "model_type": "multimodal",
+        "supported_inputs": ["text", "image", "video", "text+image"],
+        "description": "通义千问多模态 Embedding 8B，支持文本、图像、视频输入"
       }
     ]
   }
