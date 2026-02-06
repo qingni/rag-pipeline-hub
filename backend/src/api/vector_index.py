@@ -895,3 +895,94 @@ async def update_vector(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update vector: {str(e)}"
         )
+
+
+# ==================== 多 Collection 搜索 API ====================
+
+class MultiCollectionSearchRequest(BaseModel):
+    """多 Collection 搜索请求"""
+    collection_names: List[str] = Field(..., description="Collection 名称列表")
+    query_vector: List[float] = Field(..., description="查询向量")
+    top_k: int = Field(default=10, gt=0, le=100, description="返回结果数量")
+    threshold: Optional[float] = Field(None, ge=0, le=1, description="相似度阈值")
+    merge_strategy: str = Field(default="score", description="结果合并策略 (score/round_robin)")
+
+
+@router.post("/multi-search")
+async def multi_collection_search(
+    request: MultiCollectionSearchRequest,
+    service: VectorIndexService = Depends(get_vector_index_service)
+):
+    """
+    多 Collection 联合搜索
+    
+    在多个 Collection 中同时搜索，返回合并后的结果。
+    
+    合并策略：
+    - score: 按相似度分数排序（默认）
+    - round_robin: 轮询各 Collection 结果
+    """
+    try:
+        query_vector = np.array(request.query_vector, dtype=np.float32)
+        
+        result = service.multi_collection_search(
+            collection_names=request.collection_names,
+            query_vector=query_vector,
+            top_k=request.top_k,
+            threshold=request.threshold,
+            merge_strategy=request.merge_strategy
+        )
+        
+        return result
+        
+    except IndexNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except (SearchError, VectorDimensionError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Multi-collection search failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Multi-collection search failed: {str(e)}"
+        )
+
+
+@router.delete("/history/{history_id}")
+async def delete_index_history(
+    history_id: int,
+    service: VectorIndexService = Depends(get_vector_index_service)
+):
+    """
+    删除索引历史记录
+    
+    删除指定的索引记录，同时会清理：
+    - Milvus 中的实际索引（如果存在）
+    - 相关的统计记录
+    - 相关的查询历史
+    """
+    try:
+        result = service.delete_index_history(history_id)
+        return result
+        
+    except IndexNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except IndexBuildError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Failed to delete index history: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete index history: {str(e)}"
+        )

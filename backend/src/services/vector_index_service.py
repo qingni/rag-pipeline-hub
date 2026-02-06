@@ -1256,3 +1256,175 @@ class VectorIndexService:
         except Exception as e:
             logger.error(f"Failed to update vector: {str(e)}")
             raise IndexBuildError(f"Failed to update vector: {str(e)}")
+
+    # ==================== 多 Collection 搜索 API ====================
+
+    def multi_collection_search(
+        self,
+        collection_names: List[str],
+        query_vector: np.ndarray,
+        top_k: int = 10,
+        threshold: Optional[float] = None,
+        merge_strategy: str = "score"  # "score" | "round_robin"
+    ) -> Dict[str, Any]:
+        """
+        多 Collection 联合搜索
+        
+        Args:
+            collection_names: Collection 名称列表
+            query_vector: 查询向量
+            top_k: 每个 Collection 返回结果数量
+            threshold: 相似度阈值
+            merge_strategy: 结果合并策略 ("score" 按分数排序, "round_robin" 轮询)
+            
+        Returns:
+            合并后的搜索结果
+        """
+        try:
+            start_time = datetime.now()
+            all_results = []
+            collection_results = {}
+            
+            # 获取所有匹配的索引
+            indexes = self.db.query(VectorIndex).filter(
+                VectorIndex.index_name.in_(collection_names),
+                VectorIndex.status == IndexStatus.READY
+            ).all()
+            
+            if not indexes:
+                raise IndexNotFoundError(f"No ready indexes found for: {collection_names}")
+            
+            # 在每个 Collection 中搜索
+            for vector_index in indexes:
+                try:
+                    # 验证维度
+                    if len(query_vector) != vector_index.dimension:
+                        logger.warning(
+                            f"Skipping {vector_index.index_name}: dimension mismatch "
+                            f"(expected {vector_index.dimension}, got {len(query_vector)})"
+                        )
+                        continue
+                    
+                    provider = self._get_provider_for_index(vector_index)
+                    
+                    results = provider.search(
+                        vector_index.provider_index_id,
+                        query_vector,
+                        top_k
+                    )
+                    
+                    # 应用阈值过滤
+                    if threshold is not None:
+                        results = [r for r in results if r.score >= threshold]
+                    
+                    # 添加 collection 来源信息
+                    for r in results:
+                        r.metadata["_collection_name"] = vector_index.index_name
+                        r.metadata["_collection_id"] = vector_index.id
+                    
+                    collection_results[vector_index.index_name] = results
+                    all_results.extend(results)
+                    
+                except Exception as e:
+                    logger.warning(f"Search failed for {vector_index.index_name}: {str(e)}")
+                    continue
+            
+            # 合并结果
+            if merge_strategy == "score":
+                # 按分数排序
+                all_results.sort(key=lambda x: x.score, reverse=True)
+                merged_results = all_results[:top_k]
+            else:
+                # 轮询合并
+                merged_results = []
+                max_len = max(len(v) for v in collection_results.values()) if collection_results else 0
+                for i in range(max_len):
+                    for coll_name in collection_names:
+                        if coll_name in collection_results and i < len(collection_results[coll_name]):
+                            merged_results.append(collection_results[coll_name][i])
+                            if len(merged_results) >= top_k:
+                                break
+                    if len(merged_results) >= top_k:
+                        break
+            
+            total_time_ms = (datetime.now() - start_time).total_seconds() * 1000
+            
+            return {
+                "collections_searched": len(indexes),
+                "collection_names": [idx.index_name for idx in indexes],
+                "top_k": top_k,
+                "merge_strategy": merge_strategy,
+                "results_count": len(merged_results),
+                "total_time_ms": total_time_ms,
+                "results": [
+                    {
+                        "vector_id": r.vector_id,
+                        "score": r.score,
+                        "collection_name": r.metadata.get("_collection_name"),
+                        "metadata": {k: v for k, v in r.metadata.items() if not k.startswith("_")}
+                    }
+                    for r in merged_results
+                ],
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Multi-collection search failed: {str(e)}")
+            raise SearchError("multi-collection", str(e))
+
+    def delete_index_history(self, history_id: int) -> Dict[str, Any]:
+        """
+        删除索引历史记录
+        
+        Args:
+            history_id: 历史记录 ID（即索引 ID）
+            
+        Returns:
+            删除结果
+        """
+        try:
+            # 获取索引记录
+            vector_index = self.db.query(VectorIndex).filter(
+                VectorIndex.id == history_id
+            ).first()
+            
+            if not vector_index:
+                raise IndexNotFoundError(f"Index history {history_id} not found")
+            
+            # 如果索引状态是 READY，需要先删除实际索引
+            if vector_index.status == IndexStatus.READY and vector_index.provider_index_id:
+                try:
+                    provider = self._get_provider_for_index(vector_index)
+                    provider.delete_index(vector_index.provider_index_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete provider index: {str(e)}")
+            
+            # 删除相关统计记录
+            self.db.query(IndexStatistics).filter(
+                IndexStatistics.index_id == history_id
+            ).delete()
+            
+            # 删除相关查询历史
+            self.db.query(QueryHistory).filter(
+                QueryHistory.index_id == history_id
+            ).delete()
+            
+            # 删除索引记录
+            self.db.delete(vector_index)
+            self.db.commit()
+            
+            logger.info(f"Deleted index history {history_id}")
+            
+            return {
+                "history_id": history_id,
+                "deleted": True,
+                "message": "索引历史记录已删除",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except IndexNotFoundError:
+            raise
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to delete index history: {str(e)}")
+            raise IndexBuildError(f"Failed to delete index history: {str(e)}")

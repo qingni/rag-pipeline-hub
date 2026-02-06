@@ -1,0 +1,326 @@
+openapi: 3.0.3
+info:
+  title: Vector Search API - 向量检索模块（优化版）
+  description: |
+    向量相似度检索 API，支持 TopK 查询、相似度阈值过滤和批量查询。
+  version: 2.0.0
+  contact:
+    name: RAG Framework Team
+
+servers:
+  - url: /api/v1
+    description: API v1
+
+tags:
+  - name: Vector Search
+    description: 向量相似度检索接口
+
+paths:
+  /vector-index/search:
+    post:
+      tags:
+        - Vector Search
+      summary: 向量相似度检索
+      description: |
+        在指定的向量索引中执行相似度检索，返回 TopK 个最相似的结果。
+        
+        支持的功能：
+        - TopK 查询
+        - 相似度阈值过滤
+        - 单/多 Collection 查询
+      operationId: searchVectors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: 检索成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 索引不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Milvus 服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vector-index/batch-search:
+    post:
+      tags:
+        - Vector Search
+      summary: 批量向量检索
+      description: 一次请求提交多个查询向量，返回每个查询的 TopK 结果
+      operationId: batchSearchVectors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchSearchRequest'
+      responses:
+        '200':
+          description: 批量检索成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSearchResponse'
+        '400':
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vector-index/indexes/{collection_name}/stats:
+    get:
+      tags:
+        - Vector Search
+      summary: 获取索引统计信息
+      description: 返回索引的统计信息，包括向量数量、索引大小等
+      operationId: getIndexStats
+      parameters:
+        - name: collection_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功返回统计信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexStatsResponse'
+        '404':
+          description: 索引不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    SearchRequest:
+      type: object
+      required:
+        - collection_name
+        - query_vector
+      properties:
+        collection_name:
+          type: string
+          description: 目标 Collection 名称
+          example: 'legal_docs_index'
+        collection_names:
+          type: array
+          items:
+            type: string
+          description: 多 Collection 联合查询（可选，与 collection_name 二选一）
+        query_vector:
+          type: array
+          items:
+            type: number
+          description: 查询向量
+        top_k:
+          type: integer
+          description: 返回结果数量
+          minimum: 1
+          maximum: 100
+          default: 5
+        threshold:
+          type: number
+          description: 相似度阈值（可选）
+          minimum: 0
+          maximum: 1
+        search_params:
+          type: object
+          description: 搜索参数（如 nprobe、ef）
+          additionalProperties: true
+        output_fields:
+          type: array
+          items:
+            type: string
+          description: 需要返回的字段列表
+          default: ['doc_id', 'chunk_index', 'metadata']
+        filter_expression:
+          type: string
+          description: 过滤表达式（Milvus 表达式语法）
+          example: 'doc_id == "doc_001"'
+
+    SearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        query_time_ms:
+          type: number
+          description: 查询耗时（毫秒）
+        total_candidates:
+          type: integer
+          description: 候选向量总数
+
+    SearchResult:
+      type: object
+      properties:
+        vector_id:
+          type: integer
+          format: int64
+          description: 向量ID
+        score:
+          type: number
+          description: 相似度分数（归一化后 0-1）
+        distance:
+          type: number
+          description: 原始距离值
+        doc_id:
+          type: string
+          description: 文档ID
+        chunk_index:
+          type: integer
+          description: 分块索引
+        metadata:
+          type: object
+          description: 向量元数据
+        collection_name:
+          type: string
+          description: 来源 Collection（多 Collection 查询时返回）
+
+    BatchSearchRequest:
+      type: object
+      required:
+        - collection_name
+        - query_vectors
+      properties:
+        collection_name:
+          type: string
+          description: 目标 Collection 名称
+        query_vectors:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+          description: 查询向量列表
+        top_k:
+          type: integer
+          default: 5
+        threshold:
+          type: number
+        search_params:
+          type: object
+        output_fields:
+          type: array
+          items:
+            type: string
+
+    BatchSearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SingleQueryResult'
+        total_query_time_ms:
+          type: number
+
+    SingleQueryResult:
+      type: object
+      properties:
+        query_index:
+          type: integer
+          description: 查询向量索引
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        query_time_ms:
+          type: number
+
+    IndexStatsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/IndexStats'
+
+    IndexStats:
+      type: object
+      properties:
+        collection_name:
+          type: string
+        vector_count:
+          type: integer
+          description: 向量总数
+        dimension:
+          type: integer
+          description: 向量维度
+        index_type:
+          type: string
+          description: 索引类型
+        metric_type:
+          type: string
+          description: 距离度量类型
+        index_size_bytes:
+          type: integer
+          format: int64
+          description: 索引占用空间（字节）
+        index_size_human:
+          type: string
+          description: 索引占用空间（人类可读）
+        loaded:
+          type: boolean
+          description: 索引是否已加载到内存
+        created_at:
+          type: string
+          format: date-time
+        last_updated_at:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: false
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+
+    ErrorDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [connection, validation, timeout, not_found, internal]
+        code:
+          type: string
+          example: ERR_MILVUS_TIMEOUT
+        message:
+          type: string
+        detail:
+          type: string
+        suggestion:
+          type: string

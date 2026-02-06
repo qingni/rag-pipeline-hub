@@ -14,17 +14,6 @@ class Settings(BaseSettings):
     RESULTS_DIR: str = "./results"
     MAX_UPLOAD_SIZE: int = 52428800  # 50MB in bytes
     
-    # OpenAI
-    OPENAI_API_KEY: Optional[str] = None
-    
-    # AWS Bedrock
-    AWS_ACCESS_KEY_ID: Optional[str] = None
-    AWS_SECRET_ACCESS_KEY: Optional[str] = None
-    AWS_REGION: str = "us-east-1"
-    
-    # HuggingFace
-    HUGGINGFACE_API_KEY: Optional[str] = None
-    
     # Milvus
     MILVUS_HOST: str = "localhost"
     MILVUS_PORT: int = 19530
@@ -35,13 +24,6 @@ class Settings(BaseSettings):
     # Vector Index
     VECTOR_INDEX_RESULTS_DIR: str = "results/vector_index"
     VECTOR_INDEX_DEFAULT_PROVIDER: str = "milvus"
-    
-    # Pinecone
-    PINECONE_API_KEY: Optional[str] = None
-    PINECONE_ENVIRONMENT: str = "us-west1-gcp"
-    
-    # Ollama
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
     
     # Embedding API Configuration
     EMBEDDING_API_KEY: Optional[str] = None

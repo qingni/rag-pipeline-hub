@@ -1,0 +1,649 @@
+openapi: 3.0.3
+info:
+  title: Vector Index API - 向量索引模块（优化版）
+  description: |
+    向量索引管理 API，支持 Milvus 向量数据库的索引创建、查询、更新和删除操作。
+    
+    ## 功能概述
+    - 创建向量索引（支持 FLAT/IVF_FLAT/IVF_PQ/HNSW 算法）
+    - 索引构建进度查询
+    - 索引列表和详情查询
+    - 索引删除（幂等性设计）
+  version: 2.0.0
+  contact:
+    name: RAG Framework Team
+
+servers:
+  - url: /api/v1
+    description: API v1
+
+tags:
+  - name: Index Management
+    description: 索引管理相关接口
+  - name: Index Task
+    description: 索引任务相关接口
+
+paths:
+  /vector-index/indexes:
+    get:
+      tags:
+        - Index Management
+      summary: 获取索引列表
+      description: 返回所有已创建的向量索引列表
+      operationId: listIndexes
+      parameters:
+        - name: status
+          in: query
+          description: 按状态过滤
+          schema:
+            type: string
+            enum: [CREATING, READY, ERROR, DELETED]
+        - name: page
+          in: query
+          description: 页码
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          description: 每页数量
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: 成功返回索引列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexListResponse'
+
+    post:
+      tags:
+        - Index Management
+      summary: 创建向量索引
+      description: |
+        从向量化任务结果创建新的向量索引。
+        支持的索引算法：FLAT、IVF_FLAT、IVF_PQ、HNSW
+      operationId: createIndex
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIndexRequest'
+      responses:
+        '202':
+          description: 索引创建任务已接受
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIndexResponse'
+        '400':
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vector-index/indexes/{collection_name}:
+    get:
+      tags:
+        - Index Management
+      summary: 获取索引详情
+      description: 返回指定索引的详细信息
+      operationId: getIndex
+      parameters:
+        - name: collection_name
+          in: path
+          required: true
+          description: Collection 名称
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功返回索引详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexDetailResponse'
+        '404':
+          description: 索引不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Index Management
+      summary: 删除索引
+      description: |
+        删除指定的向量索引。
+        采用幂等性设计：删除不存在的索引返回成功。
+      operationId: deleteIndex
+      parameters:
+        - name: collection_name
+          in: path
+          required: true
+          description: Collection 名称
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteIndexResponse'
+
+  /vector-index/indexes/{collection_name}/vectors:
+    post:
+      tags:
+        - Index Management
+      summary: 添加向量
+      description: 向指定索引添加新向量（增量更新）
+      operationId: addVectors
+      parameters:
+        - name: collection_name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddVectorsRequest'
+      responses:
+        '200':
+          description: 添加成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddVectorsResponse'
+        '400':
+          description: 向量维度不匹配或数据无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Index Management
+      summary: 删除向量
+      description: |
+        从索引中删除指定的向量。
+        幂等性设计：删除不存在的向量ID静默忽略。
+      operationId: deleteVectors
+      parameters:
+        - name: collection_name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteVectorsRequest'
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteVectorsResponse'
+
+  /vector-index/tasks/{task_id}:
+    get:
+      tags:
+        - Index Task
+      summary: 获取任务进度
+      description: 返回索引构建任务的进度信息
+      operationId: getTaskProgress
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          description: 任务ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 成功返回任务进度
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskProgressResponse'
+        '404':
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vector-index/tasks/{task_id}/cancel:
+    post:
+      tags:
+        - Index Task
+      summary: 取消任务
+      description: 取消正在执行的索引构建任务
+      operationId: cancelTask
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelTaskResponse'
+
+  /vector-index/embedding-tasks:
+    get:
+      tags:
+        - Index Management
+      summary: 获取可用的向量化任务列表
+      description: 返回已完成的向量化任务列表，供创建索引时选择
+      operationId: listEmbeddingTasks
+      responses:
+        '200':
+          description: 成功返回向量化任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingTaskListResponse'
+
+  /vector-index/history:
+    get:
+      tags:
+        - Index Management
+      summary: 获取索引历史记录
+      description: 返回索引创建的历史记录
+      operationId: getIndexHistory
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 成功返回历史记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexHistoryResponse'
+
+  /vector-index/history/{history_id}:
+    delete:
+      tags:
+        - Index Management
+      summary: 删除历史记录
+      description: 删除指定的索引历史记录
+      operationId: deleteHistory
+      parameters:
+        - name: history_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteHistoryResponse'
+
+components:
+  schemas:
+    CreateIndexRequest:
+      type: object
+      required:
+        - collection_name
+        - embedding_task_id
+        - index_type
+      properties:
+        collection_name:
+          type: string
+          description: Collection 名称
+          pattern: '^[a-zA-Z0-9_]{3,64}$'
+          example: 'legal_docs_index'
+        embedding_task_id:
+          type: string
+          description: 来源向量化任务ID
+          format: uuid
+        index_type:
+          type: string
+          description: 索引算法类型
+          enum: [FLAT, IVF_FLAT, IVF_PQ, HNSW]
+          default: HNSW
+        metric_type:
+          type: string
+          description: 距离度量方式
+          enum: [L2, IP, COSINE]
+          default: L2
+        index_params:
+          type: object
+          description: 索引参数（根据 index_type 不同）
+          additionalProperties: true
+
+    CreateIndexResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        task_id:
+          type: string
+          format: uuid
+          description: 索引构建任务ID
+        collection_name:
+          type: string
+        message:
+          type: string
+
+    IndexListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndexSummary'
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    IndexSummary:
+      type: object
+      properties:
+        collection_name:
+          type: string
+        dimension:
+          type: integer
+        index_type:
+          type: string
+        metric_type:
+          type: string
+        vector_count:
+          type: integer
+        status:
+          type: string
+          enum: [CREATING, READY, ERROR, DELETED]
+        created_at:
+          type: string
+          format: date-time
+
+    IndexDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/IndexDetail'
+
+    IndexDetail:
+      allOf:
+        - $ref: '#/components/schemas/IndexSummary'
+        - type: object
+          properties:
+            index_params:
+              type: object
+            source_task_id:
+              type: string
+            updated_at:
+              type: string
+              format: date-time
+
+    DeleteIndexResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        collection_name:
+          type: string
+        message:
+          type: string
+
+    AddVectorsRequest:
+      type: object
+      required:
+        - vectors
+      properties:
+        vectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/VectorInput'
+
+    VectorInput:
+      type: object
+      required:
+        - doc_id
+        - chunk_index
+        - embedding
+      properties:
+        doc_id:
+          type: string
+          maxLength: 256
+        chunk_index:
+          type: integer
+          minimum: 0
+        embedding:
+          type: array
+          items:
+            type: number
+        metadata:
+          type: object
+
+    AddVectorsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        added_count:
+          type: integer
+        message:
+          type: string
+
+    DeleteVectorsRequest:
+      type: object
+      required:
+        - vector_ids
+      properties:
+        vector_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+
+    DeleteVectorsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        deleted_count:
+          type: integer
+          description: 实际删除的向量数量
+        requested_count:
+          type: integer
+          description: 请求删除的向量数量
+        message:
+          type: string
+
+    TaskProgressResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/TaskProgress'
+
+    TaskProgress:
+      type: object
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        collection_name:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        progress:
+          type: number
+          minimum: 0
+          maximum: 100
+        processed:
+          type: integer
+        total:
+          type: integer
+        status_text:
+          type: string
+          description: 状态描述文字
+        error:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    CancelTaskResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        task_id:
+          type: string
+        message:
+          type: string
+
+    EmbeddingTaskListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmbeddingTaskSummary'
+
+    EmbeddingTaskSummary:
+      type: object
+      properties:
+        task_id:
+          type: string
+        name:
+          type: string
+        dimension:
+          type: integer
+        vector_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    IndexHistoryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndexHistoryItem'
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    IndexHistoryItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        collection_name:
+          type: string
+        dimension:
+          type: integer
+        index_type:
+          type: string
+        metric_type:
+          type: string
+        vector_count:
+          type: integer
+        source_task_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    DeleteHistoryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: false
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+
+    ErrorDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          description: 错误类型
+          enum: [connection, validation, timeout, not_found, internal]
+        code:
+          type: string
+          description: 错误码
+          example: ERR_MILVUS_CONNECTION
+        message:
+          type: string
+          description: 用户友好的错误描述
+        detail:
+          type: string
+          description: 技术细节
+        suggestion:
+          type: string
+          description: 建议操作
