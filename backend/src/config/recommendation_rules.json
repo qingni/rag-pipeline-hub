@@ -1,0 +1,65 @@
+{
+  "version": "1.0.0",
+  "description": "向量索引智能推荐规则配置表",
+  "rules": [
+    {
+      "rule_id": "rule_small_data",
+      "priority": 1,
+      "min_vector_count": 0,
+      "max_vector_count": 9999,
+      "min_dimension": null,
+      "max_dimension": null,
+      "embedding_models": null,
+      "recommended_index_type": "FLAT",
+      "recommended_metric_type": null,
+      "reason_template": "数据量 {count} 条 < 1万，FLAT 暴力搜索保证 100% 精确召回"
+    },
+    {
+      "rule_id": "rule_medium_data",
+      "priority": 2,
+      "min_vector_count": 10000,
+      "max_vector_count": 499999,
+      "min_dimension": null,
+      "max_dimension": null,
+      "embedding_models": null,
+      "recommended_index_type": "HNSW",
+      "recommended_metric_type": null,
+      "reason_template": "数据量 {count} 条（1万~50万），HNSW 图索引兼顾高召回率与低延迟，业界首选"
+    },
+    {
+      "rule_id": "rule_large_data",
+      "priority": 3,
+      "min_vector_count": 500000,
+      "max_vector_count": 4999999,
+      "min_dimension": null,
+      "max_dimension": null,
+      "embedding_models": null,
+      "recommended_index_type": "IVF_SQ8",
+      "recommended_metric_type": null,
+      "reason_template": "数据量 {count} 条（50万~500万），IVF_SQ8 标量量化在精度损失极小的情况下节省约 75% 内存"
+    },
+    {
+      "rule_id": "rule_massive_data",
+      "priority": 4,
+      "min_vector_count": 5000000,
+      "max_vector_count": null,
+      "min_dimension": null,
+      "max_dimension": null,
+      "embedding_models": null,
+      "recommended_index_type": "IVF_PQ",
+      "recommended_metric_type": null,
+      "reason_template": "数据量 {count} 条 ≥ 500万，IVF_PQ 乘积量化大幅压缩内存占用"
+    }
+  ],
+  "metric_type_rules": {
+    "bge": "COSINE",
+    "qwen": "COSINE",
+    "openai": "COSINE",
+    "cohere": "COSINE",
+    "default": "L2"
+  }  "fallback": {
+    "index_type": "HNSW",
+    "metric_type": "COSINE",
+    "reason": "未精确匹配推荐规则，已使用通用默认值"
+  }
+}

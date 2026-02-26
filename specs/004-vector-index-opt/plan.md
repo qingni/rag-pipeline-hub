@@ -3,44 +3,47 @@
 **Branch**: `004-vector-index-opt` | **Date**: 2026-02-06 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/004-vector-index-opt/spec.md`
 
+**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+
 ## Summary
 
-向量索引模块优化版，基于 004-vector-index 进行简化，**移除 FAISS 支持，统一使用 Milvus 作为唯一向量数据库后端**。主要功能包括：
-- 向量数据索引构建（支持 FLAT/IVF_FLAT/IVF_PQ/HNSW 四种算法）
-- 向量相似度检索（支持 TopK 查询和相似度阈值过滤）
-- 索引增量更新与删除（幂等性设计）
-- 前端索引管理界面（左右分栏布局 + 实时进度展示）
+向量索引模块是 RAG 系统的核心检索基础设施，基于 Milvus 向量数据库提供索引构建、相似度检索、混合检索（稠密+稀疏双路召回 + RRF 粗排 + Reranker 精排）和智能推荐能力。本版本移除 FAISS 支持，统一使用 Milvus 作为唯一向量存储后端，并新增智能推荐引擎（根据向量特征自动推荐索引算法和度量类型）。
 
 ## Technical Context
 
-**Language/Version**: Python 3.11 (Backend), TypeScript/JavaScript (Frontend with Vue 3)
-**Primary Dependencies**: 
-- Backend: FastAPI, pymilvus==2.3.4, SQLAlchemy, Pydantic
-- Frontend: Vue 3, Vite, TDesign Vue Next, Pinia
-**Storage**: Milvus 2.x (向量数据库), SQLite/PostgreSQL (元数据)
-**Testing**: pytest, pytest-asyncio, pytest-cov
-**Target Platform**: Linux server, macOS (development)
-**Project Type**: web (frontend + backend)
-**Performance Goals**: 
-- 单次 TopK 查询（K=5）响应 < 100ms (P95)
-- 索引构建 >= 1000 条向量/秒 (1536维)
-- 并发支持 >= 10 请求，吞吐量 >= 50 QPS
-**Constraints**: 
-- Milvus 连接失败时指数退避重试（1s→2s→4s，最多3次）
-- 删除不存在的向量ID静默忽略（幂等性）
-**Scale/Scope**: 支持 1,000 到 1,000,000 级别向量规模
+**Language/Version**: Python 3.11 (Backend), TypeScript/JavaScript (Frontend Vue3)  
+**Primary Dependencies**: FastAPI >=0.110.0, pymilvus 2.4.9, FlagEmbedding >=1.2.0, Vue 3.x, TDesign Vue Next, Pinia  
+**Storage**: Milvus 2.4+ (向量数据), SQLite/PostgreSQL (任务元数据, 推荐规则, 推荐行为日志)  
+**Testing**: pytest (Backend), Vitest (Frontend)  
+**Target Platform**: Linux server (Docker), macOS 开发环境  
+**Project Type**: web (frontend + backend)  
+**Performance Goals**: 纯稠密检索 <100ms P95, 混合检索 <200ms P95, Reranker 精排 <100ms P95, 智能推荐 <500ms P95  
+**Constraints**: Milvus 2.4+ (hybrid_search 支持), CPU 环境 Reranker 推理, 推荐采纳率 ≥80%  
+**Scale/Scope**: 1K-1M 向量规模, 10+ 并发查询, 50 QPS 吞吐量
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-| Principle | Status | Notes |
-|-----------|--------|-------|
-| I. 模块化架构 | ✅ PASS | 向量索引模块独立设计，通过明确接口与其他模块通信 |
-| II. 多提供商支持 | ✅ PASS | 本版本专注 Milvus，符合宪章"支持多种技术提供商"原则 |
-| III. 结果持久化 | ✅ PASS | 索引元数据保存为 JSON 格式，Milvus 原生持久化向量数据 |
-| IV. 用户体验优先 | ✅ PASS | 采用 Vue3 + TDesign，左右分栏布局，实时进度展示 |
-| V. API标准化 | ✅ PASS | 基于 FastAPI 实现 RESTful API，统一错误处理 |
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. 模块化架构 | ✅ PASS | 向量索引模块独立设计，通过 RESTful API 通信，独立 service 文件 (index_service.py, recommendation_service.py) |
+| II. 多提供商支持 | ✅ PASS | 本版本专注 Milvus（移除 FAISS），Milvus 作为 constitution 明确列出的向量数据库选项 |
+| III. 结果持久化 (NON-NEGOTIABLE) | ✅ PASS | 索引结果、检索结果、推荐行为日志均以 JSON 格式持久化，文件命名含时间戳 |
+| IV. 用户体验优先 | ✅ PASS | Vue3 + TDesign，左右分栏布局，智能推荐自动填充 + 理由标签 |
+| V. API 标准化 | ✅ PASS | FastAPI RESTful，统一错误处理（ErrorResponse），OpenAPI 契约文档 |
+
+**Gate Result**: ✅ ALL PASS — 无违规项
+
+### Post-Design Re-check (Phase 1 完成后)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. 模块化架构 | ✅ PASS | RecommendationEngine 独立模块，通过 /recommend API 通信 |
+| II. 多提供商支持 | ✅ PASS | 推荐规则以 JSON 配置表存储，可扩展支持其他向量数据库的推荐 |
+| III. 结果持久化 | ✅ PASS | recommendation_logs 表持久化所有推荐行为 |
+| IV. 用户体验优先 | ✅ PASS | 推荐理由标签、兜底提示、非阻塞推荐（延迟超时用户可手动选择） |
+| V. API 标准化 | ✅ PASS | 新增 /recommend、/recommend/log、/recommend/stats 三个标准 REST 端点 |
 
 ## Project Structure
 
@@ -48,90 +51,88 @@
 
 ```text
 specs/004-vector-index-opt/
-├── plan.md              # This file
-├── research.md          # Phase 0 output - 技术研究
-├── data-model.md        # Phase 1 output - 数据模型
-├── quickstart.md        # Phase 1 output - 快速入门
-├── contracts/           # Phase 1 output - API契约
-│   ├── index-api.yaml   # 索引管理 API
-│   └── search-api.yaml  # 检索 API
-└── tasks.md             # Phase 2 output - 任务分解
+├── plan.md              # This file (/speckit.plan command output)
+├── research.md          # Phase 0 output — 13 research tasks completed
+├── data-model.md        # Phase 1 output — 7 entities (incl. RecommendationRule, RecommendationLog)
+├── quickstart.md        # Phase 1 output — 5 scenarios (incl. smart recommendation)
+├── contracts/           # Phase 1 output
+│   ├── index-api.yaml   # 索引管理 + 智能推荐 API (v2.2.0)
+│   └── search-api.yaml  # 检索 API (v2.1.0)
+├── checklists/
+│   └── requirements.md  # 需求检查清单
+└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
 ```
 
 ### Source Code (repository root)
 
 ```text
-# Web application structure (frontend + backend)
 backend/
 ├── src/
-│   ├── api/
-│   │   └── vector_index.py          # 向量索引 API 路由
-│   ├── models/
-│   │   └── vector_index.py          # 向量索引数据模型
-│   ├── schemas/
-│   │   └── vector_index.py          # Pydantic 请求/响应模式
+│   ├── models/              # 数据模型
+│   │   └── vector_index.py  # VectorIndex, IndexTask, HybridSearchResult, RecommendationRule, RecommendationLog
 │   ├── services/
-│   │   ├── vector_index_service.py  # 向量索引业务逻辑
-│   │   └── providers/
-│   │       ├── __init__.py          # Provider 注册
-│   │       ├── base_provider.py     # 抽象基类
-│   │       └── milvus_provider.py   # Milvus 实现
+│   │   ├── vector_index_service.py    # 索引构建/更新/删除服务
+│   │   ├── search_service.py          # 检索 + 混合检索服务
+│   │   ├── providers/
+│   │   │   └── milvus_provider.py     # Milvus 连接管理/CRUD
+│   │   ├── reranker_service.py        # bge-reranker-v2-m3 精排服务
+│   │   └── recommendation_service.py  # 智能推荐引擎（NEW）
+│   ├── api/
+│   │   └── vector_index.py            # 索引管理 + 检索 + 推荐 REST 端点（统一入口）
+│   ├── utils/
+│   │   ├── vector_utils.py            # 向量验证工具
+│   │   ├── sparse_utils.py            # 稀疏向量工具
+│   │   ├── result_persistence.py      # 结果持久化
+│   │   ├── error_handlers.py          # 统一错误处理
+│   │   └── index_logging.py           # 操作日志
+│   ├── exceptions/
+│   │   └── vector_index_errors.py     # 异常体系
 │   └── config/
-│       └── vector_config.py         # 向量数据库配置
+│       └── recommendation_rules.json  # 推荐规则配置表（NEW）
 ├── tests/
 │   ├── unit/
-│   │   └── test_vector_index.py     # 单元测试
+│   │   └── test_recommendation.py     # 推荐引擎单元测试（NEW）
 │   └── integration/
-│       └── test_vector_milvus.py    # Milvus 集成测试
-└── results/
-    └── vector_index/                # 索引结果 JSON 存储
+│       └── test_index_api.py          # API 集成测试
+└── migrations/
+    └── vector_index/
+        └── 008_recommendation.sql     # 推荐规则表 + 行为日志表（NEW）
 
 frontend/
 ├── src/
 │   ├── components/
 │   │   └── VectorIndex/
-│   │       ├── IndexCreate.vue      # 索引创建组件
-│   │       ├── IndexList.vue        # 索引列表组件
-│   │       └── VectorSearch.vue     # 向量搜索组件
-│   ├── views/
-│   │   └── VectorIndex.vue          # 向量索引页面
+│   │       ├── IndexCreate.vue        # 索引配置面板（含推荐展示）
+│   │       ├── IndexList.vue          # 索引列表
+│   │       ├── IndexHistory.vue       # 历史记录
+│   │       ├── IndexProgress.vue      # 索引进度组件
+│   │       ├── VectorSearch.vue       # 检索面板（含混合检索模式切换）
+│   │       ├── RecommendBadge.vue     # 推荐理由标签组件（NEW）
+│   │       └── RecommendFallback.vue  # 兜底提示组件（NEW）
 │   ├── services/
-│   │   └── vectorIndexApi.js        # API 调用封装
-│   └── stores/
-│       └── vectorIndexStore.js      # Pinia 状态管理
+│   │   └── vectorIndexApi.js          # API 调用层（含推荐接口）
+│   ├── stores/
+│   │   └── vectorIndexStore.js        # Pinia 状态管理
+│   └── views/
+│       └── VectorIndex.vue            # 索引管理主页面
 └── tests/
     └── components/
-        └── VectorIndex.spec.js      # 组件测试
+        └── RecommendBadge.spec.js     # 推荐标签组件测试（NEW）
 ```
 
-**Structure Decision**: 采用现有项目的 Web 应用结构（frontend + backend），复用已有的向量索引模块代码，移除 FAISS 相关实现。
+**Structure Decision**: Web application structure (Option 2) — 前后端分离的 Vue3 + FastAPI 架构，与现有项目结构一致。
 
 ## Complexity Tracking
 
-> 本版本无宪章违规，通过移除 FAISS 简化了架构复杂度。
+> 无违规项，无需 Complexity Tracking。
 
-| Simplification | Benefit | Trade-off |
-|----------------|---------|-----------|
-| 移除 FAISS | 减少代码维护、统一存储后端 | 失去本地轻量级存储选项 |
-| 统一 Milvus | 降低复杂度、减少测试场景 | 需要 Milvus 服务运行 |
+## Generated Artifacts
 
-## Key Design Decisions
-
-### 1. 索引算法支持
-- **FLAT**: 暴力搜索，精确匹配，适用于小规模数据
-- **IVF_FLAT**: 倒排文件索引，平衡精度与速度
-- **IVF_PQ**: 倒排文件 + 乘积量化，适用于大规模数据
-- **HNSW**: 层次化可导航小世界图，高召回率
-
-### 2. 错误处理策略
-- **Milvus 连接失败**: 指数退避重试（1s→2s→4s，最多3次）
-- **删除不存在向量**: 静默忽略，返回成功（幂等性设计）
-- **维度不匹配**: 拒绝该向量，返回明确错误信息
-
-### 3. 元数据字段设计
-- **必需字段**: `doc_id`, `chunk_index`, `created_at`
-- **可选字段**: 文本内容、来源文件名等自定义字段
-
-### 4. 前端交互设计
-- **进度展示**: 实时进度条（百分比 + 已处理/总数）+ 状态文字
-- **错误展示**: 错误弹窗（Modal）显示错误类型、详情和建议操作
+| Artifact | Path | Status |
+|----------|------|--------|
+| research.md | `specs/004-vector-index-opt/research.md` | ✅ Updated (13 research tasks) |
+| data-model.md | `specs/004-vector-index-opt/data-model.md` | ✅ Updated (7 entities) |
+| quickstart.md | `specs/004-vector-index-opt/quickstart.md` | ✅ Updated (5 scenarios) |
+| index-api.yaml | `specs/004-vector-index-opt/contracts/index-api.yaml` | ✅ Updated (v2.2.0, +3 recommend endpoints) |
+| search-api.yaml | `specs/004-vector-index-opt/contracts/search-api.yaml` | ✅ Unchanged (v2.1.0) |
+| plan.md | `specs/004-vector-index-opt/plan.md` | ✅ This file |

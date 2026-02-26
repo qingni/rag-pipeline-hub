@@ -18,6 +18,7 @@ class IndexConfig:
     metric_type: str = "cosine"
     index_type: Optional[str] = None
     num_vectors: int = 0  # 预期向量数量，用于动态调整索引参数
+    enable_sparse: bool = False  # 是否启用稀疏向量字段（用于混合检索）
 
 
 @dataclass
@@ -232,6 +233,40 @@ class BaseProvider(ABC):
         for query_vector in query_vectors:
             result = self.search_vectors(query_vector, top_k, **search_params)
             results.append(result)
+        return results
+    
+    def hybrid_search(
+        self,
+        dense_vector: np.ndarray,
+        sparse_vector: Optional[Dict] = None,
+        top_n: int = 20,
+        rrf_k: int = 60,
+        output_fields: Optional[List[str]] = None,
+        **search_params
+    ) -> List[Dict[str, Any]]:
+        """
+        Hybrid search using dense + sparse vectors with RRF fusion
+        
+        Default implementation: falls back to dense-only search.
+        Providers supporting hybrid search should override this method.
+        
+        Args:
+            dense_vector: Dense query vector (1D numpy array)
+            sparse_vector: Sparse query vector ({index: weight} dict), optional
+            top_n: Number of candidates for coarse ranking (RRF output)
+            rrf_k: RRF smoothing parameter
+            output_fields: Fields to return
+            **search_params: Provider-specific search parameters
+            
+        Returns:
+            List of search results with rrf_score
+        """
+        # 默认降级到纯稠密检索
+        results = self.search_vectors(dense_vector, top_n, **search_params)
+        # 添加 search_mode 标记
+        for r in results:
+            r["search_mode"] = "dense_only"
+            r["rrf_score"] = r.get("score", 0)
         return results
     
     def update_vectors(

@@ -5,11 +5,15 @@ info:
     向量索引管理 API，支持 Milvus 向量数据库的索引创建、查询、更新和删除操作。
     
     ## 功能概述
-    - 创建向量索引（支持 FLAT/IVF_FLAT/IVF_PQ/HNSW 算法）
+    - 创建向量索引（支持 FLAT/IVF_FLAT/IVF_SQ8/IVF_PQ/HNSW 算法）
     - 索引构建进度查询
     - 索引列表和详情查询
     - 索引删除（幂等性设计）
-  version: 2.0.0
+    - Collection 管理（Dify 方案「逻辑与物理分层」架构）
+    - 混合检索（稠密+稀疏双路召回 + RRF + Reranker）
+    - 多 Collection 联合搜索
+    - 智能推荐引擎
+  version: 2.3.0
   contact:
     name: RAG Framework Team
 
@@ -20,8 +24,16 @@ servers:
 tags:
   - name: Index Management
     description: 索引管理相关接口
+  - name: Collection Management
+    description: Collection 管理相关接口
+  - name: Vector Operations
+    description: 向量 CRUD 操作接口
+  - name: Search
+    description: 检索相关接口
   - name: Index Task
     description: 索引任务相关接口
+  - name: Index Recommendation
+    description: 智能推荐引擎相关接口
 
 paths:
   /vector-index/indexes:
@@ -37,7 +49,7 @@ paths:
           description: 按状态过滤
           schema:
             type: string
-            enum: [CREATING, READY, ERROR, DELETED]
+            enum: [FLAT, IVF_FLAT, IVF_SQ8, IVF_PQ, HNSW]
         - name: page
           in: query
           description: 页码
@@ -312,7 +324,500 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeleteHistoryResponse'
+              $ref: '#/components/schemas/DeleteHistoryResponse'
+
+  /vector-index/history/clear-all:
+    delete:
+      tags:
+        - Index Management
+      summary: 清空所有历史记录
+      description: |
+        删除所有索引历史记录，同时清理 Milvus 中的实际索引、相关统计记录和查询历史。
+      operationId: clearAllHistory
+      responses:
+        '200':
+          description: 清空成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  deleted_count:
+                    type: integer
+                  message:
+                    type: string
+
+  /vector-index/collections:
+    get:
+      tags:
+        - Collection Management
+      summary: 获取 Collection 列表
+      description: |
+        返回系统中所有 Collection 的信息，包括：
+        - 默认 Collection (default_collection)
+        - 用户自建的 Collection
+        - 每个 Collection 关联的文档数和总向量数
+        
+        采用 Dify 方案「逻辑与物理分层」架构，按逻辑知识库聚合展示。
+      operationId: getCollections
+      responses:
+        '200':
+          description: 成功返回 Collection 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  collections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        collection_name:
+                          type: string
+                        document_count:
+                          type: integer
+                        total_vector_count:
+                          type: integer
+                        dimensions:
+                          type: array
+                          items:
+                            type: integer
+                  total:
+                    type: integer
+
+  /vector-index/indexes/from-embedding:
+    post:
+      tags:
+        - Index Management
+      summary: 从向量化结果创建索引
+      description: |
+        基于已完成的向量化任务创建向量索引，系统会自动读取向量化结果中的向量数据并导入到 Milvus。
+        支持指定目标 Collection（追加模式）或使用默认 Collection。
+      operationId: createIndexFromEmbedding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIndexFromEmbeddingRequest'
+      responses:
+        '201':
+          description: 索引创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexDetailResponse'
+        '400':
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 向量化任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vector-index/indexes/find-matching:
+    get:
+      tags:
+        - Index Management
+      summary: 查找匹配的索引
+      description: 根据向量化任务ID、数据库类型、算法类型和度量类型查找是否已存在匹配的索引
+      operationId: findMatchingIndex
+      parameters:
+        - name: embedding_result_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: provider
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: algorithm_type
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: metric_type
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 查找结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found:
+                    type: boolean
+                  index:
+                    $ref: '#/components/schemas/IndexDetail'
+
+  /vector-index/indexes/{index_id}/persist:
+    post:
+      tags:
+        - Index Management
+      summary: 持久化索引
+      description: 将索引数据持久化到磁盘
+      operationId: persistIndex
+      parameters:
+        - name: index_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 持久化成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /vector-index/indexes/{index_id}/recover:
+    post:
+      tags:
+        - Index Management
+      summary: 恢复索引
+      description: 从磁盘恢复索引数据
+      operationId: recoverIndex
+      parameters:
+        - name: index_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 恢复成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /vector-index/indexes/{index_id}/vectors:
+    put:
+      tags:
+        - Vector Operations
+      summary: 更新向量
+      description: 更新索引中的指定向量
+      operationId: updateVector
+      parameters:
+        - name: index_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vector_id
+                - vector
+              properties:
+                vector_id:
+                  type: string
+                vector:
+                  type: array
+                  items:
+                    type: number
+                metadata:
+                  type: object
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /vector-index/indexes/{index_id}/query-history:
+    get:
+      tags:
+        - Search
+      summary: 获取查询历史
+      description: 获取指定索引的查询历史记录
+      operationId: getQueryHistory
+      parameters:
+        - name: index_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+      responses:
+        '200':
+          description: 查询历史列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    index_id:
+                      type: integer
+                    top_k:
+                      type: integer
+                    results_count:
+                      type: integer
+                    search_time_ms:
+                      type: number
+                    created_at:
+                      type: string
+                      format: date-time
+
+  /vector-index/multi-search:
+    post:
+      tags:
+        - Search
+      summary: 多 Collection 联合搜索
+      description: |
+        在多个 Collection 中同时搜索，返回合并后的结果。
+        
+        合并策略：
+        - score: 按相似度分数排序（默认）
+        - round_robin: 轮询各 Collection 结果
+      operationId: multiCollectionSearch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection_names
+                - query_vector
+              properties:
+                collection_names:
+                  type: array
+                  items:
+                    type: string
+                query_vector:
+                  type: array
+                  items:
+                    type: number
+                top_k:
+                  type: integer
+                  default: 10
+                threshold:
+                  type: number
+                merge_strategy:
+                  type: string
+                  enum: [score, round_robin]
+                  default: score
+      responses:
+        '200':
+          description: 搜索成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  results:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+
+  /vector-index/hybrid-search:
+    post:
+      tags:
+        - Search
+      summary: 混合检索
+      description: |
+        稠密+稀疏双路召回 → RRF 粗排 → Reranker 精排。
+        
+        自动降级策略：
+        - 稀疏向量为空 → 降级到纯稠密检索
+        - Reranker 不可用 → 跳过精排，直接返回 RRF 粗排结果
+      operationId: hybridSearch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HybridSearchRequest'
+      responses:
+        '200':
+          description: 检索成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HybridSearchResponse'
+        '404':
+          description: Collection 不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vector-index/reranker/health:
+    get:
+      tags:
+        - Search
+      summary: Reranker 服务健康检查
+      description: 检查 bge-reranker-v2-m3 模型的可用性
+      operationId: rerankerHealthCheck
+      responses:
+        '200':
+          description: 健康检查结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available:
+                    type: boolean
+                  model:
+                    type: string
+                  error:
+                    type: string
+
+  /vector-index/health:
+    get:
+      tags:
+        - Index Management
+      summary: 健康检查
+      description: |
+        检查向量索引模块的运行状态，包括 Milvus 连接状态和 Reranker 可用性。
+        用于前端和运维监控。
+      operationId: healthCheck
+      responses:
+        '200':
+          description: 服务健康
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+        '503':
+          description: 服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+  /vector-index/recommend:
+    post:
+      tags:
+        - Index Recommendation
+      summary: 智能推荐索引算法和度量类型
+      description: |
+        根据向量化任务的特征（维度、数据量、Embedding 模型类型），
+        自动推荐最佳的索引算法和度量类型。
+        
+        推荐策略：
+        - 分层规则匹配（数据量 → 维度 → 模型优先级）
+        - 兜底默认值：HNSW + COSINE
+        
+        推荐延迟目标：≤ 500ms（P95）
+      operationId: recommendIndexConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendRequest'
+      responses:
+        '200':
+          description: 推荐成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendResponse'
+        '400':
+          description: 请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vector-index/recommend/log:
+    post:
+      tags:
+        - Index Recommendation
+      summary: 记录推荐采纳行为
+      description: |
+        记录用户对推荐值的采纳或修改行为，用于推荐采纳率统计（SC-012）。
+        在用户确认创建索引时调用。
+      operationId: logRecommendation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendLogRequest'
+      responses:
+        '200':
+          description: 记录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendLogResponse'
+
+  /vector-index/recommend/stats:
+    get:
+      tags:
+        - Index Recommendation
+      summary: 获取推荐采纳率统计
+      description: 返回智能推荐引擎的采纳率和使用统计
+      operationId: getRecommendStats
+      parameters:
+        - name: days
+          in: query
+          description: 统计天数（默认30天）
+          schema:
+            type: integer
+            default: 30
+            minimum: 1
+            maximum: 365
+      responses:
+        '200':
+          description: 统计成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendStatsResponse'
 
 components:
   schemas:
@@ -334,18 +839,32 @@ components:
           format: uuid
         index_type:
           type: string
-          description: 索引算法类型
-          enum: [FLAT, IVF_FLAT, IVF_PQ, HNSW]
+          description: 稠密向量索引算法类型
+          enum: [FLAT, IVF_FLAT, IVF_SQ8, IVF_PQ, HNSW]
           default: HNSW
         metric_type:
           type: string
-          description: 距离度量方式
+          description: 稠密向量距离度量方式
           enum: [L2, IP, COSINE]
           default: L2
         index_params:
           type: object
-          description: 索引参数（根据 index_type 不同）
+          description: 稠密向量索引参数（根据 index_type 不同）
           additionalProperties: true
+        enable_sparse:
+          type: boolean
+          description: 是否启用稀疏向量字段（用于混合检索）
+          default: true
+        sparse_index_params:
+          type: object
+          description: 稀疏向量索引参数（enable_sparse=true 时有效）
+          properties:
+            drop_ratio_build:
+              type: number
+              description: 构建时丢弃的最小权重比例
+              default: 0.2
+              minimum: 0
+              maximum: 1
 
     CreateIndexResponse:
       type: object
@@ -393,6 +912,9 @@ components:
         status:
           type: string
           enum: [CREATING, READY, ERROR, DELETED]
+        has_sparse:
+          type: boolean
+          description: 是否包含稀疏向量字段
         created_at:
           type: string
           format: date-time
@@ -455,6 +977,13 @@ components:
           type: array
           items:
             type: number
+          description: 稠密向量（BGE-M3 dense output）
+        sparse_embedding:
+          type: object
+          description: 稀疏向量（BGE-M3 sparse output，格式为 {index: weight}）
+          additionalProperties:
+            type: number
+          nullable: true
         metadata:
           type: object
 
@@ -600,6 +1129,9 @@ components:
           type: string
         vector_count:
           type: integer
+        has_sparse:
+          type: boolean
+          description: 是否包含稀疏向量字段
         source_task_id:
           type: string
         created_at:
@@ -647,3 +1179,308 @@ components:
         suggestion:
           type: string
           description: 建议操作
+
+    RecommendRequest:
+      type: object
+      required:
+        - embedding_task_id
+      properties:
+        embedding_task_id:
+          type: string
+          description: 向量化任务ID（系统自动获取其维度、数据量、模型类型）
+          format: uuid
+        vector_count:
+          type: integer
+          description: 向量数量（可选，手动指定覆盖从任务获取的值）
+          minimum: 0
+        dimension:
+          type: integer
+          description: 向量维度（可选，手动指定覆盖从任务获取的值）
+        embedding_model:
+          type: string
+          description: Embedding 模型名称（可选，手动指定覆盖从任务获取的值）
+          example: 'BAAI/bge-m3'
+
+    RecommendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RecommendResult'
+
+    RecommendResult:
+      type: object
+      properties:
+        recommended_index_type:
+          type: string
+          description: 推荐的索引算法
+          enum: [FLAT, IVF_FLAT, IVF_SQ8, IVF_PQ, HNSW]
+        recommended_metric_type:
+          type: string
+          description: 推荐的度量类型
+          enum: [L2, IP, COSINE]
+        reason:
+          type: string
+          description: 推荐理由文案（展示给用户）
+          example: '基于 BAAI/bge-m3 1024维 + 5000条向量推荐 — 数据量 < 1万，FLAT 暴力搜索保证精确结果'
+        is_fallback:
+          type: boolean
+          description: 是否使用了兜底默认值
+        vector_count:
+          type: integer
+          description: 用于推荐的数据量
+        dimension:
+          type: integer
+          description: 用于推荐的向量维度
+        embedding_model:
+          type: string
+          description: 用于推荐的模型名称
+
+    RecommendLogRequest:
+      type: object
+      required:
+        - embedding_task_id
+        - recommended_index_type
+        - recommended_metric_type
+        - final_index_type
+        - final_metric_type
+      properties:
+        embedding_task_id:
+          type: string
+          format: uuid
+        recommended_index_type:
+          type: string
+          enum: [FLAT, IVF_FLAT, IVF_SQ8, IVF_PQ, HNSW]
+        recommended_metric_type:
+          type: string
+          enum: [L2, IP, COSINE]
+        final_index_type:
+          type: string
+          enum: [FLAT, IVF_FLAT, IVF_SQ8, IVF_PQ, HNSW]
+        final_metric_type:
+          type: string
+          enum: [L2, IP, COSINE]
+        is_fallback:
+          type: boolean
+          default: false
+        reason:
+          type: string
+          description: 推荐理由文案
+
+    RecommendLogResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        log_id:
+          type: integer
+        is_modified:
+          type: boolean
+          description: 系统自动判断用户是否修改了推荐值
+        message:
+          type: string
+
+    RecommendStatsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RecommendStats'
+
+    HealthCheckResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        status:
+          type: string
+          description: 整体状态
+          enum: [healthy, degraded, unhealthy]
+        components:
+          type: object
+          properties:
+            milvus:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [connected, disconnected]
+                latency_ms:
+                  type: number
+            reranker:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [available, unavailable]
+                model:
+                  type: string
+                  example: 'bge-reranker-v2-m3'
+        timestamp:
+          type: string
+          format: date-time
+
+    RecommendStats:
+      type: object
+      properties:
+        total_recommendations:
+          type: integer
+          description: 总推荐次数
+        adopted_count:
+          type: integer
+          description: 用户采纳次数（未修改推荐值）
+        modified_count:
+          type: integer
+          description: 用户修改次数
+        adoption_rate:
+          type: number
+          description: 采纳率（SC-012 目标 ≥ 80%）
+          example: 0.85
+        fallback_count:
+          type: integer
+          description: 兜底推荐次数
+        period_days:
+          type: integer
+          description: 统计周期（天）
+
+    CreateIndexFromEmbeddingRequest:
+      type: object
+      required:
+        - embedding_result_id
+      properties:
+        embedding_result_id:
+          type: string
+          description: 向量化任务结果ID
+        name:
+          type: string
+          description: 索引名称（不指定时自动生成）
+          pattern: '^[a-zA-Z0-9_-]+$'
+        collection_name:
+          type: string
+          description: 目标 Collection 名称（不指定时使用 default_collection）
+        provider:
+          type: string
+          enum: [MILVUS]
+          default: MILVUS
+        index_type:
+          type: string
+          enum: [FLAT, IVF_FLAT, IVF_SQ8, IVF_PQ, HNSW]
+          default: FLAT
+        metric_type:
+          type: string
+          enum: [cosine, euclidean, dot_product]
+          default: cosine
+        index_params:
+          type: object
+          description: 索引参数
+        namespace:
+          type: string
+          default: default
+        enable_sparse:
+          type: boolean
+          description: 是否启用 BM25 稀疏向量（用于混合检索）
+          default: true
+
+    HybridSearchRequest:
+      type: object
+      required:
+        - collection_name
+        - query_text
+        - query_dense_vector
+      properties:
+        collection_name:
+          type: string
+          description: 目标 Collection 名称
+        query_text:
+          type: string
+          description: 原始查询文本（用于 Reranker 精排和 BM25 稀疏向量生成）
+        query_dense_vector:
+          type: array
+          items:
+            type: number
+          description: 稠密查询向量
+        query_sparse_vector:
+          type: object
+          description: 稀疏查询向量（格式为 {index: weight}，可选，不传时由 BM25 自动生成）
+          additionalProperties:
+            type: number
+          nullable: true
+        top_n:
+          type: integer
+          default: 20
+          minimum: 5
+          maximum: 100
+          description: 粗排候选集大小
+        top_k:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 50
+          description: 最终返回结果数量
+        enable_reranker:
+          type: boolean
+          default: true
+          description: 是否启用 Reranker 精排
+        rrf_k:
+          type: integer
+          default: 60
+          description: RRF 排名平滑因子
+        search_params:
+          type: object
+          description: 搜索参数
+        output_fields:
+          type: array
+          items:
+            type: string
+          default: [doc_id, chunk_index, metadata]
+
+    HybridSearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              vector_id:
+                type: integer
+              rrf_score:
+                type: number
+              reranker_score:
+                type: number
+                nullable: true
+              final_score:
+                type: number
+              doc_id:
+                type: string
+              chunk_index:
+                type: integer
+              text:
+                type: string
+                nullable: true
+              metadata:
+                type: object
+              search_mode:
+                type: string
+                enum: [hybrid, dense_only]
+        search_mode:
+          type: string
+          description: 实际检索模式
+          enum: [hybrid, dense_only]
+        query_time_ms:
+          type: number
+          description: 总查询耗时（毫秒）
+        rrf_time_ms:
+          type: number
+          nullable: true
+        reranker_time_ms:
+          type: number
+          nullable: true
+        total_candidates:
+          type: integer
+        reranker_available:
+          type: boolean

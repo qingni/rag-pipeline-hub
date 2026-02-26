@@ -19,12 +19,18 @@ import {
   getEmbeddingTasks,
   createIndexFromEmbedding,
   getIndexHistory,
+  clearAllIndexHistory,
   persistIndex,
   recoverIndex,
   deleteVectors,
-  updateVector
+  updateVector,
+  hybridSearch,
+  rerankerHealthCheck,
+  getRecommendation,
+  logRecommendation,
+  getRecommendStats,
+  getCollections
 } from '../services/vectorIndexApi';
-
 export const useVectorIndexStore = defineStore('vectorIndex', {
   state: () => ({
     // 索引列表
@@ -38,6 +44,41 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
     // 搜索结果
     searchResults: null,
     
+    // ==================== Collection 管理状态 ====================
+    // 可用的 Collection 列表
+    collections: [],
+    // 当前选中的 Collection（创建索引时的目标 Collection）
+    selectedCollection: null,  // null 表示使用默认 Collection
+    
+    // ==================== Collection 管理状态 ====================
+    // 可用的 Collection 列表
+    collections: [],
+    // 当前选中的 Collection（创建索引时的目标 Collection）
+    selectedCollection: null,  // null 表示使用默认 Collection
+    
+    // ==================== 混合检索状态 ====================
+    // 混合检索结果
+    hybridSearchResults: null,
+    // 混合检索模式
+    searchMode: 'dense', // 'dense' | 'hybrid'
+    // Reranker 健康状态
+    rerankerHealth: null,
+    // 混合检索参数
+    hybridSearchParams: {
+      top_n: 20,
+      top_k: 5,
+      enable_reranker: true,
+      rrf_k: 60
+    },
+    
+    // ==================== 智能推荐状态 ====================
+    // 推荐结果
+    recommendation: null,
+    // 推荐统计
+    recommendStats: null,
+    // 推荐加载状态
+    recommendLoading: false,
+    
     // ==================== 向量化任务集成状态 ====================
     // 向量化任务列表
     embeddingTasks: [],
@@ -48,7 +89,7 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
     
     // 配置选项
     selectedDatabase: 'MILVUS',  // 仅支持 Milvus
-    selectedAlgorithm: 'FLAT',  // FLAT | HNSW | IVF_FLAT | IVF_PQ
+    selectedAlgorithm: 'FLAT',  // FLAT | HNSW | IVF_FLAT | IVF_SQ8 | IVF_PQ
     algorithmParams: {},
     metricType: 'cosine',
     namespace: 'default',
@@ -73,7 +114,9 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
       history: false,
       embeddingTasks: false,
       createFromEmbedding: false,
-      indexHistory: false
+      indexHistory: false,
+      hybridSearch: false,
+      recommend: false
     },
     // 错误信息
     error: null
@@ -114,9 +157,9 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
      */
     availableAlgorithms: (state) => {
       if (state.selectedDatabase === 'MILVUS') {
-        return ['FLAT', 'IVF_FLAT', 'IVF_PQ', 'HNSW'];
+        return ['FLAT', 'IVF_FLAT', 'IVF_SQ8', 'IVF_PQ', 'HNSW'];
       }
-      return ['FLAT', 'IVF_FLAT', 'IVF_PQ', 'HNSW'];
+      return ['FLAT', 'IVF_FLAT', 'IVF_SQ8', 'IVF_PQ', 'HNSW'];
     },
 
     /**
@@ -138,6 +181,31 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
   },
 
   actions: {
+    // ==================== Collection 管理 Actions ====================
+
+    /**
+     * 加载 Collection 列表
+     */
+    async fetchCollections() {
+      try {
+        const result = await getCollections();
+        this.collections = result.collections || [];
+        return result;
+      } catch (error) {
+        console.error('加载 Collection 列表失败:', error);
+        this.collections = [];
+        return { collections: [], total: 0 };
+      }
+    },
+
+    /**
+     * 选择目标 Collection
+     * @param {string|null} collectionName - Collection 名称，null 表示使用默认
+     */
+    setSelectedCollection(collectionName) {
+      this.selectedCollection = collectionName;
+    },
+
     // ==================== 向量化任务集成 Actions ====================
 
     /**
@@ -173,17 +241,12 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
       this.selectedTaskId = taskId;
       this.selectedTask = this.embeddingTasks.find(t => t.result_id === taskId) || null;
       
-      // 自动设置默认算法
+      // 清除上次推荐结果
+      this.recommendation = null;
+      
+      // 自动获取推荐
       if (this.selectedTask) {
-        // 根据向量数量推荐算法
-        const vectorCount = this.selectedTask.successful_count || 0;
-        if (vectorCount < 10000) {
-          this.selectedAlgorithm = 'FLAT';
-        } else if (vectorCount < 100000) {
-          this.selectedAlgorithm = 'IVF_FLAT';
-        } else {
-          this.selectedAlgorithm = 'IVF_PQ';
-        }
+        this.fetchRecommendation();
       }
     },
 
@@ -205,6 +268,7 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
         const data = {
           embedding_result_id: embeddingResultId,
           name: options.name || null,
+          collection_name: options.collection_name || this.selectedCollection || null,
           provider: options.provider || this.selectedDatabase,
           index_type: options.index_type || this.selectedAlgorithm,
           metric_type: options.metric_type || this.metricType,
@@ -373,6 +437,25 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
     /**
      * 删除索引
      */
+    async clearAllHistory() {
+      this.loading.delete = true;
+      this.error = null;
+      
+      try {
+        const result = await clearAllIndexHistory();
+        this.indexes = [];
+        this.indexHistory = [];
+        this.currentIndex = null;
+        this.statistics = null;
+        return result;
+      } catch (error) {
+        this.error = error.response?.data?.detail || '清空历史记录失败';
+        throw error;
+      } finally {
+        this.loading.delete = false;
+      }
+    },
+
     async removeIndex(indexId) {
       this.loading.delete = true;
       this.error = null;
@@ -572,6 +655,139 @@ export const useVectorIndexStore = defineStore('vectorIndex', {
         throw error;
       } finally {
         this.loading.addVectors = false;
+      }
+    },
+
+    // ==================== 混合检索 Actions ====================
+
+    /**
+     * 执行混合检索
+     * @param {Object} searchData - 混合检索参数
+     */
+    async performHybridSearch(searchData) {
+      this.loading.hybridSearch = true;
+      this.error = null;
+      
+      try {
+        this.hybridSearchResults = await hybridSearch(searchData);
+        return this.hybridSearchResults;
+      } catch (error) {
+        this.error = error.response?.data?.detail || '混合检索失败';
+        throw error;
+      } finally {
+        this.loading.hybridSearch = false;
+      }
+    },
+
+    /**
+     * 检查 Reranker 健康状态
+     */
+    async checkRerankerHealth() {
+      try {
+        this.rerankerHealth = await rerankerHealthCheck();
+        return this.rerankerHealth;
+      } catch (error) {
+        this.rerankerHealth = { available: false, error: error.message };
+        return this.rerankerHealth;
+      }
+    },
+
+    /**
+     * 切换检索模式
+     * @param {'dense'|'hybrid'} mode
+     */
+    setSearchMode(mode) {
+      this.searchMode = mode;
+    },
+
+    /**
+     * 设置混合检索参数
+     * @param {Object} params
+     */
+    setHybridSearchParams(params) {
+      this.hybridSearchParams = { ...this.hybridSearchParams, ...params };
+    },
+
+    /**
+     * 清除混合检索结果
+     */
+    clearHybridSearchResults() {
+      this.hybridSearchResults = null;
+    },
+
+    // ==================== 智能推荐 Actions ====================
+
+    /**
+     * 获取智能推荐
+     */
+    async fetchRecommendation() {
+      if (!this.selectedTaskId) return;
+      
+      this.loading.recommend = true;
+      this.recommendLoading = true;
+      
+      try {
+        const result = await getRecommendation({
+          embedding_task_id: this.selectedTaskId,
+          vector_count: this.selectedTask?.successful_count,
+          dimension: this.selectedTask?.vector_dimension,
+          embedding_model: this.selectedTask?.model
+        });
+        
+        this.recommendation = result.data;
+        
+        // 自动填充推荐值
+        if (this.recommendation) {
+          this.selectedAlgorithm = this.recommendation.recommended_index_type || 'FLAT';
+          this.metricType = this.recommendation.recommended_metric_type || 'cosine';
+          
+          // 设置默认参数
+          this.setAlgorithm(this.selectedAlgorithm);
+        }
+        
+        return result;
+      } catch (error) {
+        console.error('获取推荐失败:', error);
+        // 推荐失败不阻塞用户操作
+        this.recommendation = null;
+      } finally {
+        this.loading.recommend = false;
+        this.recommendLoading = false;
+      }
+    },
+
+    /**
+     * 记录推荐采纳行为
+     */
+    async logRecommendation() {
+      if (!this.recommendation || !this.selectedTaskId) return;
+      
+      try {
+        await logRecommendation({
+          embedding_task_id: this.selectedTaskId,
+          recommended_index_type: this.recommendation.recommended_index_type,
+          recommended_metric_type: this.recommendation.recommended_metric_type,
+          final_index_type: this.selectedAlgorithm,
+          final_metric_type: this.metricType,
+          is_fallback: this.recommendation.is_fallback || false,
+          reason: this.recommendation.reason || ''
+        });
+      } catch (error) {
+        console.error('记录推荐行为失败:', error);
+      }
+    },
+
+    /**
+     * 获取推荐统计
+     */
+    async fetchRecommendStats(days = 30) {
+      try {
+        const result = await getRecommendStats(days);
+        this.recommendStats = result.data;
+        return this.recommendStats;
+      } catch (error) {
+        console.error('获取推荐统计失败:', error);
+        return null;
       }
     }
   }

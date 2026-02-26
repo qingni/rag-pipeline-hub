@@ -10,6 +10,7 @@ from .index_registry import (
     get_provider
 )
 from .vector_index_service import VectorIndexService
+from .reranker_service import RerankerService
 
 __all__ = [
     "IndexRegistry",
@@ -18,4 +19,5 @@ __all__ = [
     "get_index",
     "get_provider",
     "VectorIndexService",
+    "RerankerService",
 ]

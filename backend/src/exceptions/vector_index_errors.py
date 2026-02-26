@@ -203,3 +203,45 @@ class ProviderNotFoundError(VectorIndexError):
 
 # Aliases for compatibility
 VectorDimensionError = VectorDimensionMismatchError
+
+
+# ==================== 混合检索 & Reranker 错误码 ====================
+
+class RerankerLoadError(VectorIndexError):
+    """Reranker 模型加载失败"""
+    
+    def __init__(self, model_name: str, reason: str):
+        super().__init__(
+            f"Failed to load reranker model '{model_name}': {reason}",
+            {"model_name": model_name, "reason": reason}
+        )
+
+
+class RerankerInferenceError(VectorIndexError):
+    """Reranker 推理失败"""
+    
+    def __init__(self, reason: str):
+        super().__init__(
+            f"Reranker inference failed: {reason}",
+            {"reason": reason}
+        )
+
+
+class SparseVectorInvalidError(VectorIndexError):
+    """稀疏向量格式无效"""
+    
+    def __init__(self, reason: str):
+        super().__init__(
+            f"Invalid sparse vector: {reason}",
+            {"reason": reason}
+        )
+
+
+class HybridSearchError(VectorIndexError):
+    """混合检索错误"""
+    
+    def __init__(self, collection_name: str, reason: str):
+        super().__init__(
+            f"Hybrid search failed on '{collection_name}': {reason}",
+            {"collection_name": collection_name, "reason": reason}
+        )

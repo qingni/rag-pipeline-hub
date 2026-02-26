@@ -1,360 +1,162 @@
 <template>
-  <t-card title="索引列表" :bordered="false">
-    <template #actions>
-      <t-space>
-        <t-input
-          v-model="searchKeyword"
-          placeholder="搜索索引名称"
-          clearable
-          style="width: 200px"
-        >
-          <template #prefix-icon><search-icon /></template>
-        </t-input>
-        <t-button variant="text" @click="handleRefresh">
-          <template #icon><refresh-icon /></template>
-          刷新
-        </t-button>
-      </t-space>
-    </template>
-
-    <t-table
-      :data="filteredIndexes"
-      :columns="columns"
-      :loading="loading"
-      row-key="id"
-      stripe
-      hover
-      :pagination="pagination"
-      @page-change="handlePageChange"
-    >
-      <template #index_name="{ row }">
-        <div class="index-name-cell">
-          <span class="name">{{ row.index_name }}</span>
-          <t-tag v-if="row.source_document_name" size="small" variant="light" theme="primary">
-            {{ row.source_document_name }}
-          </t-tag>
+  <div class="index-list">
+    <t-card :bordered="false">
+      <template #header>
+        <div class="list-header">
+          <span class="list-title">索引列表</span>
+          <t-space>
+            <t-input
+              v-model="searchKeyword"
+              placeholder="搜索索引名称"
+              clearable
+              size="small"
+              style="width: 200px"
+            >
+              <template #prefix-icon><t-icon name="search" /></template>
+            </t-input>
+            <t-button variant="outline" size="small" @click="$emit('refresh')">
+              <template #icon><t-icon name="refresh" /></template>
+              刷新
+            </t-button>
+          </t-space>
         </div>
       </template>
 
-      <template #status="{ row }">
-        <t-tag
-          :theme="getStatusTheme(row.status)"
-          variant="light"
-        >
-          <template #icon>
-            <loading-icon v-if="row.status === 'BUILDING'" class="spin-icon" />
-            <check-circle-icon v-else-if="row.status === 'READY'" />
-            <close-circle-icon v-else-if="row.status === 'ERROR'" />
-          </template>
-          {{ getStatusText(row.status) }}
-        </t-tag>
-      </template>
+      <t-table
+        :data="filteredIndexes"
+        :columns="columns"
+        :loading="loading"
+        row-key="id"
+        stripe
+        hover
+        size="small"
+        :max-height="500"
+      >
+        <!-- 索引名称 -->
+        <template #index_name="{ row }">
+          <div class="name-cell">
+            <span class="name-text">{{ row.index_name }}</span>
+            <t-space size="4px" style="margin-top: 2px">
+              <t-tag v-if="row.has_sparse" theme="warning" variant="light" size="small">
+                稀疏向量
+              </t-tag>
+              <t-tag v-if="row.source_document_name" variant="light" size="small">
+                {{ row.source_document_name }}
+              </t-tag>
+            </t-space>
+          </div>
+        </template>
 
-      <template #index_type="{ row }">
-        <t-tag variant="outline">{{ row.index_type }}</t-tag>
-      </template>
+        <!-- 状态 -->
+        <template #status="{ row }">
+          <t-tag :theme="getStatusTheme(row.status)" variant="light" size="small">
+            {{ getStatusText(row.status) }}
+          </t-tag>
+        </template>
 
-      <template #algorithm_type="{ row }">
-        <t-tag variant="outline" theme="warning">{{ row.algorithm_type || 'FLAT' }}</t-tag>
-      </template>
+        <!-- 向量数量 -->
+        <template #vector_count="{ row }">
+          <span class="mono-value">{{ formatNumber(row.vector_count || 0) }}</span>
+        </template>
 
-      <template #metric_type="{ row }">
-        <t-tag variant="outline" theme="success">{{ row.metric_type }}</t-tag>
-      </template>
-
-      <template #vector_count="{ row }">
-        <span class="vector-count">{{ formatNumber(row.vector_count || 0) }}</span>
-      </template>
-
-      <template #created_at="{ row }">
-        {{ formatDate(row.created_at) }}
-      </template>
-
-      <template #operation="{ row }">
-        <t-space>
-          <t-button
-            theme="primary"
-            variant="text"
-            size="small"
-            :disabled="row.status !== 'READY'"
-            @click="handleSelect(row)"
-          >
-            选择
-          </t-button>
-          <t-dropdown
-            :options="getMoreOptions(row)"
-            @click="(item) => handleMoreAction(item, row)"
-          >
-            <t-button variant="text" size="small">
-              更多
-              <template #suffix><chevron-down-icon /></template>
+        <!-- 操作 -->
+        <template #operation="{ row }">
+          <t-space size="small">
+            <t-button variant="text" size="small" theme="primary" @click="$emit('view', row)">
+              详情
             </t-button>
-          </t-dropdown>
-        </t-space>
-      </template>
-    </t-table>
-  </t-card>
+            <t-button variant="text" size="small" theme="primary" @click="$emit('search', row)">
+              检索
+            </t-button>
+            <t-button variant="text" size="small" theme="danger" @click="$emit('delete', row)">
+              删除
+            </t-button>
+          </t-space>
+        </template>
+      </t-table>
+    </t-card>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
-import { 
-  RefreshIcon, 
-  SearchIcon,
-  LoadingIcon,
-  CheckCircleIcon,
-  CloseCircleIcon,
-  ChevronDownIcon
-} from 'tdesign-icons-vue-next';
-import { storeToRefs } from 'pinia';
-import { useVectorIndexStore } from '../../stores/vectorIndexStore';
-import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next';
+import { ref, computed } from 'vue'
 
 const props = defineProps({
+  /** 索引列表数据 */
+  indexes: {
+    type: Array,
+    default: () => []
+  },
+  /** 加载状态 */
   loading: {
     type: Boolean,
     default: false
   }
-});
+})
 
-const emit = defineEmits(['select', 'delete', 'refresh']);
+defineEmits(['view', 'search', 'delete', 'refresh'])
 
-const vectorIndexStore = useVectorIndexStore();
-const { indexes } = storeToRefs(vectorIndexStore);
-
-const searchKeyword = ref('');
+const searchKeyword = ref('')
 
 const columns = [
-  {
-    colKey: 'id',
-    title: 'ID',
-    width: 60
-  },
-  {
-    colKey: 'index_name',
-    title: '索引名称',
-    width: 200,
-    cell: 'index_name'
-  },
-  {
-    colKey: 'index_type',
-    title: '提供者',
-    width: 90,
-    cell: 'index_type'
-  },
-  {
-    colKey: 'algorithm_type',
-    title: '算法',
-    width: 100,
-    cell: 'algorithm_type'
-  },
-  {
-    colKey: 'dimension',
-    title: '维度',
-    width: 70
-  },
-  {
-    colKey: 'metric_type',
-    title: '度量',
-    width: 90,
-    cell: 'metric_type'
-  },
-  {
-    colKey: 'vector_count',
-    title: '向量数',
-    width: 90,
-    cell: 'vector_count'
-  },
-  {
-    colKey: 'status',
-    title: '状态',
-    width: 100,
-    cell: 'status'
-  },
-  {
-    colKey: 'created_at',
-    title: '创建时间',
-    width: 150,
-    cell: 'created_at'
-  },
-  {
-    colKey: 'operation',
-    title: '操作',
-    width: 130,
-    cell: 'operation',
-    fixed: 'right'
-  }
-];
+  { colKey: 'index_name', title: '索引名称', width: 220, cell: 'index_name' },
+  { colKey: 'algorithm_type', title: '算法', width: 90 },
+  { colKey: 'dimension', title: '维度', width: 70 },
+  { colKey: 'vector_count', title: '向量数', width: 90, cell: 'vector_count' },
+  { colKey: 'metric_type', title: '度量', width: 80 },
+  { colKey: 'status', title: '状态', width: 80, cell: 'status' },
+  { colKey: 'operation', title: '操作', width: 170, cell: 'operation', fixed: 'right' }
+]
 
-// 过滤后的索引列表
 const filteredIndexes = computed(() => {
-  if (!searchKeyword.value) {
-    return indexes.value;
-  }
-  const keyword = searchKeyword.value.toLowerCase();
-  return indexes.value.filter(index => 
-    index.index_name?.toLowerCase().includes(keyword) ||
-    index.source_document_name?.toLowerCase().includes(keyword)
-  );
-});
-
-const pagination = computed(() => ({
-  total: filteredIndexes.value.length,
-  pageSize: 10,
-  current: 1
-}));
+  if (!searchKeyword.value) return props.indexes
+  const keyword = searchKeyword.value.toLowerCase()
+  return props.indexes.filter(idx =>
+    idx.index_name?.toLowerCase().includes(keyword) ||
+    idx.source_document_name?.toLowerCase().includes(keyword)
+  )
+})
 
 const getStatusTheme = (status) => {
-  const themeMap = {
-    'BUILDING': 'warning',
-    'READY': 'success',
-    'UPDATING': 'primary',
-    'ERROR': 'danger'
-  };
-  return themeMap[status] || 'default';
-};
+  const map = { BUILDING: 'warning', READY: 'success', UPDATING: 'primary', ERROR: 'danger' }
+  return map[status] || 'default'
+}
 
 const getStatusText = (status) => {
-  const textMap = {
-    'BUILDING': '构建中',
-    'READY': '就绪',
-    'UPDATING': '更新中',
-    'ERROR': '错误'
-  };
-  return textMap[status] || status;
-};
-
-const formatDate = (dateString) => {
-  if (!dateString) return '-';
-  const date = new Date(dateString);
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-};
+  const map = { BUILDING: '构建中', READY: '就绪', UPDATING: '更新中', ERROR: '错误' }
+  return map[status] || status
+}
 
 const formatNumber = (num) => {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1) + 'M';
-  }
-  if (num >= 1000) {
-    return (num / 1000).toFixed(1) + 'K';
-  }
-  return num.toString();
-};
-
-const getMoreOptions = (row) => {
-  const options = [
-    { content: '查看详情', value: 'detail' },
-    { content: '查看历史', value: 'history' }
-  ];
-  
-  options.push({ content: '删除', value: 'delete', theme: 'error' });
-  
-  return options;
-};
-
-const handleMoreAction = async (item, row) => {
-  switch (item.value) {
-    case 'detail':
-      // 显示详情弹窗
-      DialogPlugin.alert({
-        header: '索引详情',
-        body: `
-          <div style="line-height: 2;">
-            <p><strong>ID:</strong> ${row.id}</p>
-            <p><strong>名称:</strong> ${row.index_name}</p>
-            <p><strong>提供者:</strong> ${row.index_type}</p>
-            <p><strong>算法:</strong> ${row.algorithm_type || 'FLAT'}</p>
-            <p><strong>维度:</strong> ${row.dimension}</p>
-            <p><strong>度量类型:</strong> ${row.metric_type}</p>
-            <p><strong>向量数量:</strong> ${row.vector_count || 0}</p>
-            <p><strong>状态:</strong> ${row.status}</p>
-            <p><strong>命名空间:</strong> ${row.namespace || 'default'}</p>
-            ${row.source_document_name ? `<p><strong>源文档:</strong> ${row.source_document_name}</p>` : ''}
-            ${row.source_model ? `<p><strong>源模型:</strong> ${row.source_model}</p>` : ''}
-            ${row.error_message ? `<p style="color: red;"><strong>错误:</strong> ${row.error_message}</p>` : ''}
-          </div>
-        `,
-        confirmBtn: '关闭'
-      });
-      break;
-    case 'history':
-      // TODO: 显示操作历史
-      MessagePlugin.info('操作历史功能开发中');
-      break;
-    case 'persist':
-      try {
-        await vectorIndexStore.persistIndex(row.id);
-        MessagePlugin.success('索引持久化成功');
-      } catch (error) {
-        MessagePlugin.error('持久化失败: ' + (error.message || '未知错误'));
-      }
-      break;
-    case 'delete':
-      handleDelete(row.id);
-      break;
-  }
-};
-
-const handleSelect = (row) => {
-  emit('select', row);
-};
-
-const handleDelete = (id) => {
-  const dialog = DialogPlugin.confirm({
-    header: '确认删除',
-    body: '确定要删除这个索引吗？此操作不可恢复。',
-    confirmBtn: { theme: 'danger', content: '删除' },
-    onConfirm: async () => {
-      try {
-        await vectorIndexStore.removeIndex(id);
-        MessagePlugin.success('索引删除成功');
-        dialog.destroy();
-      } catch (error) {
-        MessagePlugin.error('删除失败: ' + (error.message || '未知错误'));
-      }
-    }
-  });
-};
-
-const handleRefresh = () => {
-  emit('refresh');
-};
-
-const handlePageChange = (pageInfo) => {
-  console.log('Page changed:', pageInfo);
-};
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+  return num.toString()
+}
 </script>
 
 <style scoped>
-.index-name-cell {
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.list-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.name-cell {
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
-.index-name-cell .name {
+.name-text {
   font-weight: 500;
 }
 
-.vector-count {
+.mono-value {
   font-family: monospace;
   font-weight: 500;
-}
-
-.spin-icon {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-:deep(.t-table) {
-  font-size: 13px;
 }
 </style>

@@ -51,11 +51,17 @@ huggingface-hub>=0.23,<1
 tiktoken==0.12.0
 
 # Vector stores
-pymilvus==2.3.4
+pymilvus==2.5.18
 pinecone-client==2.2.4
 
+# Reranker (混合检索精排)
+FlagEmbedding>=1.2.0
+
+# BM25 稀疏向量生成 (中文分词)
+jieba>=0.42.1
+
 # Utilities
-python-dotenv==1.0.0
+python-dotenv==1.0.1
 requests>=2.32.2,<3.0.0
 aiofiles==23.2.1
 

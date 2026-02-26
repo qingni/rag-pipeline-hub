@@ -56,10 +56,9 @@ build/
 .DS_Store
 Thumbs.db
 
-# CodeBuddy - 忽略缓存，保留 specs 和 rules
+# CodeBuddy - 忽略除 commands 外的所有内容
 .codebuddy/*
-!.codebuddy/specs/
-!.codebuddy/rules/
+!.codebuddy/commands/
 
 # Logs
 logs/
@@ -80,6 +79,9 @@ coverage/
 uploads/
 results/
 backend/results/
+
+# Database migrations (开发过程中的一次性迁移脚本)
+backend/migrations/
 
 # Docker volumes (runtime data)
 docker/milvus/volumes/

@@ -16,7 +16,9 @@ from ..models.vector_index import (
     IndexProvider, 
     IndexStatus,
     CreateIndexFromEmbeddingRequest,
-    IndexHistoryResponse
+    IndexHistoryResponse,
+    HybridSearchRequest,
+    HybridSearchResponse
 )
 from ..storage.database import get_db
 from ..utils.logger import get_logger
@@ -45,6 +47,7 @@ class CreateIndexRequest(BaseModel):
     description: Optional[str] = Field(None, description="索引描述")
     namespace: Optional[str] = Field(default="default", description="命名空间")
     index_params: Optional[Dict[str, Any]] = Field(default={}, description="索引参数")
+    enable_sparse: bool = Field(default=False, description="是否启用稀疏向量字段（混合检索）")
 
 
 class AddVectorsRequest(BaseModel):
@@ -72,6 +75,7 @@ class BatchSearchRequest(BaseModel):
 class IndexResponse(BaseModel):
     """索引响应"""
     id: int
+    uuid: Optional[str] = None
     index_name: str
     index_type: str
     algorithm_type: Optional[str]
@@ -79,10 +83,12 @@ class IndexResponse(BaseModel):
     metric_type: str
     status: str
     description: Optional[str]
+    collection_name: Optional[str] = None
     embedding_result_id: Optional[str]
     source_document_name: Optional[str]
     source_model: Optional[str]
     vector_count: int
+    has_sparse: bool = False
     namespace: Optional[str]
     created_at: str
     updated_at: str
@@ -215,6 +221,7 @@ async def find_matching_index(
                 "found": True,
                 "index": IndexResponse(
                     id=matching_index.id,
+                    uuid=matching_index.uuid,
                     index_name=matching_index.index_name,
                     index_type=matching_index.index_type.value,
                     algorithm_type=matching_index.algorithm_type,
@@ -257,15 +264,18 @@ async def create_index_from_embedding(
         vector_index = service.create_index_from_embedding(
             embedding_result_id=request.embedding_result_id,
             name=request.name,
+            collection_name=request.collection_name,
             provider=request.provider,
             index_type=request.index_type,
             metric_type=request.metric_type,
             index_params=request.index_params,
-            namespace=request.namespace
+            namespace=request.namespace,
+            enable_sparse=request.enable_sparse
         )
         
         return IndexResponse(
             id=vector_index.id,
+            uuid=vector_index.uuid,
             index_name=vector_index.index_name,
             index_type=vector_index.index_type.value,
             algorithm_type=vector_index.algorithm_type,
@@ -273,10 +283,12 @@ async def create_index_from_embedding(
             metric_type=vector_index.metric_type,
             status=vector_index.status.value,
             description=vector_index.description,
+            collection_name=vector_index.collection_name,
             embedding_result_id=vector_index.embedding_result_id,
             source_document_name=vector_index.source_document_name,
             source_model=vector_index.source_model,
             vector_count=vector_index.vector_count,
+            has_sparse=vector_index.has_sparse,
             namespace=vector_index.namespace,
             created_at=vector_index.created_at.isoformat(),
             updated_at=vector_index.updated_at.isoformat()
@@ -287,8 +299,7 @@ async def create_index_from_embedding(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
-    except ProviderNotFoundError as e:
-        raise HTTPException(
+    except Exception as e:        raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
@@ -366,6 +377,7 @@ async def create_index(
         
         return IndexResponse(
             id=vector_index.id,
+            uuid=vector_index.uuid,
             index_name=vector_index.index_name,
             index_type=vector_index.index_type.value,
             algorithm_type=vector_index.algorithm_type,
@@ -373,10 +385,12 @@ async def create_index(
             metric_type=vector_index.metric_type,
             status=vector_index.status.value,
             description=vector_index.description,
+            collection_name=vector_index.collection_name,
             embedding_result_id=vector_index.embedding_result_id,
             source_document_name=vector_index.source_document_name,
             source_model=vector_index.source_model,
             vector_count=vector_index.vector_count,
+            has_sparse=vector_index.has_sparse,
             namespace=vector_index.namespace,
             created_at=vector_index.created_at.isoformat(),
             updated_at=vector_index.updated_at.isoformat()
@@ -557,6 +571,7 @@ async def get_index(
         
         return IndexResponse(
             id=vector_index.id,
+            uuid=vector_index.uuid,
             index_name=vector_index.index_name,
             index_type=vector_index.index_type.value,
             algorithm_type=vector_index.algorithm_type,
@@ -564,10 +579,12 @@ async def get_index(
             metric_type=vector_index.metric_type,
             status=vector_index.status.value,
             description=vector_index.description,
+            collection_name=vector_index.collection_name,
             embedding_result_id=vector_index.embedding_result_id,
             source_document_name=vector_index.source_document_name,
             source_model=vector_index.source_model,
             vector_count=vector_index.vector_count,
+            has_sparse=vector_index.has_sparse,
             namespace=vector_index.namespace,
             created_at=vector_index.created_at.isoformat(),
             updated_at=vector_index.updated_at.isoformat()
@@ -601,6 +618,7 @@ async def list_indexes(
     return [
         IndexResponse(
             id=idx.id,
+            uuid=idx.uuid,
             index_name=idx.index_name,
             index_type=idx.index_type.value,
             algorithm_type=idx.algorithm_type,
@@ -608,10 +626,12 @@ async def list_indexes(
             metric_type=idx.metric_type,
             status=idx.status.value,
             description=idx.description,
+            collection_name=idx.collection_name,
             embedding_result_id=idx.embedding_result_id,
             source_document_name=idx.source_document_name,
             source_model=idx.source_model,
             vector_count=idx.vector_count,
+            has_sparse=idx.has_sparse,
             namespace=idx.namespace,
             created_at=idx.created_at.isoformat(),
             updated_at=idx.updated_at.isoformat()
@@ -897,6 +917,33 @@ async def update_vector(
         )
 
 
+@router.get("/collections")
+async def get_collections(
+    service: VectorIndexService = Depends(get_vector_index_service)
+):
+    """
+    获取所有可用的 Milvus Collection 列表
+    
+    返回系统中所有 Collection 的信息，包括：
+    - 默认 Collection (default_collection)
+    - 用户自建的 Collection
+    - 每个 Collection 关联的文档数和总向量数
+    """
+    try:
+        collections = service.get_collections()
+        return {
+            "collections": collections,
+            "total": len(collections)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get collections: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get collections: {str(e)}"
+        )
+
+
 # ==================== 多 Collection 搜索 API ====================
 
 class MultiCollectionSearchRequest(BaseModel):
@@ -953,6 +1000,30 @@ async def multi_collection_search(
         )
 
 
+@router.delete("/history/clear-all")
+async def clear_all_index_history(
+    service: VectorIndexService = Depends(get_vector_index_service)
+):
+    """
+    清空所有索引历史记录
+    
+    删除所有索引记录，同时会清理：
+    - Milvus 中的实际索引（如果存在）
+    - 相关的统计记录
+    - 相关的查询历史
+    """
+    try:
+        result = service.clear_all_index_history()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Failed to clear all index history: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clear all index history: {str(e)}"
+        )
+
+
 @router.delete("/history/{history_id}")
 async def delete_index_history(
     history_id: int,
@@ -985,4 +1056,224 @@ async def delete_index_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete index history: {str(e)}"
+        )
+
+
+# ==================== 混合检索端点 (T064) ====================
+
+@router.post("/hybrid-search")
+async def hybrid_search(
+    request: HybridSearchRequest,
+    service: VectorIndexService = Depends(get_vector_index_service)
+):
+    """
+    混合检索：稠密+稀疏双路召回 → RRF 粗排 → Reranker 精排
+    
+    自动降级策略：
+    - 稀疏向量为空 → 降级到纯稠密检索
+    - Reranker 不可用 → 跳过精排，直接返回 RRF 粗排结果
+    
+    参考规约: search-api.yaml - POST /vector-index/hybrid-search
+    """
+    try:
+        # 查找索引 ID（通过 collection_name 查找）
+        from ..models.vector_index import VectorIndex
+        vector_index = service.db.query(VectorIndex).filter(
+            VectorIndex.index_name == request.collection_name
+        ).first()
+        
+        if not vector_index:
+            raise IndexNotFoundError(f"Collection '{request.collection_name}' not found")
+        
+        result = service.hybrid_search(
+            index_id=vector_index.id,
+            query_text=request.query_text,
+            query_dense_vector=request.query_dense_vector,
+            query_sparse_vector=request.query_sparse_vector,
+            top_n=request.top_n,
+            top_k=request.top_k,
+            enable_reranker=request.enable_reranker,
+            rrf_k=request.rrf_k,
+            search_params=request.search_params,
+            output_fields=request.output_fields
+        )
+        
+        return result
+        
+    except IndexNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except SearchError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Hybrid search failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Hybrid search failed: {str(e)}"
+        )
+
+
+@router.get("/reranker/health")
+async def reranker_health_check():
+    """
+    Reranker 服务健康检查
+    """
+    try:
+        from ..services.reranker_service import RerankerService
+        reranker = RerankerService.get_instance()
+        return reranker.health_check()
+    except Exception as e:
+        return {
+            "available": False,
+            "error": str(e)
+        }
+
+
+# ==================== 智能推荐 API 端点 (T020) ====================
+
+@router.post("/recommend")
+async def recommend_index_config(
+    request: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    智能推荐索引算法和度量类型
+
+    根据向量化任务的特征（维度、数据量、Embedding 模型类型），
+    自动推荐最佳的索引算法和度量类型。
+
+    推荐策略：分层规则匹配（数据量 → 维度 → 模型优先级）
+    兜底默认值：HNSW + COSINE
+    """
+    try:
+        from ..services.recommendation_service import get_recommendation_engine
+
+        engine = get_recommendation_engine()
+
+        embedding_task_id = request.get("embedding_task_id", "")
+        vector_count = request.get("vector_count")
+        dimension = request.get("dimension")
+        embedding_model = request.get("embedding_model", "")
+
+        # 如果未指定向量数量/维度，尝试从向量化任务获取
+        if vector_count is None or dimension is None:
+            try:
+                from ..models.embedding_result import EmbeddingResult
+                embedding_result = db.query(EmbeddingResult).filter(
+                    EmbeddingResult.result_id == embedding_task_id
+                ).first()
+                if embedding_result:
+                    if vector_count is None:
+                        vector_count = embedding_result.successful_count or 0
+                    if dimension is None:
+                        dimension = embedding_result.vector_dimension or 0
+                    if not embedding_model:
+                        embedding_model = embedding_result.model or ""
+            except Exception as e:
+                logger.warning(f"无法从向量化任务获取信息: {e}")
+
+        # 使用默认值（避免 None）
+        vector_count = vector_count or 0
+        dimension = dimension or 0
+
+        result = engine.recommend(
+            vector_count=vector_count,
+            dimension=dimension,
+            embedding_model=embedding_model
+        )
+
+        return {
+            "success": True,
+            "data": {
+                "recommended_index_type": result["index_type"],
+                "recommended_metric_type": result["metric_type"],
+                "reason": result["reason"],
+                "is_fallback": result["is_fallback"],
+                "vector_count": result["vector_count"],
+                "dimension": result["dimension"],
+                "embedding_model": result["embedding_model"],
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"推荐失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"推荐失败: {str(e)}"
+        )
+
+
+@router.post("/recommend/log")
+async def log_recommendation(
+    request: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    记录推荐采纳行为
+
+    在用户确认创建索引时调用，记录推荐值与最终选择的对比。
+    用于推荐采纳率统计（SC-012 目标 ≥ 80%）。
+    """
+    try:
+        from ..services.recommendation_service import get_recommendation_log_service
+
+        log_service = get_recommendation_log_service(db)
+
+        log_entry = log_service.log_recommendation(
+            embedding_task_id=request.get("embedding_task_id", ""),
+            recommended_index_type=request.get("recommended_index_type", ""),
+            recommended_metric_type=request.get("recommended_metric_type", ""),
+            final_index_type=request.get("final_index_type", ""),
+            final_metric_type=request.get("final_metric_type", ""),
+            is_fallback=request.get("is_fallback", False),
+            reason=request.get("reason", ""),
+        )
+
+        return {
+            "success": True,
+            "log_id": log_entry.log_id,
+            "is_modified": log_entry.is_modified,
+            "message": "推荐行为已记录"
+        }
+
+    except Exception as e:
+        logger.error(f"记录推荐行为失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"记录推荐行为失败: {str(e)}"
+        )
+
+
+@router.get("/recommend/stats")
+async def get_recommend_stats(
+    days: int = Query(default=30, ge=1, le=365, description="统计天数"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取推荐采纳率统计
+
+    返回指定时间范围内的推荐引擎使用统计，
+    包括采纳率、修改率、兜底推荐次数等。
+    """
+    try:
+        from ..services.recommendation_service import get_recommendation_log_service
+
+        log_service = get_recommendation_log_service(db)
+        stats = log_service.get_recommendation_stats(days=days)
+
+        return {
+            "success": True,
+            "data": stats
+        }
+
+    except Exception as e:
+        logger.error(f"获取推荐统计失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取推荐统计失败: {str(e)}"
         )

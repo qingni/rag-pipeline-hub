@@ -1,145 +1,107 @@
 <template>
-  <div class="index-progress">
+  <div v-if="visible" class="index-progress">
     <t-card :bordered="false" class="progress-card">
       <template #header>
-        <div class="card-header">
-          <span class="card-title">索引构建进度</span>
-          <t-tag v-if="status" :theme="statusTheme" variant="light">
+        <div class="progress-header">
+          <span class="progress-title">索引构建进度</span>
+          <t-tag :theme="statusTheme" variant="light" size="small">
             {{ statusText }}
           </t-tag>
         </div>
       </template>
 
-      <!-- 进度条 -->
-      <div class="progress-section">
-        <t-progress 
-          :percentage="percentage" 
+      <div class="progress-body">
+        <!-- 进度条 -->
+        <t-progress
+          :percentage="percentage"
           :status="progressStatus"
+          :stroke-width="8"
           :label="progressLabel"
-          size="large"
         />
-        
-        <div class="progress-info">
-          <span class="count">{{ processed }} / {{ total }}</span>
-          <span class="status-text">{{ statusMessage }}</span>
+
+        <!-- 进度详情 -->
+        <div class="progress-detail">
+          <div class="detail-item">
+            <span class="detail-label">已处理</span>
+            <span class="detail-value">{{ processedCount }} / {{ totalCount }}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">索引算法</span>
+            <span class="detail-value">{{ indexType }}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">耗时</span>
+            <span class="detail-value">{{ elapsedTime }}</span>
+          </div>
         </div>
-      </div>
 
-      <!-- 任务详情 -->
-      <div v-if="taskId" class="task-details">
-        <t-descriptions :column="2" size="small" bordered>
-          <t-descriptions-item label="任务ID">
-            <t-tooltip :content="taskId">
-              <span class="task-id">{{ shortTaskId }}</span>
-            </t-tooltip>
-          </t-descriptions-item>
-          <t-descriptions-item label="索引名称">
-            {{ collectionName || '-' }}
-          </t-descriptions-item>
-          <t-descriptions-item label="开始时间">
-            {{ formatDate(createdAt) }}
-          </t-descriptions-item>
-          <t-descriptions-item label="预计剩余">
-            {{ estimatedRemaining }}
-          </t-descriptions-item>
-        </t-descriptions>
-      </div>
-
-      <!-- 错误信息 -->
-      <div v-if="error" class="error-section">
-        <t-alert theme="error" :message="error" close @close="$emit('clearError')">
-          <template #operation>
-            <t-button theme="danger" variant="text" size="small" @click="$emit('retry')">
-              重试
-            </t-button>
-          </template>
-        </t-alert>
-      </div>
-
-      <!-- 操作按钮 -->
-      <div v-if="showActions" class="action-buttons">
-        <t-button 
-          v-if="canCancel" 
-          theme="default" 
-          variant="outline"
-          :loading="cancelling"
-          @click="$emit('cancel')"
-        >
-          取消任务
-        </t-button>
+        <!-- 错误信息 -->
+        <t-alert
+          v-if="errorMessage"
+          theme="error"
+          :message="errorMessage"
+          class="progress-error"
+        />
       </div>
     </t-card>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed } from 'vue'
 
 const props = defineProps({
-  // 任务信息
-  taskId: {
-    type: String,
-    default: ''
+  /** 是否显示 */
+  visible: {
+    type: Boolean,
+    default: false
   },
-  collectionName: {
-    type: String,
-    default: ''
-  },
-  // 进度信息
+  /** 任务状态: pending / running / completed / failed */
   status: {
     type: String,
-    default: 'pending', // pending, running, completed, failed
-    validator: (val) => ['pending', 'running', 'completed', 'failed'].includes(val)
+    default: 'pending'
   },
+  /** 进度百分比 0-100 */
   percentage: {
     type: Number,
     default: 0
   },
-  processed: {
+  /** 已处理条数 */
+  processedCount: {
     type: Number,
     default: 0
   },
-  total: {
+  /** 总条数 */
+  totalCount: {
     type: Number,
     default: 0
   },
-  // 时间信息
-  createdAt: {
+  /** 索引算法类型 */
+  indexType: {
+    type: String,
+    default: 'FLAT'
+  },
+  /** 开始时间 */
+  startTime: {
+    type: [Date, String],
+    default: null
+  },
+  /** 错误信息 */
+  errorMessage: {
     type: String,
     default: ''
-  },
-  completedAt: {
-    type: String,
-    default: ''
-  },
-  // 错误信息
-  error: {
-    type: String,
-    default: ''
-  },
-  // 控制
-  showActions: {
-    type: Boolean,
-    default: true
-  },
-  cancelling: {
-    type: Boolean,
-    default: false
   }
-});
+})
 
-defineEmits(['cancel', 'retry', 'clearError']);
-
-// 计算属性
 const statusTheme = computed(() => {
   const map = {
     pending: 'default',
     running: 'warning',
     completed: 'success',
     failed: 'danger'
-  };
-  return map[props.status] || 'default';
-});
+  }
+  return map[props.status] || 'default'
+})
 
 const statusText = computed(() => {
   const map = {
@@ -147,136 +109,83 @@ const statusText = computed(() => {
     running: '构建中',
     completed: '已完成',
     failed: '失败'
-  };
-  return map[props.status] || props.status;
-});
+  }
+  return map[props.status] || props.status
+})
 
 const progressStatus = computed(() => {
-  const map = {
-    pending: 'active',
-    running: 'active',
-    completed: 'success',
-    failed: 'error'
-  };
-  return map[props.status] || 'active';
-});
+  if (props.status === 'failed') return 'error'
+  if (props.status === 'completed') return 'success'
+  return 'active'
+})
 
 const progressLabel = computed(() => {
-  return props.percentage ? `${props.percentage.toFixed(1)}%` : '0%';
-});
+  if (props.status === 'completed') return '完成'
+  if (props.status === 'failed') return '失败'
+  return `${props.percentage}%`
+})
 
-const statusMessage = computed(() => {
-  if (props.status === 'pending') return '等待开始...';
-  if (props.status === 'running') return '正在构建索引...';
-  if (props.status === 'completed') return '索引构建完成';
-  if (props.status === 'failed') return '索引构建失败';
-  return '';
-});
-
-const shortTaskId = computed(() => {
-  if (!props.taskId) return '-';
-  return props.taskId.substring(0, 8) + '...';
-});
-
-const canCancel = computed(() => {
-  return props.status === 'pending' || props.status === 'running';
-});
-
-const estimatedRemaining = computed(() => {
-  if (props.status === 'completed') return '已完成';
-  if (props.status === 'failed') return '-';
-  if (!props.processed || !props.total || props.processed === 0) return '计算中...';
-  
-  // 简单估算：假设每个向量处理时间一致
-  const remaining = props.total - props.processed;
-  if (remaining <= 0) return '即将完成';
-  
-  // 基于已处理数量估算
-  if (props.percentage > 0 && props.percentage < 100) {
-    const remainingPercent = 100 - props.percentage;
-    const estimatedSeconds = Math.ceil(remainingPercent / 10); // 粗略估计
-    if (estimatedSeconds < 60) return `约 ${estimatedSeconds} 秒`;
-    return `约 ${Math.ceil(estimatedSeconds / 60)} 分钟`;
-  }
-  
-  return '计算中...';
-});
-
-// 工具函数
-const formatDate = (dateString) => {
-  if (!dateString) return '-';
-  return new Date(dateString).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
-};
+const elapsedTime = computed(() => {
+  if (!props.startTime) return '-'
+  const start = new Date(props.startTime)
+  const now = new Date()
+  const diff = Math.floor((now - start) / 1000)
+  if (diff < 60) return `${diff}s`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ${diff % 60}s`
+  return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m`
+})
 </script>
 
 <style scoped>
 .index-progress {
-  width: 100%;
+  margin-bottom: 16px;
 }
 
 .progress-card {
   background: var(--td-bg-color-container);
 }
 
-.card-header {
+.progress-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.card-title {
-  font-size: 16px;
+.progress-title {
+  font-size: 14px;
   font-weight: 600;
 }
 
-.progress-section {
-  margin-bottom: 16px;
+.progress-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.progress-info {
+.progress-detail {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-top: 8px;
-  font-size: 14px;
+  gap: 16px;
 }
 
-.count {
-  font-weight: 500;
-  color: var(--td-brand-color);
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.status-text {
+.detail-label {
+  font-size: 12px;
   color: var(--td-text-color-secondary);
 }
 
-.task-details {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--td-component-border);
-}
-
-.task-id {
+.detail-value {
+  font-size: 14px;
+  font-weight: 500;
   font-family: monospace;
-  font-size: 12px;
-  cursor: pointer;
 }
 
-.error-section {
-  margin-top: 16px;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--td-component-border);
+.progress-error {
+  margin-top: 8px;
 }
 </style>

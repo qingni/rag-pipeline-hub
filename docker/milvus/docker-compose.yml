@@ -38,7 +38,7 @@ services:
 
   standalone:
     container_name: milvus-standalone
-    image: milvusdb/milvus:v2.3.4
+    image: milvusdb/milvus:v2.5.6
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -57,6 +57,16 @@ services:
     depends_on:
       - "etcd"
       - "minio"
+
+  attu:
+    container_name: milvus-attu
+    image: zilliz/attu:v2.5
+    environment:
+      - MILVUS_URL=standalone:19530
+    ports:
+      - "8080:3000"
+    depends_on:
+      - "standalone"
 
 networks:
   default:

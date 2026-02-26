@@ -32,6 +32,7 @@ from ..exceptions.vector_index_errors import (
     SearchError,
     VectorDimensionError
 )
+from .bm25_service import BM25SparseService
 
 logger = get_logger("vector_index_service")
 
@@ -52,14 +53,19 @@ class VectorIndexService:
             result_dir: 结果持久化目录
         """
         self.db = db_session
+        self.result_dir = result_dir
         self.registry = IndexRegistry()
         self.result_persistence = ResultPersistence(result_dir)
         self.operation_logger = IndexOperationLogger(db_session)
         
+        # 初始化 BM25 稀疏向量服务
+        bm25_stats_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "results", "bm25_stats")
+        self.bm25_service = BM25SparseService(stats_dir=bm25_stats_dir)
+        
         # 注册提供者
         self._register_providers()
         
-        logger.info("VectorIndexService initialized")
+        logger.info("VectorIndexService initialized (BM25 sparse enabled)")
 
     def _register_providers(self) -> None:
         """注册向量存储提供者"""
@@ -167,27 +173,39 @@ class VectorIndexService:
         self,
         embedding_result_id: str,
         name: Optional[str] = None,
+        collection_name: Optional[str] = None,
         provider: IndexProvider = IndexProvider.MILVUS,  # 默认使用 Milvus
         index_type: str = "FLAT",  # 默认使用 FLAT
         metric_type: str = "cosine",
         index_params: Optional[Dict[str, Any]] = None,
-        namespace: str = "default"
+        namespace: str = "default",
+        enable_sparse: bool = True  # 默认启用 BM25 稀疏向量
     ) -> VectorIndex:
         """
-        从向量化任务创建索引
+        从向量化任务创建索引（向量追加到指定 Collection）
+        
+        设计说明：
+        - 一个知识库对应一个 Milvus Collection
+        - 多个文档的向量可以追加到同一个 Collection 中
+        - 如果不指定 collection_name，则使用默认 Collection (default_collection)
+        - 每次调用会创建一条 VectorIndex 记录，记录本次导入的详情
         
         Args:
             embedding_result_id: 向量化任务结果ID
-            name: 索引名称（可选，自动生成）
+            name: 索引记录名称（可选，自动生成）
+            collection_name: 目标 Collection 名称（可选，不指定则使用默认 Collection）
             provider: 向量数据库提供商
             index_type: 索引算法类型
             metric_type: 相似度度量方法
             index_params: 索引算法参数
             namespace: 命名空间
+            enable_sparse: 是否启用 BM25 稀疏向量
             
         Returns:
             VectorIndex 对象
         """
+        from ..vector_config import DEFAULT_COLLECTION_NAME, get_physical_collection_name
+        
         try:
             # 1. 获取向量化任务
             embedding_result = self.db.query(EmbeddingResult).filter(
@@ -202,16 +220,18 @@ class VectorIndexService:
                     f"Embedding result status is {embedding_result.status}, expected SUCCESS or PARTIAL_SUCCESS"
                 )
             
-            # 2. 生成索引名称
+            # 2. 确定目标 Collection 名称
+            target_collection = collection_name or DEFAULT_COLLECTION_NAME
+            
+            # 3. 生成索引记录名称（用于标识本次导入）
             if not name:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 doc_name = self._get_document_name(embedding_result.document_id) or "unknown"
-                # 清理文档名称，移除非ASCII字符（Milvus要求collection名称以字母或下划线开头）
+                # 清理文档名称，移除非ASCII字符
                 doc_name = doc_name.replace(".", "_").replace(" ", "_")[:20]
-                # 确保名称以字母开头（Milvus要求）
                 name = f"idx_{doc_name}_{timestamp}"
             
-            # 3. 检查索引名称是否已存在
+            # 4. 检查索引记录名称是否已存在
             existing = self.db.query(VectorIndex).filter(
                 VectorIndex.index_name == name
             ).first()
@@ -219,16 +239,17 @@ class VectorIndexService:
             if existing:
                 raise IndexBuildError(f"Index with name '{name}' already exists")
             
-            # 4. 验证维度
+            # 5. 验证维度
             dimension = embedding_result.vector_dimension
             if dimension not in VALID_DIMENSIONS:
                 raise VectorDimensionError(
                     f"Dimension {dimension} not in valid dimensions: {VALID_DIMENSIONS}"
                 )
             
-            # 5. 创建数据库记录
+            # 6. 创建数据库记录（记录本次导入操作）
             vector_index = VectorIndex(
                 index_name=name,
+                collection_name=target_collection,
                 index_type=provider,
                 algorithm_type=index_type,
                 dimension=dimension,
@@ -246,21 +267,22 @@ class VectorIndexService:
             self.db.commit()
             self.db.refresh(vector_index)
             
-            # 6. 记录操作日志
+            # 7. 记录操作日志
             with self.operation_logger.track_operation(
                 operation_type=OperationType.CREATE,
                 index_id=vector_index.id,
                 details={
                     "embedding_result_id": embedding_result_id,
+                    "collection_name": target_collection,
                     "provider": provider.value,
                     "index_type": index_type
                 }
             ):
-                # 7. 先加载向量数据（用于确定索引参数）
-                vectors, metadata_list = self._load_vectors_from_embedding(embedding_result)
+                # 8. 先加载向量数据（用于确定索引参数）
+                vectors, metadata_list, doc_ids = self._load_vectors_from_embedding(embedding_result)
                 num_vectors = len(vectors)
                 
-                # 8. 获取提供者
+                # 9. 获取提供者
                 provider_name = provider.value.lower()
                 vector_provider = self.registry.get_provider(provider_name)
                 
@@ -270,26 +292,64 @@ class VectorIndexService:
                         f"Please check if the required dependencies are installed and the service is running."
                     )
                 
-                # 9. 创建索引配置（传入向量数量用于动态调整参数）
-                config = IndexConfig(
-                    index_name=name,
+                # 10. 确保 Collection 存在（Dify 方案：按维度拆分物理 Collection）
+                # provider_index_id 现在返回的是物理 Collection 名称（如 default_collection_dim1024）
+                provider_index_id = vector_provider.ensure_collection_exists(
+                    collection_name=target_collection,
                     dimension=dimension,
                     metric_type=metric_type,
                     index_type=index_type,
-                    num_vectors=num_vectors  # 传入向量数量
+                    enable_sparse=enable_sparse,
+                    description=f"Knowledge base collection: {target_collection}"
                 )
-                
-                # 10. 在提供者中创建索引
-                provider_index_id = vector_provider.create_index(config)
                 vector_index.provider_index_id = provider_index_id
                 
+                # 记录物理 Collection 名称（Dify 方案元数据映射）
+                vector_index.physical_collection_name = get_physical_collection_name(target_collection, dimension)
+                
                 if num_vectors > 0:
-                    # 11. 批量插入向量
-                    vector_ids = vector_provider.add_vectors(
-                        provider_index_id,
-                        vectors,
-                        metadata_list
-                    )
+                    # 10.5 使用 BM25 生成稀疏向量（如果启用）
+                    sparse_vectors = None
+                    if enable_sparse:
+                        try:
+                            # 从 metadata 中提取源文本用于 BM25
+                            source_texts = [
+                                m.get("source_text", "") for m in metadata_list
+                            ]
+                            # 过滤空文本
+                            if any(t.strip() for t in source_texts):
+                                sparse_vectors = self.bm25_service.build_and_encode(
+                                    index_id=provider_index_id,
+                                    texts=source_texts
+                                )
+                                logger.info(
+                                    f"BM25 sparse vectors generated: "
+                                    f"{sum(1 for sv in sparse_vectors if sv)} non-empty "
+                                    f"out of {len(sparse_vectors)}"
+                                )
+                            else:
+                                logger.warning("所有文档的源文本为空，跳过 BM25 稀疏向量生成")
+                        except Exception as bm25_error:
+                            logger.warning(f"BM25 稀疏向量生成失败（降级到纯稠密索引）: {bm25_error}")
+                            sparse_vectors = None
+                    
+                    # 11. 批量插入向量到 Collection（追加模式，包含 doc_id 用于 Partition Key 路由）
+                    if sparse_vectors and any(sv for sv in sparse_vectors):
+                        vector_ids = vector_provider.add_vectors_with_sparse(
+                            provider_index_id,
+                            vectors,
+                            metadata_list,
+                            sparse_vectors=sparse_vectors,
+                            doc_ids=doc_ids
+                        )
+                        vector_index.has_sparse = True
+                    else:
+                        vector_ids = vector_provider.add_vectors(
+                            provider_index_id,
+                            vectors,
+                            metadata_list,
+                            doc_ids=doc_ids
+                        )
                     
                     # 12. 更新索引状态
                     vector_index.vector_count = num_vectors
@@ -314,7 +374,10 @@ class VectorIndexService:
             # 14. 创建初始统计记录
             self._create_initial_statistics(vector_index.id)
             
-            logger.info(f"Created index from embedding: {name} (ID: {vector_index.id})")
+            logger.info(
+                f"Added vectors to collection '{target_collection}' from embedding: {name} "
+                f"(ID: {vector_index.id}, vectors: {num_vectors})"
+            )
             return vector_index
             
         except Exception as e:
@@ -327,6 +390,68 @@ class VectorIndexService:
             logger.error(f"Failed to create index from embedding: {str(e)}")
             raise IndexBuildError(f"Failed to create index from embedding: {str(e)}")
 
+    def get_collections(self) -> List[Dict[str, Any]]:
+        """
+        获取所有可用的 Milvus Collection 列表
+        
+        Returns:
+            Collection 信息列表
+        """
+        from ..vector_config import DEFAULT_COLLECTION_NAME, parse_physical_collection_name
+        
+        try:
+            provider = self.registry.get_provider("milvus")
+            if provider is None:
+                return []
+            
+            collection_names = provider.get_collection_names()
+            
+            # Dify 方案：按逻辑知识库名聚合物理 Collection
+            logical_map = {}  # {logical_name: [physical_names]}
+            for coll_name in collection_names:
+                logical_name, dim = parse_physical_collection_name(coll_name)
+                if logical_name not in logical_map:
+                    logical_map[logical_name] = []
+                logical_map[logical_name].append({
+                    "physical_name": coll_name,
+                    "dimension": dim
+                })
+            
+            from sqlalchemy import func
+            
+            collections = []
+            for logical_name, physical_list in logical_map.items():
+                # 统计逻辑知识库关联的文档数量
+                doc_count = self.db.query(VectorIndex).filter(
+                    VectorIndex.collection_name == logical_name,
+                    VectorIndex.status == IndexStatus.READY
+                ).count()
+                
+                # 统计逻辑知识库的总向量数
+                total_vectors = self.db.query(func.sum(VectorIndex.vector_count)).filter(
+                    VectorIndex.collection_name == logical_name,
+                    VectorIndex.status == IndexStatus.READY
+                ).scalar() or 0
+                
+                # 提取所有维度
+                dimensions = [p["dimension"] for p in physical_list if p["dimension"] is not None]
+                
+                collections.append({
+                    "collection_name": logical_name,
+                    "is_default": logical_name == DEFAULT_COLLECTION_NAME,
+                    "document_count": doc_count,
+                    "total_vectors": total_vectors,
+                    "physical_collections": physical_list,
+                    "dimensions": sorted(dimensions),
+                    "physical_count": len(physical_list)
+                })
+            
+            return collections
+            
+        except Exception as e:
+            logger.error(f"Failed to get collections: {str(e)}")
+            return []
+
     def _load_vectors_from_embedding(
         self,
         embedding_result: EmbeddingResult
@@ -338,7 +463,7 @@ class VectorIndexService:
             embedding_result: 向量化结果对象
             
         Returns:
-            (vectors: np.ndarray, metadata: List[Dict])
+            (vectors: np.ndarray, metadata: List[Dict], doc_ids: List[str])
         """
         try:
             # 读取 JSON 文件
@@ -364,23 +489,26 @@ class VectorIndexService:
                 
                 if not json_file_path:
                     logger.warning(f"JSON file not found in any of: {possible_paths}")
-                    return np.array([]), []
+                    return np.array([]), [], []
             
             if not os.path.exists(json_file_path):
                 logger.warning(f"JSON file not found: {json_file_path}")
-                return np.array([]), []
+                return np.array([]), [], []
             
             with open(json_file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
             vectors = []
             metadata_list = []
+            doc_ids = []
             
             # 解析向量数据
             if "vectors" in data:
                 for item in data["vectors"]:
                     if "vector" in item:
                         vectors.append(item["vector"])
+                        # doc_id 提升为顶级字段（用于 Partition Key）
+                        doc_ids.append(embedding_result.document_id or "unknown")
                         metadata_list.append({
                             "index": item.get("index", len(vectors) - 1),
                             "text_hash": item.get("text_hash"),
@@ -392,12 +520,12 @@ class VectorIndexService:
             
             if len(vectors) == 0:
                 logger.warning(f"No vectors found in JSON file: {json_file_path}")
-                return np.array([]), []
+                return np.array([]), [], []
             
             vectors_array = np.array(vectors, dtype=np.float32)
             
-            logger.info(f"Loaded {len(vectors)} vectors from embedding result")
-            return vectors_array, metadata_list
+            logger.info(f"Loaded {len(vectors)} vectors from embedding result (doc_id: {embedding_result.document_id})")
+            return vectors_array, metadata_list, doc_ids
             
         except Exception as e:
             logger.error(f"Failed to load vectors from embedding: {str(e)}")
@@ -1428,3 +1556,291 @@ class VectorIndexService:
             self.db.rollback()
             logger.error(f"Failed to delete index history: {str(e)}")
             raise IndexBuildError(f"Failed to delete index history: {str(e)}")
+
+    def clear_all_index_history(self) -> Dict[str, Any]:
+        """
+        清空所有索引历史记录
+        
+        删除所有索引记录，同时清理：
+        - Milvus 中的实际索引（如果存在）
+        - 相关的统计记录
+        - 相关的查询历史
+        
+        Returns:
+            清空结果，包含删除的记录数
+        """
+        try:
+            # 获取所有索引记录
+            all_indexes = self.db.query(VectorIndex).all()
+            deleted_count = len(all_indexes)
+            
+            # 逐个清理 Milvus 中的实际索引
+            for vector_index in all_indexes:
+                if vector_index.status == IndexStatus.READY and vector_index.provider_index_id:
+                    try:
+                        provider = self._get_provider_for_index(vector_index)
+                        provider.delete_index(vector_index.provider_index_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete provider index {vector_index.provider_index_id}: {str(e)}")
+            
+            # 批量删除所有统计记录
+            self.db.query(IndexStatistics).delete()
+            
+            # 批量删除所有查询历史
+            self.db.query(QueryHistory).delete()
+            
+            # 批量删除所有索引记录
+            self.db.query(VectorIndex).delete()
+            
+            self.db.commit()
+            
+            logger.info(f"Cleared all index history, deleted {deleted_count} records")
+            
+            return {
+                "deleted_count": deleted_count,
+                "message": f"已清空所有索引历史记录，共删除 {deleted_count} 条",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to clear all index history: {str(e)}")
+            raise IndexBuildError(f"Failed to clear all index history: {str(e)}")
+
+    # ==================== 混合检索方法 (T061-T063, T066) ====================
+
+    def hybrid_search(
+        self,
+        index_id: int,
+        query_text: str,
+        query_dense_vector: List[float],
+        query_sparse_vector: Optional[Dict] = None,
+        top_n: int = 20,
+        top_k: int = 5,
+        enable_reranker: bool = True,
+        rrf_k: int = 60,
+        search_params: Optional[Dict] = None,
+        output_fields: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        混合检索：稠密+稀疏双路召回 → RRF 粗排 → Reranker 精排
+        
+        自动降级策略：
+        - 稀疏向量为空或无效 → 降级到纯稠密检索
+        - Reranker 不可用 → 跳过精排，直接返回 RRF 粗排结果
+        
+        Args:
+            index_id: 索引数据库 ID
+            query_text: 原始查询文本（用于 Reranker 精排）
+            query_dense_vector: 稠密查询向量
+            query_sparse_vector: 稀疏查询向量
+            top_n: 粗排候选集大小
+            top_k: 最终返回结果数量
+            enable_reranker: 是否启用 Reranker 精排
+            rrf_k: RRF 排名平滑因子
+            search_params: 搜索参数
+            output_fields: 返回字段列表
+            
+        Returns:
+            HybridSearchResponse 格式的字典
+        """
+        import time
+        total_start = time.time()
+        
+        try:
+            # 获取索引记录
+            vector_index = self.db.query(VectorIndex).filter(
+                VectorIndex.id == index_id
+            ).first()
+            
+            if not vector_index:
+                raise IndexNotFoundError(f"Index {index_id} not found")
+            
+            if vector_index.status != IndexStatus.READY:
+                raise SearchError(str(index_id), f"Index is not ready (status={vector_index.status.value})")
+            
+            # 获取 Provider
+            provider = self._get_provider_for_index(vector_index)
+            provider_index_id = vector_index.provider_index_id
+            
+            if not provider_index_id:
+                raise SearchError(str(index_id), "No provider index ID found")
+            
+            # ============ Step 0.5: 自动生成 query sparse 向量 ============
+            # 如果调用方未提供 sparse 向量，且索引支持 sparse，则使用 BM25 自动生成
+            if not query_sparse_vector and vector_index.has_sparse and query_text:
+                try:
+                    auto_sparse = self.bm25_service.encode_query(
+                        index_id=provider_index_id,
+                        query_text=query_text
+                    )
+                    if auto_sparse:
+                        query_sparse_vector = auto_sparse
+                        logger.info(
+                            f"BM25 自动生成 query sparse 向量: "
+                            f"{len(auto_sparse)} 个非零维度"
+                        )
+                except Exception as e:
+                    logger.warning(f"BM25 query sparse 生成失败（降级到纯稠密检索）: {e}")
+            
+            # ============ Step 1: 双路召回 + RRF 粗排 ============
+            rrf_start = time.time()
+            
+            dense_vec = np.array(query_dense_vector, dtype=np.float32)
+            
+            # 调用 Provider 的 hybrid_search（内含 RRF 融合和降级逻辑）
+            candidates, search_mode = provider.hybrid_search(
+                index_id=provider_index_id,
+                dense_vector=dense_vec,
+                sparse_vector=query_sparse_vector,
+                top_n=top_n,
+                rrf_k=rrf_k,
+                output_fields=output_fields,
+                **(search_params or {})
+            )
+            
+            rrf_time_ms = (time.time() - rrf_start) * 1000
+            total_candidates = len(candidates)
+            
+            # ============ Step 2: Reranker 精排 ============
+            reranker_time_ms = None
+            reranker_available = False
+            
+            if enable_reranker and query_text and query_text.strip():
+                try:
+                    from .reranker_service import RerankerService
+                    reranker = RerankerService.get_instance()
+                    
+                    if not reranker.available:
+                        reranker.init()
+                    
+                    if reranker.available:
+                        reranker_available = True
+                        reranker_start = time.time()
+                        
+                        # 将候选集交给 Reranker 精排
+                        candidates = reranker.rerank(
+                            query=query_text,
+                            candidates=candidates,
+                            top_k=top_k,
+                            text_key="text"
+                        )
+                        
+                        reranker_time_ms = (time.time() - reranker_start) * 1000
+                    else:
+                        logger.warning("Reranker 不可用，跳过精排")
+                        candidates = candidates[:top_k]
+                except Exception as e:
+                    logger.warning(f"Reranker 精排失败，跳过: {e}")
+                    candidates = candidates[:top_k]
+            else:
+                # 不启用 Reranker 或查询文本为空
+                candidates = candidates[:top_k]
+            
+            total_time_ms = (time.time() - total_start) * 1000
+            
+            # ============ Step 3: 构造返回结果 ============
+            results = []
+            for i, c in enumerate(candidates):
+                result_item = {
+                    "vector_id": c.get("vector_id", 0),
+                    "rrf_score": c.get("rrf_score", 0),
+                    "reranker_score": c.get("reranker_score"),
+                    "final_score": c.get("reranker_score") if c.get("reranker_score") is not None else c.get("rrf_score", 0),
+                    "doc_id": c.get("metadata", {}).get("doc_id", ""),
+                    "chunk_index": c.get("metadata", {}).get("chunk_index", 0),
+                    "text": c.get("text") or c.get("metadata", {}).get("source_text", ""),
+                    "metadata": c.get("metadata", {}),
+                    "search_mode": search_mode
+                }
+                results.append(result_item)
+            
+            response = {
+                "success": True,
+                "data": results,
+                "search_mode": search_mode,
+                "query_time_ms": round(total_time_ms, 2),
+                "rrf_time_ms": round(rrf_time_ms, 2) if rrf_time_ms else None,
+                "reranker_time_ms": round(reranker_time_ms, 2) if reranker_time_ms else None,
+                "total_candidates": total_candidates,
+                "reranker_available": reranker_available
+            }
+            
+            # ============ Step 4: 记录查询历史 ============
+            try:
+                query_record = QueryHistory(
+                    index_id=index_id,
+                    query_text=query_text[:500] if query_text else "",
+                    top_k=top_k,
+                    result_count=len(results),
+                    response_time_ms=total_time_ms,
+                    search_mode=search_mode
+                )
+                self.db.add(query_record)
+                self.db.commit()
+            except Exception as e:
+                logger.warning(f"Failed to save query history: {e}")
+                self.db.rollback()
+            
+            # ============ Step 5: 结果持久化到 JSON ============
+            try:
+                self._persist_hybrid_search_result(
+                    index_id=index_id,
+                    query_text=query_text,
+                    response=response
+                )
+            except Exception as e:
+                logger.warning(f"Failed to persist hybrid search result: {e}")
+            
+            logger.info(
+                f"Hybrid search completed: index={index_id}, mode={search_mode}, "
+                f"candidates={total_candidates}, results={len(results)}, "
+                f"total_time={total_time_ms:.1f}ms"
+            )
+            
+            return response
+            
+        except (IndexNotFoundError, SearchError):
+            raise
+        except Exception as e:
+            logger.error(f"Hybrid search failed: {str(e)}")
+            raise SearchError(str(index_id), f"Hybrid search failed: {str(e)}")
+
+    def _persist_hybrid_search_result(
+        self,
+        index_id: int,
+        query_text: str,
+        response: Dict[str, Any]
+    ) -> None:
+        """
+        持久化混合检索结果到 JSON 文件
+        
+        Args:
+            index_id: 索引 ID
+            query_text: 查询文本
+            response: 检索响应
+        """
+        result_dir = os.path.join(self.result_dir, "hybrid_search")
+        os.makedirs(result_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"hybrid_{index_id}_{timestamp}.json"
+        filepath = os.path.join(result_dir, filename)
+        
+        persist_data = {
+            "index_id": index_id,
+            "query_text": query_text[:200] if query_text else "",
+            "search_mode": response.get("search_mode"),
+            "result_count": len(response.get("data", [])),
+            "query_time_ms": response.get("query_time_ms"),
+            "rrf_time_ms": response.get("rrf_time_ms"),
+            "reranker_time_ms": response.get("reranker_time_ms"),
+            "reranker_available": response.get("reranker_available"),
+            "timestamp": datetime.now().isoformat(),
+            "results": response.get("data", [])[:10]  # 只保存 Top-10
+        }
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(persist_data, f, ensure_ascii=False, indent=2, default=str)
+        
+        logger.debug(f"Hybrid search result persisted to {filepath}")

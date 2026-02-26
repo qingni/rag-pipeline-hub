@@ -43,6 +43,7 @@ export async function getEmbeddingTasks(params = {}) {
  * @param {Object} data - 创建参数
  * @param {string} data.embedding_result_id - 向量化任务结果ID
  * @param {string} data.name - 索引名称（可选）
+ * @param {string} data.collection_name - 目标 Collection 名称（可选，默认使用 default_collection）
  * @param {string} data.provider - 向量数据库 (MILVUS)
  * @param {string} data.index_type - 索引算法类型
  * @param {string} data.metric_type - 相似度度量方法
@@ -87,6 +88,20 @@ export async function getIndexHistory(params = {}) {
 }
 
 /**
+ * 清空所有索引历史记录
+ * @returns {Promise<Object>} 清空结果
+ */
+export async function clearAllIndexHistory() {
+  try {
+    const response = await axios.delete(`${VECTOR_INDEX_API}/history/clear-all`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to clear all index history:', error);
+    throw error;
+  }
+}
+
+/**
  * 查找匹配条件的已存在索引
  * @param {Object} params - 查询参数
  * @param {string} params.embedding_result_id - 向量化任务结果ID
@@ -108,6 +123,22 @@ export async function findMatchingIndex(params) {
     return response.data;
   } catch (error) {
     console.error('Failed to find matching index:', error);
+    throw error;
+  }
+}
+
+// ==================== Collection 管理 API ====================
+
+/**
+ * 获取所有可用的 Milvus Collection 列表
+ * @returns {Promise<Object>} { collections: [], total: N }
+ */
+export async function getCollections() {
+  try {
+    const response = await axios.get(`${VECTOR_INDEX_API}/collections`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to get collections:', error);
     throw error;
   }
 }
@@ -303,6 +334,48 @@ export async function healthCheck() {
   }
 }
 
+// ==================== 混合检索 API ====================
+
+/**
+ * 混合检索：稠密+稀疏双路召回 → RRF 粗排 → Reranker 精排
+ * @param {Object} searchData - 混合检索参数
+ * @param {string} searchData.collection_name - 目标 Collection 名称
+ * @param {string} searchData.query_text - 原始查询文本（用于 Reranker 精排）
+ * @param {Array<number>} searchData.query_dense_vector - 稠密查询向量
+ * @param {Object} searchData.query_sparse_vector - 稀疏查询向量 {index: weight}（可选）
+ * @param {number} searchData.top_n - 粗排候选集大小（默认 20）
+ * @param {number} searchData.top_k - 最终返回结果数量（默认 5）
+ * @param {boolean} searchData.enable_reranker - 是否启用 Reranker 精排（默认 true）
+ * @param {number} searchData.rrf_k - RRF 排名平滑因子（默认 60）
+ * @returns {Promise<Object>} HybridSearchResponse
+ */
+export async function hybridSearch(searchData) {
+  try {
+    const response = await axios.post(
+      `${VECTOR_INDEX_API}/hybrid-search`,
+      searchData
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Failed to perform hybrid search:', error);
+    throw error;
+  }
+}
+
+/**
+ * Reranker 服务健康检查
+ * @returns {Promise<Object>} Reranker 健康状态
+ */
+export async function rerankerHealthCheck() {
+  try {
+    const response = await axios.get(`${VECTOR_INDEX_API}/reranker/health`);
+    return response.data;
+  } catch (error) {
+    console.error('Reranker health check failed:', error);
+    throw error;
+  }
+}
+
 // ==================== 持久化 API ====================
 
 /**
@@ -382,13 +455,76 @@ export async function updateVector(indexId, data) {
   }
 }
 
+// ==================== 智能推荐 API ====================
+
+/**
+ * 获取智能推荐的索引算法和度量类型
+ * @param {Object} data - 推荐请求参数
+ * @param {string} data.embedding_task_id - 向量化任务ID
+ * @param {number} data.vector_count - 向量数量（可选覆盖）
+ * @param {number} data.dimension - 向量维度（可选覆盖）
+ * @param {string} data.embedding_model - 模型名称（可选覆盖）
+ * @returns {Promise<Object>} 推荐结果
+ */
+export async function getRecommendation(data) {
+  try {
+    const response = await axios.post(`${VECTOR_INDEX_API}/recommend`, data);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to get recommendation:', error);
+    throw error;
+  }
+}
+
+/**
+ * 记录推荐采纳行为
+ * @param {Object} data - 推荐行为日志
+ * @param {string} data.embedding_task_id - 向量化任务ID
+ * @param {string} data.recommended_index_type - 推荐的索引算法
+ * @param {string} data.recommended_metric_type - 推荐的度量类型
+ * @param {string} data.final_index_type - 用户最终选择的索引算法
+ * @param {string} data.final_metric_type - 用户最终选择的度量类型
+ * @param {boolean} data.is_fallback - 是否使用了兜底默认值
+ * @param {string} data.reason - 推荐理由
+ * @returns {Promise<Object>} 记录结果
+ */
+export async function logRecommendation(data) {
+  try {
+    const response = await axios.post(`${VECTOR_INDEX_API}/recommend/log`, data);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to log recommendation:', error);
+    throw error;
+  }
+}
+
+/**
+ * 获取推荐采纳率统计
+ * @param {number} days - 统计天数（默认30天）
+ * @returns {Promise<Object>} 统计结果
+ */
+export async function getRecommendStats(days = 30) {
+  try {
+    const response = await axios.get(`${VECTOR_INDEX_API}/recommend/stats`, {
+      params: { days }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to get recommend stats:', error);
+    throw error;
+  }
+}
+
 // 导出所有 API 方法
 export default {
   // 向量化任务集成
   getEmbeddingTasks,
   createIndexFromEmbedding,
   getIndexHistory,
+  clearAllIndexHistory,
   findMatchingIndex,
+  // Collection 管理
+  getCollections,
   // 原有 API
   createIndex,
   listIndexes,
@@ -405,5 +541,12 @@ export default {
   recoverIndex,
   // 向量 CRUD
   deleteVectors,
-  updateVector
+  updateVector,
+  // 混合检索 API
+  hybridSearch,
+  rerankerHealthCheck,
+  // 智能推荐 API
+  getRecommendation,
+  logRecommendation,
+  getRecommendStats
 };

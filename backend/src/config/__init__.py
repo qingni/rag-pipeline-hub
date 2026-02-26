@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     VECTOR_INDEX_RESULTS_DIR: str = "results/vector_index"
     VECTOR_INDEX_DEFAULT_PROVIDER: str = "milvus"
     
+    # Reranker 配置 (混合检索精排)
+    RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    RERANKER_USE_FP16: bool = True
+    RERANKER_TOP_N: int = 20
+    RERANKER_BATCH_SIZE: int = 32
+    
     # Embedding API Configuration
     EMBEDDING_API_KEY: Optional[str] = None
     EMBEDDING_API_BASE_URL: str = ""  # 必须通过 .env 配置

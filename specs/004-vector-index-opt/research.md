@@ -2,7 +2,7 @@
 
 **Branch**: `004-vector-index-opt`
 **Date**: 2026-02-06
-**Status**: Complete
+**Status**: Updated (混合检索增强 2026-02-06)
 
 ## Research Overview
 
@@ -280,7 +280,9 @@ WORKER_COUNT = 4       # Uvicorn worker 数量
 
 ---
 
-## Dependencies Summary
+## Dependencies Summary (Superseded — see Updated version below)
+
+> ⚠️ 以下为初始版本依赖列表，已被下方“Dependencies Summary (Updated)”替代。
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
@@ -294,13 +296,503 @@ WORKER_COUNT = 4       # Uvicorn worker 数量
 
 ---
 
+---
+
+## Research Task 8: Milvus 多向量字段 Schema 设计（稀疏向量集成）
+
+### Decision
+在现有 Collection Schema 中新增 `sparse_embedding` 字段（SPARSE_FLOAT_VECTOR 类型），与现有 `embedding` 字段（FLOAT_VECTOR）共存于同一 Collection。
+
+### Rationale
+1. Milvus 2.4+ 原生支持同一 Collection 多个向量字段
+2. 稠密+稀疏向量存储在同一 Collection 避免了跨 Collection JOIN 的复杂度
+3. BGE-M3 一次推理同时输出稠密和稀疏向量，写入时天然配对
+
+### Implementation
+```python
+from pymilvus import FieldSchema, CollectionSchema, DataType
+
+def create_hybrid_collection_schema(dimension: int) -> CollectionSchema:
+    """
+    创建支持混合检索的 Milvus Collection Schema
+    """
+    fields = [
+        FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+        FieldSchema(name="doc_id", dtype=DataType.VARCHAR, max_length=256),
+        FieldSchema(name="chunk_index", dtype=DataType.INT32),
+        FieldSchema(name="created_at", dtype=DataType.INT64),
+        # 稠密向量字段（BGE-M3 dense output）
+        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dimension),
+        # 稀疏向量字段（BGE-M3 sparse output）— 新增
+        FieldSchema(name="sparse_embedding", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        FieldSchema(name="metadata", dtype=DataType.JSON)
+    ]
+    return CollectionSchema(fields=fields, description="Hybrid vector collection for RAG")
+```
+
+### Alternatives Considered
+- **两个独立 Collection**: 稠密和稀疏分开存储，查询时需 JOIN，延迟高
+- **仅稠密向量**: 不支持混合检索，召回率有限
+- **外部稀疏索引（如 Elasticsearch）**: 引入额外依赖，架构复杂
+
+### Migration Strategy
+- 新创建的 Collection 默认包含 `sparse_embedding` 字段
+- 旧 Collection 无此字段时，系统检测并自动降级到纯稠密检索
+- 无需迁移旧数据，向前兼容
+
+---
+
+## Research Task 9: Milvus RRFRanker 粗排融合
+
+### Decision
+使用 Milvus 原生 `hybrid_search` API + `RRFRanker(k=60)` 对稠密和稀疏双路召回结果进行粗排融合。
+
+### Rationale
+1. RRF (Reciprocal Rank Fusion) 是经过验证的多路融合算法，无需训练
+2. Milvus 2.4 原生支持 `hybrid_search`，一次 API 调用完成双路召回+融合
+3. k=60 是 RRF 的默认推荐值，对大多数场景效果稳定
+4. 粗排阶段取 Top-N（默认 N=20），送入 Reranker 精排
+
+### Implementation
+```python
+from pymilvus import AnnSearchRequest, RRFRanker
+
+def hybrid_search(collection, dense_vector, sparse_vector, top_n=20):
+    """
+    Milvus 混合检索 — 稠密 + 稀疏双路召回 + RRF 粗排
+    """
+    # 稠密向量检索请求
+    dense_req = AnnSearchRequest(
+        data=[dense_vector],
+        anns_field="embedding",
+        param={"metric_type": "L2", "params": {"ef": 64}},  # HNSW 示例
+        limit=top_n
+    )
+    
+    # 稀疏向量检索请求
+    sparse_req = AnnSearchRequest(
+        data=[sparse_vector],
+        anns_field="sparse_embedding",
+        param={"metric_type": "IP", "params": {}},
+        limit=top_n
+    )
+    
+    # RRF 融合
+    reranker = RRFRanker(k=60)
+    
+    results = collection.hybrid_search(
+        reqs=[dense_req, sparse_req],
+        ranker=reranker,
+        limit=top_n,
+        output_fields=["doc_id", "chunk_index", "metadata"]
+    )
+    
+    return results
+```
+
+### Parameters
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `k` (RRF) | 60 | 排名平滑因子，越大越平滑 |
+| `top_n` (粗排) | 20 | 粗排候选集大小，送入 Reranker |
+| `top_k` (最终) | 5 | 最终返回给用户的结果数 |
+
+### Alternatives Considered
+- **WeightedRanker**: 需要手动调权重（如 0.7*dense + 0.3*sparse），不够自适应
+- **自定义融合算法**: 开发成本高，且 RRF 已被验证效果稳定
+- **仅依赖 Reranker**: 不做粗排直接精排，候选集过大时 Reranker 推理慢
+
+---
+
+## Research Task 10: bge-reranker-v2-m3 精排集成
+
+### Decision
+使用 FlagEmbedding 库加载 `bge-reranker-v2-m3` 模型，对 RRF 粗排后的候选集进行精排重排序。
+
+### Rationale
+1. bge-reranker-v2-m3 是 BAAI 发布的多语言 Reranker 模型，中英文效果优秀
+2. FlagEmbedding 库是官方推荐的 Python 集成方式
+3. 支持 batch 推理，20 条候选集精排延迟可控（< 100ms on CPU）
+4. 与 BGE-M3 Embedding 模型同系列，兼容性好
+
+### Implementation
+```python
+from FlagEmbedding import FlagReranker
+
+class RerankerService:
+    """bge-reranker-v2-m3 精排服务"""
+    
+    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3"):
+        self.reranker = FlagReranker(model_name, use_fp16=True)
+    
+    def rerank(
+        self,
+        query: str,
+        candidates: list[dict],
+        top_k: int = 5
+    ) -> list[dict]:
+        """
+        对候选集进行精排重排序
+        
+        Args:
+            query: 原始查询文本
+            candidates: RRF 粗排后的候选集 [{doc_id, chunk_index, text, ...}]
+            top_k: 最终返回数量
+        
+        Returns:
+            重排后的 Top-K 结果，附带 reranker_score
+        """
+        # 构造 query-document pairs
+        pairs = [[query, c.get("text", "")] for c in candidates]
+        
+        # batch 推理
+        scores = self.reranker.compute_score(pairs, normalize=True)
+        
+        # 按分数排序
+        for i, candidate in enumerate(candidates):
+            candidate["reranker_score"] = scores[i] if isinstance(scores, list) else scores
+        
+        sorted_results = sorted(candidates, key=lambda x: x["reranker_score"], reverse=True)
+        return sorted_results[:top_k]
+```
+
+### Performance Characteristics
+| 候选集大小 | CPU 推理延迟 | GPU 推理延迟 |
+|-----------|-------------|-------------|
+| 10 条 | ~50ms | ~10ms |
+| 20 条 | ~100ms | ~20ms |
+| 50 条 | ~250ms | ~50ms |
+
+### Configuration
+```python
+# .env 配置
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RERANKER_USE_FP16=true
+RERANKER_BATCH_SIZE=32
+RERANKER_TOP_N=20  # 粗排候选集大小
+```
+
+### Alternatives Considered
+- **Cohere Rerank API**: 效果好但需要网络调用和 API Key，增加外部依赖
+- **cross-encoder/ms-marco**: 英文效果好，中文差
+- **不使用 Reranker**: 仅 RRF 粗排，精度不够
+
+---
+
+## Research Task 11: 稀疏向量降级策略
+
+### Decision
+当稀疏向量为空或不可用时，系统自动降级到纯稠密向量检索（跳过 RRF 融合），直接将稠密检索 Top-N 送入 Reranker 精排。
+
+### Rationale
+1. 保证检索服务在任何情况下可用（不因稀疏向量缺失而中断）
+2. 降级逻辑简单，仅是条件跳过，不引入额外复杂度
+3. 纯稠密检索 + Reranker 精排仍能提供较好的检索效果
+
+### Implementation
+```python
+async def search(self, query_dense, query_sparse=None, top_n=20, top_k=5, query_text=""):
+    """
+    智能检索：自动选择混合检索或纯稠密检索
+    """
+    # 判断是否可以使用混合检索
+    use_hybrid = (
+        query_sparse is not None
+        and len(query_sparse) > 0
+        and self._collection_has_sparse_field()
+    )
+    
+    if use_hybrid:
+        # 混合检索：稠密 + 稀疏 → RRF 粗排
+        candidates = await self._hybrid_search(query_dense, query_sparse, top_n)
+    else:
+        # 降级：纯稠密检索
+        candidates = await self._dense_search(query_dense, top_n)
+    
+    # 精排（无论是否混合检索，都走 Reranker）
+    if query_text and self.reranker:
+        results = self.reranker.rerank(query_text, candidates, top_k)
+    else:
+        results = candidates[:top_k]
+    
+    return results
+```
+
+### Degradation Detection
+```python
+def _collection_has_sparse_field(self) -> bool:
+    """检测 Collection 是否有稀疏向量字段"""
+    schema = self.collection.schema
+    return any(
+        field.dtype == DataType.SPARSE_FLOAT_VECTOR
+        for field in schema.fields
+    )
+
+def _is_sparse_vector_valid(self, sparse_vector) -> bool:
+    """检测稀疏向量是否有效"""
+    if sparse_vector is None:
+        return False
+    if isinstance(sparse_vector, dict) and len(sparse_vector) == 0:
+        return False
+    return True
+```
+
+### Alternatives Considered
+- **报错拒绝**: 稀疏向量缺失时报错，但会降低可用性
+- **使用零向量替代**: 稀疏向量全零可能干扰 RRF 融合结果
+- **缓存最近的稀疏向量**: 复杂且不准确
+
+---
+
+## Research Task 12: SPARSE_INVERTED_INDEX 构建参数
+
+### Decision
+使用 `SPARSE_INVERTED_INDEX` + `IP`（内积）度量 + `drop_ratio_build=0.2` 优化存储。
+
+### Rationale
+1. SPARSE_INVERTED_INDEX 是 Milvus 专为稀疏向量设计的倒排索引
+2. 稀疏向量天然使用内积（IP）作为相似度度量
+3. `drop_ratio_build=0.2` 丢弃构建时最小的 20% 权重值，节省索引空间而几乎不影响召回率
+
+### Configuration
+```python
+# 稀疏向量索引配置
+sparse_index_params = {
+    "index_type": "SPARSE_INVERTED_INDEX",
+    "metric_type": "IP",
+    "params": {
+        "drop_ratio_build": 0.2  # 构建时丢弃最小的 20% 权重
+    }
+}
+
+# 搜索参数
+sparse_search_params = {
+    "metric_type": "IP",
+    "params": {
+        "drop_ratio_search": 0.0  # 搜索时不丢弃（保证召回率）
+    }
+}
+```
+
+### Parameters
+| 参数 | 默认值 | 范围 | 说明 |
+|------|--------|------|------|
+| `drop_ratio_build` | 0.2 | 0.0-1.0 | 构建时丢弃的最小权重比例 |
+| `drop_ratio_search` | 0.0 | 0.0-1.0 | 搜索时丢弃的最小权重比例 |
+
+### Alternatives Considered
+- **SPARSE_WAND**: Milvus 也支持的稀疏索引类型，但 SPARSE_INVERTED_INDEX 更通用
+- **不建索引直接暴力搜索**: 稀疏向量维度高，暴力搜索太慢
+- **BM25 外部索引**: 引入 Elasticsearch 额外依赖
+
+---
+
+## Research Task 13: 智能推荐引擎 — 索引算法与度量类型推荐策略
+
+### Decision
+采用**分层规则匹配引擎**，基于数据量 → 向量维度 → Embedding 模型类型三维决策因子，自动推荐索引算法和度量类型。推荐规则以 JSON 配置表形式存储，支持热更新。
+
+### Rationale
+1. 分层规则匹配是业内向量数据库（Milvus、Pinecone、Weaviate）推荐策略的主流方案
+2. 三维决策因子覆盖了影响索引性能的核心变量：数据量决定算法复杂度需求，维度影响内存与计算特性，模型类型决定度量兼容性
+3. JSON 配置表可在运行时更新，无需重新部署代码
+4. 兜底默认值（HNSW + COSINE）确保任何情况下都有合理推荐
+
+### Implementation
+
+```python
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class RecommendationRule:
+    """推荐规则实体"""
+    priority: int                          # 规则优先级（数字越小优先级越高）
+    min_vector_count: Optional[int]        # 最小数据量
+    max_vector_count: Optional[int]        # 最大数据量
+    min_dimension: Optional[int]           # 最小维度
+    max_dimension: Optional[int]           # 最大维度
+    embedding_models: Optional[list[str]]  # 适用的 Embedding 模型列表
+    recommended_index_type: str            # 推荐索引算法
+    recommended_metric_type: str           # 推荐度量类型
+    reason_template: str                   # 推荐理由文案模板
+
+# 默认推荐规则表（按优先级排序）
+DEFAULT_RECOMMENDATION_RULES = [
+    # 规则 1：小数据量 → FLAT
+    RecommendationRule(
+        priority=1,
+        min_vector_count=0,
+        max_vector_count=9999,
+        min_dimension=None, max_dimension=None,
+        embedding_models=None,
+        recommended_index_type="FLAT",
+        recommended_metric_type=None,  # 度量类型由模型规则决定
+        reason_template="数据量 {count} 条 < 1万，FLAT 暴力搜索保证精确结果"
+    ),
+    # 规则 2：中等数据量 + 低维度 → IVF_FLAT
+    RecommendationRule(
+        priority=2,
+        min_vector_count=10000,
+        max_vector_count=999999,
+        min_dimension=1, max_dimension=256,
+        embedding_models=None,
+        recommended_index_type="IVF_FLAT",
+        recommended_metric_type=None,
+        reason_template="数据量 {count} 条 + 维度 {dim} ≤ 256，IVF_FLAT 聚类效率高"
+    ),
+    # 规则 3：中等数据量 + 高维度 → HNSW
+    RecommendationRule(
+        priority=3,
+        min_vector_count=10000,
+        max_vector_count=999999,
+        min_dimension=257, max_dimension=None,
+        embedding_models=None,
+        recommended_index_type="HNSW",
+        recommended_metric_type=None,
+        reason_template="数据量 {count} 条 + 维度 {dim} > 256，HNSW 图索引召回率与速度兼优"
+    ),
+    # 规则 4：百万级数据 → IVF_PQ
+    RecommendationRule(
+        priority=4,
+        min_vector_count=1000000,
+        max_vector_count=None,
+        min_dimension=None, max_dimension=None,
+        embedding_models=None,
+        recommended_index_type="IVF_PQ",
+        recommended_metric_type=None,
+        reason_template="数据量 {count} 条 ≥ 100万，IVF_PQ 压缩显著降低内存占用"
+    ),
+]
+
+# 度量类型推荐规则（按模型系列）
+METRIC_TYPE_RULES = {
+    "bge": "COSINE",       # BGE 系列归一化输出
+    "openai": "COSINE",    # OpenAI Ada/text-embedding 归一化输出
+    "cohere": "COSINE",    # Cohere embed 归一化输出
+    "default": "L2",       # 未识别模型默认 L2
+}
+
+# 兜底默认值
+FALLBACK_RECOMMENDATION = {
+    "index_type": "HNSW",
+    "metric_type": "COSINE",
+    "reason": "未精确匹配推荐规则，已使用通用默认值"
+}
+
+
+class RecommendationEngine:
+    """智能推荐引擎"""
+    
+    def __init__(self, rules: list[RecommendationRule] = None):
+        self.rules = sorted(rules or DEFAULT_RECOMMENDATION_RULES, key=lambda r: r.priority)
+    
+    def recommend(
+        self,
+        vector_count: int,
+        dimension: int,
+        embedding_model: str = ""
+    ) -> dict:
+        """
+        根据向量特征推荐索引算法和度量类型
+        
+        Returns:
+            {
+                "index_type": str,
+                "metric_type": str,
+                "reason": str,
+                "is_fallback": bool
+            }
+        """
+        # 1. 匹配索引算法规则
+        matched_rule = None
+        for rule in self.rules:
+            if self._matches(rule, vector_count, dimension):
+                matched_rule = rule
+                break
+        
+        # 2. 推断度量类型
+        metric_type = self._infer_metric_type(embedding_model)
+        
+        # 3. 输出推荐
+        if matched_rule:
+            reason = matched_rule.reason_template.format(
+                count=vector_count, dim=dimension, model=embedding_model
+            )
+            return {
+                "index_type": matched_rule.recommended_index_type,
+                "metric_type": matched_rule.recommended_metric_type or metric_type,
+                "reason": f"基于 {embedding_model or '未知模型'} {dimension}维 + {vector_count}条向量推荐 — {reason}",
+                "is_fallback": False
+            }
+        
+        # 4. 兜底
+        return {
+            **FALLBACK_RECOMMENDATION,
+            "is_fallback": True
+        }
+    
+    def _matches(self, rule: RecommendationRule, count: int, dim: int) -> bool:
+        if rule.min_vector_count is not None and count < rule.min_vector_count:
+            return False
+        if rule.max_vector_count is not None and count > rule.max_vector_count:
+            return False
+        if rule.min_dimension is not None and dim < rule.min_dimension:
+            return False
+        if rule.max_dimension is not None and dim > rule.max_dimension:
+            return False
+        return True
+    
+    def _infer_metric_type(self, model: str) -> str:
+        model_lower = (model or "").lower()
+        for prefix, metric in METRIC_TYPE_RULES.items():
+            if prefix != "default" and prefix in model_lower:
+                return metric
+        return METRIC_TYPE_RULES["default"]
+```
+
+### Performance Characteristics
+| 操作 | 延迟 | 说明 |
+|------|------|------|
+| 规则匹配 | < 1ms | 纯内存遍历，规则数 < 10 |
+| 度量类型推断 | < 1ms | 字符串前缀匹配 |
+| 总推荐延迟 | < 10ms | 远低于 500ms P95 要求 |
+
+### Alternatives Considered
+- **机器学习推荐模型**: 需要训练数据积累，初期规则引擎更实用
+- **用户历史行为推荐**: 冷启动问题，需要大量用户数据
+- **硬编码推荐**: 不可配置，修改需要重新部署
+
+---
+
+## Dependencies Summary (Updated)
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| pymilvus | 2.4.9 | Milvus Python SDK（支持 hybrid_search） |
+| FlagEmbedding | >=1.2.0 | bge-reranker-v2-m3 精排模型加载 |
+| FastAPI | >=0.110.0 | Web 框架 |
+| Pydantic | 2.7.4 | 数据验证 |
+| SQLAlchemy | 2.0.23 | 元数据 ORM |
+| Vue | 3.x | 前端框架 |
+| TDesign | latest | UI 组件库 |
+| Pinia | latest | 状态管理 |
+
+---
+
 ## Conclusion
 
 所有技术研究任务已完成，无待澄清项。主要技术决策：
-1. ✅ 索引算法：FLAT/IVF_FLAT/IVF_PQ/HNSW
+1. ✅ 索引算法：FLAT/IVF_FLAT/IVF_PQ/HNSW（稠密向量）
 2. ✅ 重试策略：指数退避（1s→2s→4s，最多3次）
 3. ✅ 元数据字段：最小必需集 + JSON 可选字段
 4. ✅ 进度展示：实时进度条 + 状态文字
 5. ✅ 错误展示：Modal 弹窗 + 建议操作
 6. ✅ 删除幂等：静默忽略不存在的ID
 7. ✅ 并发控制：Milvus 原生 + 异步 I/O
+8. ✅ 多向量字段 Schema：同一 Collection 中稠密+稀疏向量字段共存
+9. ✅ RRF 粗排融合：Milvus hybrid_search + RRFRanker(k=60)
+10. ✅ Reranker 精排：bge-reranker-v2-m3 + FlagEmbedding
+11. ✅ 稀疏向量降级：自动降级到纯稠密检索 + Reranker
+12. ✅ 稀疏索引：SPARSE_INVERTED_INDEX + IP + drop_ratio_build=0.2
+13. ✅ 智能推荐引擎：分层规则匹配（数据量→维度→模型），JSON 配置表，兜底 HNSW+COSINE

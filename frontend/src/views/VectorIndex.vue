@@ -86,15 +86,27 @@
             </t-select>
           </div>
 
+          <!-- 推荐兜底提示 -->
+          <RecommendFallback
+            :visible="showFallbackAlert"
+            @close="showFallbackAlert = false"
+          />
+
           <!-- 索引算法选择 -->
           <div class="form-section">
             <label class="section-label">
               <CpuIcon :size="16" />
               索引算法
             </label>
+            <RecommendBadge
+              v-if="recommendation && !recommendLoading"
+              :reason="recommendation.reason"
+              :is-fallback="recommendation.is_fallback"
+            />
             <t-select
               v-model="indexConfig.algorithm"
               placeholder="请选择索引算法"
+              :loading="recommendLoading"
               :popup-props="{ overlayClassName: 'vector-index-select-popup' }"
             >
               <t-option value="FLAT" label="FLAT - 暴力搜索（默认）">
@@ -115,10 +127,16 @@
                   <div class="select-option-desc">倒排索引，平衡精度与速度</div>
                 </div>
               </t-option>
+              <t-option value="IVF_SQ8" label="IVF_SQ8 - 标量量化">
+                <div class="select-option-item">
+                  <div class="select-option-name">IVF_SQ8</div>
+                  <div class="select-option-desc">标量量化，精度损失极小，节省约75%内存</div>
+                </div>
+              </t-option>
               <t-option value="IVF_PQ" label="IVF_PQ - 乘积量化">
                 <div class="select-option-item">
                   <div class="select-option-name">IVF_PQ</div>
-                  <div class="select-option-desc">乘积量化，节省内存，适合超大规模数据</div>
+                  <div class="select-option-desc">乘积量化，大幅压缩内存，适合超大规模数据</div>
                 </div>
               </t-option>
             </t-select>
@@ -226,11 +244,13 @@
                 </template>
                 
                 <t-descriptions :column="2" bordered>
-                  <t-descriptions-item label="索引名称">
-                    {{ currentIndex.index_name }}
+                  <t-descriptions-item label="索引名称" :span="2">
+                    <span class="index-name-text">{{ currentIndex.index_name }}</span>
                   </t-descriptions-item>
                   <t-descriptions-item label="索引ID">
-                    {{ currentIndex.id }}
+                    <t-tooltip :content="currentIndex.uuid || '-'" placement="top">
+                      <span class="uuid-short">{{ currentIndex.uuid ? currentIndex.uuid.substring(0, 8) : '-' }}</span>
+                    </t-tooltip>
                   </t-descriptions-item>
                   <t-descriptions-item label="向量数据库">
                     <t-tag variant="outline">{{ currentIndex.index_type }}</t-tag>
@@ -249,6 +269,11 @@
                   </t-descriptions-item>
                   <t-descriptions-item label="创建时间">
                     {{ formatDate(currentIndex.created_at) }}
+                  </t-descriptions-item>
+                  <t-descriptions-item label="Sparse向量">
+                    <t-tag :theme="currentIndex.has_sparse ? 'success' : 'default'" variant="light">
+                      {{ currentIndex.has_sparse ? '已生成' : '未生成' }}
+                    </t-tag>
                   </t-descriptions-item>
                   <t-descriptions-item v-if="currentIndex.source_document_name" label="源文档" :span="2">
                     {{ currentIndex.source_document_name }}
@@ -289,10 +314,21 @@
               <template #header>
                 <div class="card-header">
                   <span class="card-title">索引历史</span>
-                  <t-button variant="text" @click="loadIndexes">
-                    <template #icon><RefreshIcon :size="14" /></template>
-                    刷新
-                  </t-button>
+                  <t-space size="small">
+                    <t-button variant="text" @click="loadIndexes">
+                      <template #icon><RefreshIcon :size="14" /></template>
+                      刷新
+                    </t-button>
+                    <t-popconfirm
+                      content="确定要清空所有历史记录吗？此操作不可恢复。"
+                      @confirm="handleClearAllHistory"
+                    >
+                      <t-button variant="text" theme="danger" :disabled="!indexes.length">
+                        <template #icon><TrashIcon :size="14" /></template>
+                        一键清空
+                      </t-button>
+                    </t-popconfirm>
+                  </t-space>
                 </div>
               </template>
 
@@ -321,6 +357,12 @@
                     </template>
                     {{ getStatusText(row.status) }}
                   </t-tag>
+                </template>
+
+                <template #uuid="{ row }">
+                  <t-tooltip :content="row.uuid || '-'" placement="top">
+                    <span class="uuid-short">{{ row.uuid ? row.uuid.substring(0, 8) : '-' }}</span>
+                  </t-tooltip>
                 </template>
 
                 <template #created_at="{ row }">
@@ -375,9 +417,11 @@ import {
 import { useVectorIndexStore } from '../stores/vectorIndexStore';
 import { findMatchingIndex } from '../services/vectorIndexApi';
 import { storeToRefs } from 'pinia';
+import RecommendBadge from '../components/VectorIndex/RecommendBadge.vue';
+import RecommendFallback from '../components/VectorIndex/RecommendFallback.vue';
 
 const vectorIndexStore = useVectorIndexStore();
-const { indexes, currentIndex } = storeToRefs(vectorIndexStore);
+const { indexes, currentIndex, recommendation, recommendLoading } = storeToRefs(vectorIndexStore);
 
 // 状态
 const activeTab = ref('result');
@@ -390,6 +434,7 @@ const error = ref(null);
 const embeddingTasks = ref([]);
 const matchingIndex = ref(null);  // 匹配的已存在索引
 const checkingMatch = ref(false);  // 检查中状态
+const showFallbackAlert = ref(false);  // 推荐兜底提示
 
 let refreshInterval = null;
 
@@ -403,9 +448,10 @@ const indexConfig = reactive({
 
 // 历史记录表格列
 const historyColumns = [
-  { colKey: 'id', title: 'ID', width: 60 },
+{ colKey: 'uuid', title: 'ID', width: 120, cell: 'uuid' },
   { colKey: 'index_name', title: '索引名称', width: 200, cell: 'index_name' },
   { colKey: 'index_type', title: '数据库', width: 80 },
+  { colKey: 'metric_type', title: '度量类型', width: 100 },
   { colKey: 'algorithm_type', title: '算法', width: 90 },
   { colKey: 'dimension', title: '维度', width: 70 },
   { colKey: 'vector_count', title: '向量数', width: 80 },
@@ -536,8 +582,34 @@ const loadIndexes = async () => {
 const handleEmbeddingSelect = async (taskId) => {
   const task = embeddingTasks.value.find(t => t.result_id === taskId);
   selectedEmbedding.value = task || null;
+  showFallbackAlert.value = false;
+  
+  // 通过 store 触发智能推荐
+  if (taskId) {
+    vectorIndexStore.selectEmbeddingTask(taskId);
+  }
   // checkMatchingIndex 会通过 watch 自动触发
 };
+
+// Milvus 原生度量类型 → 前端 select value 映射
+const mapMetricType = (milvusMetric) => {
+  const map = {
+    'COSINE': 'cosine',
+    'L2': 'euclidean',
+    'IP': 'dot_product',
+  };
+  const upper = (milvusMetric || '').toUpperCase();
+  return map[upper] || 'cosine';
+};
+
+// 监听推荐结果，自动更新索引算法和度量类型
+watch(recommendation, (rec) => {
+  if (rec && selectedEmbedding.value) {
+    indexConfig.algorithm = rec.recommended_index_type || 'FLAT';
+    indexConfig.metric_type = mapMetricType(rec.recommended_metric_type);
+    showFallbackAlert.value = rec.is_fallback || false;
+  }
+});
 
 const handleStartIndexing = async () => {
   if (!canStartIndexing.value) return;
@@ -607,23 +679,50 @@ const handleViewDetail = (row) => {
   activeTab.value = 'result';
 };
 
+const deletingIndexId = ref(null);
+
+const handleClearAllHistory = async () => {
+  try {
+    const result = await vectorIndexStore.clearAllHistory();
+    MessagePlugin.success(result.message || '已清空所有历史记录');
+    await loadIndexes();
+  } catch (err) {
+    MessagePlugin.error('清空失败: ' + (err.message || '未知错误'));
+  }
+};
+
 const handleDeleteIndex = (indexId) => {
+  // 防止重复触发删除
+  if (deletingIndexId.value === indexId) return;
+  
   const dialog = DialogPlugin.confirm({
     header: '确认删除',
     body: '确定要删除这个索引吗？此操作不可恢复。',
     confirmBtn: { theme: 'danger', content: '删除' },
     onConfirm: async () => {
+      // 防止重复点击确认按钮
+      if (deletingIndexId.value) return;
+      deletingIndexId.value = indexId;
+      
+      // 更新按钮状态为loading
+      dialog.update({ confirmBtn: { theme: 'danger', content: '删除中...', loading: true }, cancelBtn: { disabled: true } });
+      
       try {
         await vectorIndexStore.removeIndex(indexId);
         MessagePlugin.success('索引删除成功');
-        dialog.destroy();
         
         // 如果删除的是当前索引，清空
         if (currentIndex.value?.id === indexId) {
           vectorIndexStore.setCurrentIndex(null);
         }
+        
+        // 刷新列表
+        await loadIndexes();
       } catch (err) {
         MessagePlugin.error('删除失败: ' + (err.message || '未知错误'));
+      } finally {
+        deletingIndexId.value = null;
+        dialog.destroy();
       }
     }
   });
@@ -671,7 +770,12 @@ const getStatusText = (status) => {
 
 const formatDate = (dateString) => {
   if (!dateString) return '-';
-  return new Date(dateString).toLocaleString('zh-CN', {
+  // 后端返回的是 UTC 时间，如果没有时区标识则添加 'Z' 确保正确解析
+  let str = dateString;
+  if (typeof str === 'string' && !str.endsWith('Z') && !str.includes('+') && !str.includes('-', 10)) {
+    str = str + 'Z';
+  }
+  return new Date(str).toLocaleString('zh-CN', {
     month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
   });
 };
@@ -788,6 +892,21 @@ onUnmounted(() => {
   background: var(--td-bg-color-page);
   border-radius: 6px;
   border: 1px solid var(--td-component-border);
+  overflow: hidden;
+
+  :deep(.t-descriptions__body) {
+    table-layout: fixed;
+    width: 100%;
+  }
+
+  :deep(.t-descriptions__label) {
+    width: 60px;
+  }
+
+  :deep(.t-descriptions__content) {
+    word-break: break-all;
+    overflow-wrap: break-word;
+  }
 }
 
 /* 下拉选项统一样式 */
@@ -890,6 +1009,11 @@ onUnmounted(() => {
   color: var(--td-brand-color);
 }
 
+.index-name-text {
+  word-break: break-all;
+  white-space: normal;
+}
+
 .action-buttons {
   display: flex;
   gap: 12px;
@@ -962,6 +1086,18 @@ onUnmounted(() => {
 
 .index-name-cell .name {
   font-weight: 500;
+}
+
+.uuid-short {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  cursor: default;
+  padding: 2px 6px;
+  background-color: var(--td-bg-color-container-hover);
+  border-radius: 4px;
+  white-space: nowrap;
+  display: inline-block;
 }
 
 .spin-icon {

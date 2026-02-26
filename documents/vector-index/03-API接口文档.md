@@ -1,8 +1,9 @@
 # API接口文档 - 向量索引模块
 
 **生成日期**: 2025-12-26  
+**最后更新**: 2026-02-26  
 **项目**: RAG Framework - 向量索引模块  
-**API版本**: v1  
+**API版本**: v2  
 
 ---
 
@@ -30,19 +31,39 @@
 
 ### 1.2 接口列表
 
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| POST | /vector-index/create | 创建索引 |
-| POST | /vector-index/create-from-embedding | 从向量化结果创建索引 |
-| GET | /vector-index/list | 获取索引列表 |
-| GET | /vector-index/{id} | 获取索引详情 |
-| DELETE | /vector-index/{id} | 删除索引 |
-| POST | /vector-index/{id}/vectors | 添加向量 |
-| POST | /vector-index/{id}/search | 搜索向量 |
-| GET | /vector-index/{id}/statistics | 获取统计信息 |
-| GET | /vector-index/providers | 获取可用Provider |
-| GET | /vector-index/algorithms | 获取可用算法 |
-| GET | /vector-index/check-match | 检查匹配索引 |
+| 方法 | 路径 | 描述 | 分类 |
+|------|------|------|------|
+| **索引管理** | | | |
+| POST | /vector-index/indexes | 创建索引 | Index Management |
+| POST | /vector-index/indexes/from-embedding | 从向量化结果创建索引 | Index Management |
+| GET | /vector-index/indexes | 列出所有索引 | Index Management |
+| GET | /vector-index/indexes/{id} | 获取索引详情 | Index Management |
+| DELETE | /vector-index/indexes/{id} | 删除索引 | Index Management |
+| GET | /vector-index/indexes/find-matching | 查找匹配索引 | Index Management |
+| POST | /vector-index/indexes/{id}/persist | 持久化索引 | Index Management |
+| POST | /vector-index/indexes/{id}/recover | 恢复索引 | Index Management |
+| GET | /vector-index/indexes/{id}/statistics | 获取统计信息 | Index Management |
+| GET | /vector-index/indexes/{id}/query-history | 获取查询历史 | Index Management |
+| **Collection 管理** | | | |
+| GET | /vector-index/collections | 获取 Collection 列表 | Collection |
+| **向量操作** | | | |
+| POST | /vector-index/indexes/{id}/vectors | 添加向量 | Vector Operations |
+| PUT | /vector-index/indexes/{id}/vectors | 更新向量 | Vector Operations |
+| DELETE | /vector-index/indexes/{id}/vectors | 删除向量 | Vector Operations |
+| **检索** | | | |
+| - | - | 检索相关接口已移至 [检索查询模块 API 文档](../search-query/02-API接口文档.md) | Search |
+| **历史管理** | | | |
+| GET | /vector-index/indexes/history | 获取索引历史 | History |
+| DELETE | /vector-index/history/{id} | 删除历史记录 | History |
+| DELETE | /vector-index/history/clear-all | 清空所有历史 | History |
+| **向量化任务** | | | |
+| GET | /vector-index/embedding-tasks | 获取向量化任务列表 | Embedding |
+| **智能推荐** | | | |
+| POST | /vector-index/recommend | 智能推荐索引配置 | Recommendation |
+| POST | /vector-index/recommend/log | 记录推荐采纳行为 | Recommendation |
+| GET | /vector-index/recommend/stats | 获取推荐统计 | Recommendation |
+| **健康检查** | | | |
+| GET | /vector-index/health | 系统健康检查 | System |
 
 ---
 
@@ -52,55 +73,61 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /vector-index/create-from-embedding` |
-| 描述 | 从已完成的向量化结果创建向量索引 |
+| 路径 | `POST /vector-index/indexes/from-embedding` |
+| 描述 | 从已完成的向量化结果创建向量索引，支持追加到已有 Collection |
 
 #### 请求参数
 
 ```json
 {
   "embedding_result_id": "emb_123456",
-  "index_name": "技术文档索引",
-  "provider": "milvus",
-  "algorithm": "HNSW",
+  "name": "idx_技术文档_20260226",
+  "collection_name": "default_collection",
+  "provider": "MILVUS",
+  "index_type": "HNSW",
   "metric_type": "cosine",
-  "algorithm_params": {
+  "index_params": {
     "M": 16,
-    "efConstruction": 256
+    "efConstruction": 200
   },
-  "overwrite": false
+  "namespace": "default",
+  "enable_sparse": true
 }
 ```
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | embedding_result_id | string | 是 | 向量化结果ID |
-| index_name | string | 否 | 索引名称，默认使用文档名 |
-| provider | string | 是 | 向量数据库类型 |
-| algorithm | string | 是 | 索引算法 |
-| metric_type | string | 是 | 度量类型 |
-| algorithm_params | object | 否 | 算法参数 |
-| overwrite | boolean | 否 | 是否覆盖已存在的匹配索引 |
+| name | string | 否 | 索引名称，默认自动生成 |
+| collection_name | string | 否 | 目标 Collection，默认 default_collection |
+| provider | string | 否 | 向量数据库（默认 MILVUS） |
+| index_type | string | 否 | 索引算法（FLAT/IVF_FLAT/IVF_SQ8/IVF_PQ/HNSW），默认 FLAT |
+| metric_type | string | 否 | 度量类型（cosine/euclidean/dot_product），默认 cosine |
+| index_params | object | 否 | 算法参数 |
+| namespace | string | 否 | 命名空间（默认 default） |
+| enable_sparse | boolean | 否 | 是否启用 BM25 稀疏向量（默认 true） |
 
 #### 响应示例
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {
-    "id": "idx_789012",
-    "index_name": "技术文档索引",
-    "embedding_result_id": "emb_123456",
-    "document_name": "技术文档.pdf",
-    "provider": "milvus",
-    "algorithm": "HNSW",
-    "metric_type": "cosine",
-    "dimension": 1024,
-    "vector_count": 50,
-    "status": "ready",
-    "created_at": "2025-12-26T10:30:00Z"
-  }
+  "id": 1,
+  "uuid": "a1b2c3d4-...",
+  "index_name": "idx_技术文档_20260226",
+  "index_type": "MILVUS",
+  "algorithm_type": "HNSW",
+  "dimension": 1024,
+  "metric_type": "cosine",
+  "status": "READY",
+  "collection_name": "default_collection",
+  "embedding_result_id": "emb_123456",
+  "source_document_name": "技术文档.pdf",
+  "source_model": "bge-m3",
+  "vector_count": 50,
+  "has_sparse": true,
+  "namespace": "default",
+  "created_at": "2026-02-26T10:30:00Z",
+  "updated_at": "2026-02-26T10:30:15Z"
 }
 ```
 
@@ -151,17 +178,17 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /vector-index/list` |
+| 路径 | `GET /vector-index/indexes` |
 | 描述 | 获取所有向量索引列表 |
 
 #### 请求参数
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| page | int | 否 | 1 | 页码 |
-| page_size | int | 否 | 20 | 每页数量 |
-| provider | string | 否 | - | 按Provider筛选 |
-| status | string | 否 | - | 按状态筛选 |
+| skip | int | 否 | 0 | 跳过记录数 |
+| limit | int | 否 | 100 | 返回记录数 |
+| namespace | string | 否 | - | 按命名空间筛选 |
+| status | string | 否 | - | 按状态筛选（BUILDING/READY/UPDATING/ERROR） |
 
 #### 响应示例
 
@@ -195,7 +222,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /vector-index/{id}` |
+| 路径 | `GET /vector-index/indexes/{id}` |
 | 描述 | 获取单个索引的详细信息 |
 
 #### 响应示例
@@ -231,7 +258,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `DELETE /vector-index/{id}` |
+| 路径 | `DELETE /vector-index/indexes/{id}` |
 | 描述 | 删除指定的向量索引 |
 
 #### 响应示例
@@ -247,205 +274,60 @@
 }
 ```
 
-### 3.4 检查匹配索引
+### 3.4 获取 Collection 列表（新增）
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /vector-index/check-match` |
-| 描述 | 检查是否存在匹配的索引 |
+| 路径 | `GET /vector-index/collections` |
+| 描述 | 获取所有 Collection 信息（Dify 方案按逻辑知识库聚合） |
 
-#### 请求参数
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| embedding_result_id | string | 是 | 向量化结果ID |
-| provider | string | 是 | 向量数据库类型 |
-| algorithm | string | 是 | 索引算法 |
-| metric_type | string | 是 | 度量类型 |
-
-#### 响应示例（存在匹配）
+#### 响应示例
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {
-    "matched": true,
-    "index": {
-      "id": "idx_789012",
-      "index_name": "技术文档索引",
-      "vector_count": 50,
-      "status": "ready",
-      "created_at": "2025-12-26T10:30:00Z"
-    }
-  }
-}
-```
-
-#### 响应示例（无匹配）
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "matched": false,
-    "index": null
-  }
-}
-```
-
----
-
-## 4. 向量操作
-
-### 4.1 添加向量
-
-| 项目 | 说明 |
-|------|------|
-| 路径 | `POST /vector-index/{id}/vectors` |
-| 描述 | 向索引中添加向量 |
-
-#### 请求参数
-
-```json
-{
-  "vectors": [
+  "collections": [
     {
-      "id": "vec_001",
-      "embedding": [0.123, -0.456, 0.789, ...],
-      "text": "文本内容",
-      "metadata": {
-        "source": "文档.pdf",
-        "page": 1
-      }
+      "collection_name": "default_collection",
+      "is_default": true,
+      "document_count": 5,
+      "total_vectors": 250,
+      "physical_collections": [
+        {"physical_name": "default_collection_dim1024", "dimension": 1024},
+        {"physical_name": "default_collection_dim2048", "dimension": 2048}
+      ],
+      "dimensions": [1024, 2048],
+      "physical_count": 2
     }
-  ]
-}
-```
-
-#### 响应示例
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "added_count": 10,
-    "total_count": 60
-  }
-}
-```
-
-### 4.2 删除向量
-
-| 项目 | 说明 |
-|------|------|
-| 路径 | `DELETE /vector-index/{id}/vectors` |
-| 描述 | 从索引中删除向量 |
-
-#### 请求参数
-
-```json
-{
-  "vector_ids": ["vec_001", "vec_002"]
-}
-```
-
-#### 响应示例
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "deleted_count": 2,
-    "total_count": 48
-  }
+  ],
+  "total": 1
 }
 ```
 
 ---
 
-## 5. 向量搜索
+## 4. 混合检索（已移至检索查询模块）
 
-### 5.1 单向量搜索
+> 混合检索、向量搜索、多 Collection 联合搜索、Reranker 健康检查等检索相关接口已移至 [检索查询模块 API 文档](../search-query/02-API接口文档.md)。
+
+---
+
+## 5. 智能推荐引擎（新增）
+
+### 5.1 获取推荐配置
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /vector-index/{id}/search` |
-| 描述 | 在指定索引中搜索相似向量 |
+| 路径 | `POST /vector-index/recommend` |
+| 描述 | 根据向量特征自动推荐索引算法和度量类型 |
 
 #### 请求参数
 
 ```json
 {
-  "query_vector": [0.123, -0.456, 0.789, ...],
-  "top_k": 10,
-  "threshold": 0.5,
-  "filter": {
-    "page": {"$gte": 1, "$lte": 10}
-  }
-}
-```
-
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| query_vector | float[] | 是 | - | 查询向量 |
-| top_k | int | 否 | 10 | 返回数量 |
-| threshold | float | 否 | 0 | 相似度阈值 |
-| filter | object | 否 | - | 元数据过滤条件 |
-
-#### 响应示例
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "results": [
-      {
-        "id": "vec_005",
-        "score": 0.95,
-        "text": "最相似的文本内容...",
-        "metadata": {
-          "source": "文档.pdf",
-          "page": 3
-        }
-      },
-      {
-        "id": "vec_012",
-        "score": 0.88,
-        "text": "第二相似的文本内容...",
-        "metadata": {
-          "source": "文档.pdf",
-          "page": 5
-        }
-      }
-    ],
-    "total": 2,
-    "search_time_ms": 15
-  }
-}
-```
-
-### 5.2 批量搜索
-
-| 项目 | 说明 |
-|------|------|
-| 路径 | `POST /vector-index/{id}/batch-search` |
-| 描述 | 批量搜索多个查询向量 |
-
-#### 请求参数
-
-```json
-{
-  "query_vectors": [
-    [0.123, -0.456, ...],
-    [0.234, -0.567, ...]
-  ],
-  "top_k": 5,
-  "threshold": 0.5
+  "embedding_task_id": "emb_123456",
+  "vector_count": 50000,
+  "dimension": 1024,
+  "embedding_model": "bge-m3"
 }
 ```
 
@@ -453,29 +335,32 @@
 
 ```json
 {
-  "code": 200,
-  "message": "success",
+  "success": true,
   "data": {
-    "results": [
-      {
-        "query_index": 0,
-        "matches": [
-          {"id": "vec_005", "score": 0.95, "text": "..."},
-          {"id": "vec_012", "score": 0.88, "text": "..."}
-        ]
-      },
-      {
-        "query_index": 1,
-        "matches": [
-          {"id": "vec_008", "score": 0.92, "text": "..."}
-        ]
-      }
-    ],
-    "total_queries": 2,
-    "search_time_ms": 25
+    "recommended_index_type": "HNSW",
+    "recommended_metric_type": "COSINE",
+    "reason": "基于 bge-m3 1024维 + 50000条向量推荐 — 数据量 50000 条（1万~50万），HNSW 图索引兼顾高召回率与低延迟",
+    "is_fallback": false,
+    "vector_count": 50000,
+    "dimension": 1024,
+    "embedding_model": "bge-m3"
   }
 }
 ```
+
+### 5.2 记录推荐采纳行为
+
+| 项目 | 说明 |
+|------|------|
+| 路径 | `POST /vector-index/recommend/log` |
+| 描述 | 记录用户对推荐值的采纳/修改行为 |
+
+### 5.3 获取推荐统计
+
+| 项目 | 说明 |
+|------|------|
+| 路径 | `GET /vector-index/recommend/stats?days=30` |
+| 描述 | 获取推荐采纳率统计（目标 ≥ 80%） |
 
 ---
 
@@ -603,10 +488,12 @@
 | 状态码 | 说明 |
 |--------|------|
 | 200 | 成功 |
+| 201 | 创建成功 |
+| 204 | 删除成功（无响应体） |
 | 400 | 请求参数错误 |
-| 404 | 索引不存在 |
-| 409 | 索引已存在（冲突） |
+| 404 | 索引/Collection 不存在 |
 | 500 | 服务器内部错误 |
+| 503 | 服务不可用（健康检查失败） |
 
 ### 7.2 业务错误码
 

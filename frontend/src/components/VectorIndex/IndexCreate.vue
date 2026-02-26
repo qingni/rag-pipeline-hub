@@ -82,6 +82,18 @@
                   <div class="option-desc">高性能，适合大数据集</div>
                 </div>
               </t-option>
+              <t-option value="IVF_SQ8" label="IVF_SQ8（标量量化）">
+                <div>
+                  <div>IVF_SQ8（标量量化）</div>
+                  <div class="option-desc">精度损失极小，节省约75%内存</div>
+                </div>
+              </t-option>
+              <t-option value="IVF_PQ" label="IVF_PQ（乘积量化）">
+                <div>
+                  <div>IVF_PQ（乘积量化）</div>
+                  <div class="option-desc">大幅压缩内存，适合超大规模数据</div>
+                </div>
+              </t-option>
             </t-select>
           </t-form-item>
 
@@ -109,6 +121,15 @@
                 </div>
               </t-option>
             </t-select>
+          </t-form-item>
+
+          <t-form-item label="稀疏向量">
+            <t-checkbox v-model="formData.enable_sparse">
+              启用稀疏向量（支持混合检索）
+            </t-checkbox>
+            <div class="form-tip">
+              启用后将创建稀疏向量字段（SPARSE_FLOAT_VECTOR），支持稠密+稀疏混合检索
+            </div>
           </t-form-item>
 
           <t-form-item label="描述" name="description">
@@ -186,6 +207,36 @@
             </t-descriptions>
           </div>
 
+          <t-form-item label="目标Collection" name="collection_name">
+            <t-select
+              v-model="embeddingFormData.collection_name"
+              placeholder="默认 Collection（留空使用 default_collection）"
+              :loading="loadingCollections"
+              clearable
+              filterable
+              :creatable="true"
+              @create="handleCreateCollection"
+            >
+              <t-option
+                v-for="coll in collections"
+                :key="coll.collection_name"
+                :value="coll.collection_name"
+                :label="coll.collection_name + (coll.is_default ? ' (默认)' : '')"
+              >
+                <div class="option-item">
+                  <div class="option-name">
+                    {{ coll.collection_name }}
+                    <t-tag v-if="coll.is_default" size="small" theme="primary" variant="light" style="margin-left: 4px">默认</t-tag>
+                  </div>
+                  <div class="option-desc">
+                    {{ coll.document_count }} 个文档 · {{ coll.total_vectors }} 个向量
+                  </div>
+                </div>
+              </t-option>
+            </t-select>
+            <div class="form-tip">选择向量写入的目标 Collection（知识库）。留空使用默认 Collection，也可输入新名称创建。</div>
+          </t-form-item>
+
           <t-form-item label="索引名称" name="name">
             <t-input
               v-model="embeddingFormData.name"
@@ -204,15 +255,30 @@
             </t-radio-group>
           </t-form-item>
 
+          <!-- 推荐兜底提示 (T035) -->
+          <RecommendFallback
+            :visible="showFallbackAlert"
+            @close="showFallbackAlert = false"
+          />
+
           <t-form-item label="算法类型" name="index_type">
             <t-select
               v-model="embeddingFormData.index_type"
               placeholder="请选择索引算法"
+              :loading="recommendLoading"
             >
               <t-option value="FLAT" label="FLAT" />
               <t-option value="IVF_FLAT" label="IVF_FLAT" />
+              <t-option value="IVF_SQ8" label="IVF_SQ8" />
+              <t-option value="IVF_PQ" label="IVF_PQ" />
               <t-option value="HNSW" label="HNSW" />
             </t-select>
+            <!-- 推荐理由标签 (T034) -->
+            <RecommendBadge
+              v-if="recommendation && !recommendLoading"
+              :reason="recommendation.reason"
+              :is-fallback="recommendation.is_fallback"
+            />
           </t-form-item>
 
           <t-form-item label="度量类型" name="metric_type">
@@ -222,6 +288,15 @@
               <t-option value="dot_product" label="点积" />
             </t-select>
           </t-form-item>
+
+          <t-form-item label="稀疏向量">
+            <t-checkbox v-model="embeddingFormData.enable_sparse">
+              启用稀疏向量（支持混合检索）
+            </t-checkbox>
+            <div class="form-tip">
+              启用后将创建稀疏向量字段（SPARSE_FLOAT_VECTOR），支持稠密+稀疏混合检索
+            </div>
+          </t-form-item>
         </t-form>
       </t-tab-panel>
     </t-tabs>
@@ -229,8 +304,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue';
+import { ref, reactive, watch, computed, onMounted } from 'vue';
 import { useVectorIndexStore } from '../../stores/vectorIndexStore';
+import RecommendBadge from './RecommendBadge.vue';
+import RecommendFallback from './RecommendFallback.vue';
 
 const props = defineProps({
   visible: {
@@ -254,6 +331,10 @@ const loadingEmbeddings = ref(false);
 const embeddingTasks = ref([]);
 const selectedEmbedding = ref(null);
 
+// Collection 相关状态
+const loadingCollections = ref(false);
+const collections = ref([]);
+
 // 有效的向量维度
 const validDimensions = [128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096];
 
@@ -264,17 +345,20 @@ const formData = reactive({
   index_type: 'MILVUS',
   algorithm_type: 'FLAT',
   metric_type: 'cosine',
-  description: ''
+  description: '',
+  enable_sparse: false
 });
 
 // 从向量化任务创建表单数据
 const embeddingFormData = reactive({
   embedding_result_id: '',
   name: '',
+  collection_name: null,  // null 表示使用默认 Collection
   provider: 'MILVUS',
   index_type: 'FLAT',
   metric_type: 'cosine',
-  index_params: {}
+  index_params: {},
+  enable_sparse: false
 });
 
 const rules = {
@@ -326,6 +410,38 @@ const formatDate = (dateString) => {
   return date.toLocaleString('zh-CN');
 };
 
+// 加载 Collection 列表
+const loadCollections = async () => {
+  loadingCollections.value = true;
+  try {
+    const result = await vectorIndexStore.fetchCollections();
+    collections.value = result.collections || [];
+  } catch (error) {
+    console.error('加载 Collection 列表失败:', error);
+    collections.value = [];
+  } finally {
+    loadingCollections.value = false;
+  }
+};
+
+// 创建新 Collection（通过输入框直接创建）
+const handleCreateCollection = (value) => {
+  // 验证名称格式（只允许字母、数字、下划线）
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
+    return;
+  }
+  // 添加到选项列表并选中
+  if (!collections.value.find(c => c.collection_name === value)) {
+    collections.value.push({
+      collection_name: value,
+      is_default: false,
+      document_count: 0,
+      total_vectors: 0
+    });
+  }
+  embeddingFormData.collection_name = value;
+};
+
 // 加载向量化任务列表
 const loadEmbeddingTasks = async () => {
   loadingEmbeddings.value = true;
@@ -342,11 +458,42 @@ const loadEmbeddingTasks = async () => {
   }
 };
 
+// 推荐状态
+const showFallbackAlert = ref(false);
+
+// 推荐结果（从 store 获取）
+const recommendation = computed(() => vectorIndexStore.recommendation);
+const recommendLoading = computed(() => vectorIndexStore.recommendLoading);
+
 // 选择向量化任务
 const handleEmbeddingSelect = (taskId) => {
   const task = embeddingTasks.value.find(t => t.result_id === taskId);
   selectedEmbedding.value = task || null;
+  showFallbackAlert.value = false;
+  
+  // 通过 store 触发推荐
+  vectorIndexStore.selectEmbeddingTask(taskId);
 };
+
+// Milvus 原生度量类型 → 前端 select value 映射
+const mapMetricType = (milvusMetric) => {
+  const map = {
+    'COSINE': 'cosine',
+    'L2': 'euclidean',
+    'IP': 'dot_product',
+  };
+  const upper = (milvusMetric || '').toUpperCase();
+  return map[upper] || 'cosine';
+};
+
+// 监听推荐结果更新表单
+watch(recommendation, (rec) => {
+  if (rec && selectedEmbedding.value) {
+    embeddingFormData.index_type = rec.recommended_index_type || 'FLAT';
+    embeddingFormData.metric_type = mapMetricType(rec.recommended_metric_type);
+    showFallbackAlert.value = rec.is_fallback || false;
+  }
+});
 
 // 确认创建
 const handleConfirm = async () => {
@@ -358,6 +505,8 @@ const handleConfirm = async () => {
   } else {
     const valid = await embeddingFormRef.value?.validate();
     if (valid === true) {
+      // 记录推荐采纳行为（T019, T020）
+      await vectorIndexStore.logRecommendation();
       emit('create-from-embedding', { ...embeddingFormData });
     }
   }
@@ -375,6 +524,7 @@ const handleClose = () => {
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     loadEmbeddingTasks();
+    loadCollections();
   } else {
     handleClose();
   }
@@ -383,6 +533,7 @@ watch(() => props.visible, (newVal) => {
 onMounted(() => {
   if (props.visible) {
     loadEmbeddingTasks();
+    loadCollections();
   }
 });
 </script>
@@ -466,6 +617,21 @@ onMounted(() => {
   padding: 16px;
   background: var(--td-bg-color-container);
   border-radius: 6px;
+  overflow: hidden;
+
+  :deep(.t-descriptions__body) {
+    table-layout: fixed;
+    width: 100%;
+  }
+
+  :deep(.t-descriptions__label) {
+    width: 60px;
+  }
+
+  :deep(.t-descriptions__content) {
+    word-break: break-all;
+    overflow-wrap: break-word;
+  }
 }
 
 :deep(.t-radio) {
