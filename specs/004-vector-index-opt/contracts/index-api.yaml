@@ -697,7 +697,7 @@ paths:
       tags:
         - Search
       summary: Reranker 服务健康检查
-      description: 检查 bge-reranker-v2-m3 模型的可用性
+      description: 检查 Reranker 模型的可用性
       operationId: rerankerHealthCheck
       responses:
         '200':
@@ -1317,7 +1317,7 @@ components:
                   enum: [available, unavailable]
                 model:
                   type: string
-                  example: 'bge-reranker-v2-m3'
+                  example: 'qwen3-reranker-4b'
         timestamp:
           type: string
           format: date-time

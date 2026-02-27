@@ -22,6 +22,40 @@ export async function executeSearch(params) {
 }
 
 /**
+ * 执行混合检索（稠密+稀疏双路召回 + RRF + Reranker）
+ * @param {Object} params - 搜索参数
+ * @param {string} params.query_text - 查询文本
+ * @param {string[]} [params.collection_ids] - 目标 Collection ID 列表（最多5个）
+ * @param {number} [params.top_k=10] - 最终返回结果数量
+ * @param {number} [params.threshold=0.5] - 相似度阈值
+ * @param {string} [params.search_mode='auto'] - 检索模式 (auto/hybrid/dense_only)
+ * @param {number} [params.reranker_top_n=20] - Reranker 候选集大小
+ * @param {number} [params.reranker_top_k] - Reranker 最终返回数
+ * @param {number} [params.page=1] - 页码
+ * @param {number} [params.page_size=10] - 每页数量
+ * @returns {Promise<Object>} 混合检索响应
+ */
+export async function executeHybridSearch(params) {
+  return await api.post(`${BASE_URL}/hybrid`, params)
+}
+
+/**
+ * 获取 Reranker 健康状态
+ * @returns {Promise<Object>} Reranker 健康检查响应
+ */
+export async function getRerankerHealth() {
+  return await api.get(`${BASE_URL}/reranker/health`)
+}
+
+/**
+ * 获取可用 Collection 列表（含 has_sparse 标识）
+ * @returns {Promise<Object>} Collection 列表响应
+ */
+export async function getAvailableCollections() {
+  return await api.get(`${BASE_URL}/collections`)
+}
+
+/**
  * 获取可用索引列表
  * @returns {Promise<Object>} 索引列表响应
  */
@@ -59,7 +93,10 @@ export async function clearSearchHistory() {
 
 export default {
   executeSearch,
+  executeHybridSearch,
   getAvailableIndexes,
+  getAvailableCollections,
+  getRerankerHealth,
   getSearchHistory,
   deleteSearchHistory,
   clearSearchHistory

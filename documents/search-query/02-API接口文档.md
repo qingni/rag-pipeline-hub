@@ -298,7 +298,7 @@
 ```json
 {
   "available": true,
-  "model": "bge-reranker-v2-m3",
+  "model": "qwen3-reranker-4b",
   "latency_ms": 12.5
 }
 ```

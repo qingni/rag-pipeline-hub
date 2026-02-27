@@ -17,7 +17,7 @@ info:
 servers:
   - url: http://localhost:8000
     description: Local development server
-  - url: http://dev.fit-ai.woa.com
+  - url: http://dev.example.com
     description: Development environment
 
 tags:

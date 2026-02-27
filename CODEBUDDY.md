@@ -17,6 +17,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-17
 - Milvus 2.4+ (向量数据), SQLite/PostgreSQL (元数据) (004-vector-index-opt)
 - Python 3.11 (Backend), TypeScript/JavaScript (Frontend Vue3) + FastAPI >=0.110.0, pymilvus 2.4.9, FlagEmbedding >=1.2.0, Vue 3.x, TDesign Vue Next, Pinia (004-vector-index-opt)
 - Milvus 2.4+ (向量数据), SQLite/PostgreSQL (任务元数据, 推荐规则, 推荐行为日志) (004-vector-index-opt)
+- Python 3.11 (后端) + Vue 3 + Vite (前端) + FastAPI 0.104.1, pymilvus 2.3.4, FlagEmbedding>=1.2.0, jieba, TDesign Vue Next, Pinia (005-search-query-opt)
+- SQLite (搜索历史 - search_history 表) + Milvus 2.x (向量检索) (005-search-query-opt)
 
 - Python 3.11+ (backend), JavaScript/ES2020+ (frontend) (003-vector-embedding)
 
@@ -36,9 +38,9 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+ (backend), JavaScript/ES2020+ (frontend): Follow standard conventions
 
 ## Recent Changes
+- 005-search-query-opt: Added Python 3.11 (后端) + Vue 3 + Vite (前端) + FastAPI 0.104.1, pymilvus 2.3.4, FlagEmbedding>=1.2.0, jieba, TDesign Vue Next, Pinia
 - 004-vector-index-opt: Added Python 3.11 (Backend), TypeScript/JavaScript (Frontend Vue3) + FastAPI >=0.110.0, pymilvus 2.4.9, FlagEmbedding >=1.2.0, Vue 3.x, TDesign Vue Next, Pinia
 - 004-vector-index-opt: Added Python 3.11 (Backend) / JavaScript ES2022 (Frontend) + FastAPI >=0.110.0, pymilvus 2.4.9, sentence-transformers (reranker), Vue 3.3, TDesign Vue Next 1.13
-- 004-vector-index-opt: Added Python 3.11 (Backend), TypeScript/JavaScript (Frontend with Vue 3)
 
 
 <!-- MANUAL ADDITIONS START -->

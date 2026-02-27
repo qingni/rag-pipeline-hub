@@ -25,11 +25,17 @@ class Settings(BaseSettings):
     VECTOR_INDEX_RESULTS_DIR: str = "results/vector_index"
     VECTOR_INDEX_DEFAULT_PROVIDER: str = "milvus"
     
-    # Reranker 配置 (混合检索精排)
-    RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
-    RERANKER_USE_FP16: bool = True
+    # Reranker 配置 (混合检索精排 - 远程 API)
+    RERANKER_MODEL: str = "qwen3-reranker-4b"
+    RERANKER_API_KEY: str = ""
+    RERANKER_API_BASE_URL: str = ""  # 如 http://your-reranker-server.example.com/api/llmproxy
+    RERANKER_TIMEOUT: int = 30
     RERANKER_TOP_N: int = 20
-    RERANKER_BATCH_SIZE: int = 32
+    
+    # 混合检索配置
+    RRF_K: int = 60                    # RRF 融合参数（前端不暴露，业内标准默认值）
+    MAX_COLLECTIONS: int = 5           # 联合搜索最大 Collection 数
+    DEFAULT_SEARCH_MODE: str = "auto"  # auto = 乐观尝试混合检索 + 自动降级
     
     # Embedding API Configuration
     EMBEDDING_API_KEY: Optional[str] = None

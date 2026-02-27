@@ -7,24 +7,53 @@
     placement="center"
   >
     <div v-if="result" class="result-detail">
-      <!-- 相似度信息 -->
+      <!-- 相似度和检索信息 -->
       <div class="detail-header">
+        <!-- 🆕 检索模式标签 -->
+        <t-tag 
+          v-if="result.search_mode"
+          :theme="result.search_mode === 'hybrid' ? 'primary' : 'default'"
+          size="medium"
+        >
+          {{ result.search_mode === 'hybrid' ? '混合检索' : '纯稠密检索' }}
+        </t-tag>
         <t-tag 
           :theme="scoreTheme" 
           size="medium"
         >
-          相似度: {{ result.similarity_percent }}
+          相似度: {{ result.similarity_percent || formatPercent(result.similarity_score) }}
         </t-tag>
         <span class="rank-info">排名 #{{ result.rank }}</span>
       </div>
       
+      <!-- 🆕 精排分数详情 -->
+      <div v-if="result.reranker_score != null || result.rrf_score != null" class="score-detail">
+        <div class="score-row" v-if="result.reranker_score != null">
+          <span class="score-label">Reranker 精排分数:</span>
+          <span class="score-value highlight">{{ result.reranker_score.toFixed(6) }}</span>
+        </div>
+        <div class="score-row" v-if="result.rrf_score != null">
+          <span class="score-label">RRF 融合分数:</span>
+          <span class="score-value">{{ result.rrf_score.toFixed(6) }}</span>
+        </div>
+        <div class="score-row" v-if="result.similarity_score != null">
+          <span class="score-label">原始相似度分数:</span>
+          <span class="score-value">{{ result.similarity_score.toFixed(6) }}</span>
+        </div>
+      </div>
+      
       <!-- 来源信息 -->
       <div class="source-info">
+        <!-- 🆕 来源 Collection -->
+        <div v-if="result.source_collection" class="info-row">
+          <span class="label">来源 Collection:</span>
+          <span class="value">{{ result.source_collection }}</span>
+        </div>
         <div class="info-row">
           <span class="label">来源文档:</span>
           <span class="value">{{ result.source_document }}</span>
         </div>
-        <div v-if="result.source_index" class="info-row">
+        <div v-if="result.source_index && !result.source_collection" class="info-row">
           <span class="label">来源索引:</span>
           <span class="value">{{ result.source_index }}</span>
         </div>
@@ -101,6 +130,11 @@ const formattedMetadata = computed(() => {
   if (!props.result?.metadata) return ''
   return JSON.stringify(props.result.metadata, null, 2)
 })
+
+function formatPercent(score) {
+  if (score == null) return '0%'
+  return (score * 100).toFixed(1) + '%'
+}
 </script>
 
 <style scoped>
@@ -111,13 +145,46 @@ const formattedMetadata = computed(() => {
 .detail-header {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
   margin-bottom: 1.5rem;
+  flex-wrap: wrap;
 }
 
 .rank-info {
   color: #666;
   font-size: 0.875rem;
+}
+
+/* 🆕 精排分数详情 */
+.score-detail {
+  background: #f0f7ff;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  border-left: 3px solid #0052d9;
+}
+
+.score-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0;
+}
+
+.score-label {
+  color: #666;
+  font-size: 0.875rem;
+}
+
+.score-value {
+  font-family: monospace;
+  font-size: 0.875rem;
+  color: #333;
+}
+
+.score-value.highlight {
+  color: #0052d9;
+  font-weight: 600;
 }
 
 .source-info {
@@ -137,9 +204,10 @@ const formattedMetadata = computed(() => {
 }
 
 .label {
-  width: 80px;
+  width: 120px;
   color: #666;
   font-size: 0.875rem;
+  flex-shrink: 0;
 }
 
 .value {
@@ -172,15 +240,6 @@ const formattedMetadata = computed(() => {
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.content-box.empty-content {
-  color: #999;
-  font-style: italic;
-}
-
-.empty-hint {
-  color: #999;
 }
 
 .metadata-section {

@@ -11,7 +11,7 @@ info:
 servers:
   - url: http://localhost:8000/api/v1
     description: Local development server
-  - url: http://dev.fit-ai.woa.com/api/v1
+  - url: http://dev.example.com/api/v1
     description: Development environment
 
 tags:

@@ -1709,7 +1709,13 @@ class VectorIndexService:
             if enable_reranker and query_text and query_text.strip():
                 try:
                     from .reranker_service import RerankerService
-                    reranker = RerankerService.get_instance()
+                    from ..config import settings
+                    reranker = RerankerService.get_instance(
+                        model_name=settings.RERANKER_MODEL,
+                        api_key=settings.RERANKER_API_KEY,
+                        api_base_url=settings.RERANKER_API_BASE_URL,
+                        timeout=settings.RERANKER_TIMEOUT
+                    )
                     
                     if not reranker.available:
                         reranker.init()

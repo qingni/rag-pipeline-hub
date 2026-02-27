@@ -112,7 +112,7 @@
 
 - [x] T042 [US7] 扩展 Milvus Provider 支持混合检索：在 `backend/src/services/providers/milvus_provider.py` 中实现 hybrid_search 方法（AnnSearchRequest 双路 + RRFRanker(k=60)）
 - [x] T043 [US7] 扩展 Collection Schema 支持稀疏向量：在 `backend/src/services/providers/milvus_provider.py` 中更新 create_collection 方法，添加 sparse_embedding 字段和 SPARSE_INVERTED_INDEX 索引
-- [x] T044 [US7] 实现 Reranker 精排服务 `backend/src/services/reranker_service.py`：加载 bge-reranker-v2-m3 模型（FlagEmbedding），rerank() 方法（query + candidates → top_k scored results）
+- [x] T044 [US7] 实现 Reranker 精排服务 `backend/src/services/reranker_service.py`：调用 qwen3-reranker-4b 模型（远程 API），rerank() 方法（query + candidates → top_k scored results）
 - [x] T045 [P] [US7] 实现混合检索编排逻辑：在 `backend/src/services/search_service.py` 中实现 hybrid_search 方法（自动检测稀疏向量 → 选择 hybrid/dense_only → RRF → Reranker）
 - [x] T046 [P] [US7] 实现稀疏向量降级策略：在 `backend/src/services/search_service.py` 中实现 _collection_has_sparse_field() 和 _is_sparse_vector_valid() 检测，自动降级
 - [x] T047 [P] [US7] 实现 Reranker 降级策略：在 `backend/src/services/search_service.py` 中处理 Reranker 不可用场景（跳过精排，返回 RRF 粗排结果，标注 reranker_available=false）
