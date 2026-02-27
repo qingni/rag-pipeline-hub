@@ -80,28 +80,49 @@ class SearchService:
         """
         self.db = db_session
         self._embedding_service = None
+        self._embedding_services = {}  # 按模型名缓存 EmbeddingService 实例
         self._vector_index_service = None
         logger.info("SearchService initialized")
     
     @property
     def embedding_service(self) -> EmbeddingService:
-        """获取 Embedding 服务实例（延迟初始化）"""
+        """获取默认 Embedding 服务实例（延迟初始化）"""
         if self._embedding_service is None:
+            self._embedding_service = self._get_embedding_service_for_model(
+                settings.EMBEDDING_DEFAULT_MODEL
+            )
+        return self._embedding_service
+    
+    def _get_embedding_service_for_model(self, model_name: str) -> EmbeddingService:
+        """
+        按模型名获取 EmbeddingService 实例（缓存复用）
+        
+        设计理念：一个知识库绑定一种 Embedding 模型，搜索时需要使用
+        与入库时相同的模型来嵌入查询文本，确保语义空间一致。
+        
+        Args:
+            model_name: 嵌入模型名称（如 qwen3-embedding-8b, bge-m3）
+            
+        Returns:
+            对应模型的 EmbeddingService 实例
+        """
+        if model_name not in self._embedding_services:
             api_key = settings.EMBEDDING_API_KEY
             base_url = settings.EMBEDDING_API_BASE_URL
-            model = settings.EMBEDDING_DEFAULT_MODEL
             
             if not api_key or not base_url:
                 raise EmbeddingServiceError("Embedding API 配置缺失")
             
-            self._embedding_service = EmbeddingService(
+            self._embedding_services[model_name] = EmbeddingService(
                 api_key=api_key,
-                model=model,
+                model=model_name,
                 base_url=base_url,
                 max_retries=settings.EMBEDDING_MAX_RETRIES,
                 request_timeout=settings.EMBEDDING_TIMEOUT
             )
-        return self._embedding_service
+            logger.info(f"Created EmbeddingService instance for model: {model_name}")
+        
+        return self._embedding_services[model_name]
     
     @property
     def vector_index_service(self) -> VectorIndexService:
@@ -237,19 +258,31 @@ class SearchService:
         
         return indexes
     
-    async def _embed_query(self, query_text: str) -> np.ndarray:
-        """将查询文本转换为向量"""
+    async def _embed_query(self, query_text: str, model_name: str = None) -> np.ndarray:
+        """
+        将查询文本转换为向量
+        
+        Args:
+            query_text: 查询文本
+            model_name: 指定使用的嵌入模型（不指定则使用默认模型）
+        """
         try:
+            # 选择对应模型的 EmbeddingService 实例
+            if model_name:
+                service = self._get_embedding_service_for_model(model_name)
+            else:
+                service = self.embedding_service
+            
             # 使用同步方法，在线程池中执行
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
-                self.embedding_service.embed_query,
+                service.embed_query,
                 query_text
             )
             return np.array(result.vector)
         except Exception as e:
-            logger.error(f"Embedding failed: {str(e)}")
+            logger.error(f"Embedding failed (model={model_name}): {str(e)}")
             raise EmbeddingServiceError("向量化服务暂时不可用，请稍后重试")
     
     def _search_in_index(
@@ -781,7 +814,12 @@ class SearchService:
         sparse_vector = None
         
         try:
-            sparse_vector = self.bm25_service.encode_query(str(index_id), query_text)
+            # 将数据库 ID 映射为物理 Collection 名称（BM25 统计以物理 Collection 名称为 key）
+            try:
+                bm25_index_key = self._resolve_index_id_to_collection_name(str(index_id))
+            except Exception:
+                bm25_index_key = str(index_id)
+            sparse_vector = self.bm25_service.encode_query(bm25_index_key, query_text)
         except Exception as e:
             logger.warning(f"BM25 稀疏向量生成失败 (index={index_id}): {str(e)}")
         
@@ -839,11 +877,17 @@ class SearchService:
         
         # auto 或 hybrid 模式：检查 Collection 是否支持混合检索
         try:
+            # 将数据库 ID 映射为物理 Collection 名称（BM25 统计以物理 Collection 名称为 key）
+            try:
+                bm25_index_key = self._resolve_index_id_to_collection_name(str(index_id))
+            except Exception:
+                bm25_index_key = str(index_id)
+            
             # 检查 BM25 统计是否可用
-            has_bm25 = self.bm25_service.has_stats(str(index_id))
+            has_bm25 = self.bm25_service.has_stats(bm25_index_key)
             
             if not has_bm25:
-                logger.info(f"BM25 统计不可用 (index={index_id})，降级到 dense_only")
+                logger.info(f"BM25 统计不可用 (index={index_id}, bm25_key={bm25_index_key})，降级到 dense_only")
                 return "dense_only"
             
             # 实际的稀疏字段检查由 MilvusProvider.hybrid_search 内部处理
@@ -870,7 +914,7 @@ class SearchService:
         Args:
             query_text: 原始查询文本
             candidates: 粗排候选集
-            top_k: 最终返回数量
+            top_k: 最大返回数量
             reranker_top_n: 送入 Reranker 的候选集大小
             
         Returns:
@@ -1012,9 +1056,32 @@ class SearchService:
                     "timing": self._build_search_timing()
                 }
             
-            # 2. 生成稠密查询向量
+            # 2. 按 Embedding 模型分组 Collection，各自嵌入查询文本
+            # 设计理念：不同知识库可能绑定不同的 Embedding 模型，
+            # 跨模型联合搜索时需按模型分组，各自使用对应模型嵌入查询文本，
+            # 确保各 Collection 的检索在正确的语义空间中进行。
+            model_groups = self._group_collections_by_embedding_model(collection_ids)
+            
             embed_start = time.time()
-            query_vector = await self._embed_query(query_text)
+            
+            if len(model_groups) <= 1:
+                # 所有 Collection 使用相同模型（或只有一个 Collection）：单次嵌入
+                search_model = next(iter(model_groups.keys())) if model_groups else None
+                if search_model == "__default__":
+                    search_model = None
+                query_vector = await self._embed_query(query_text, model_name=search_model)
+                # 构建统一的 collection_id → query_vector 映射
+                collection_vectors = {cid: query_vector for cid in collection_ids}
+                if search_model:
+                    logger.info(f"Using embedding model '{search_model}' for query (all collections same model)")
+            else:
+                # 跨模型联合搜索：按模型分组并行嵌入查询文本
+                logger.info(f"跨模型联合搜索: 检测到 {len(model_groups)} 种不同 Embedding 模型，按模型分组嵌入")
+                collection_vectors = await self._embed_query_per_model_group(
+                    query_text=query_text,
+                    model_groups=model_groups
+                )
+            
             embedding_ms = int((time.time() - embed_start) * 1000)
             
             rrf_k = settings.RRF_K
@@ -1026,11 +1093,11 @@ class SearchService:
             
             # 3. 单/多 Collection 分发
             if len(collection_ids) > 1:
-                # T028-T029: 多 Collection 联合搜索
+                # T028-T029: 多 Collection 联合搜索（支持跨模型）
                 result = await self._multi_collection_search(
                     collection_ids=collection_ids,
                     query_text=query_text,
-                    query_vector=query_vector,
+                    collection_vectors=collection_vectors,
                     search_mode_requested=search_mode_requested,
                     reranker_top_n=reranker_top_n,
                     reranker_top_k=reranker_top_k,
@@ -1043,6 +1110,7 @@ class SearchService:
             else:
                 # 单 Collection 检索
                 cid = collection_ids[0]
+                query_vector = collection_vectors[cid]
                 actual_mode = self._determine_search_mode(cid, search_mode_requested)
                 
                 search_start = time.time()
@@ -1140,11 +1208,63 @@ class SearchService:
 
     # ==================== 多 Collection 联合搜索 (Phase 8: US6) ====================
 
+    async def _embed_query_per_model_group(
+        self,
+        query_text: str,
+        model_groups: Dict[str, List[str]]
+    ) -> Dict[str, np.ndarray]:
+        """
+        按模型分组并行嵌入查询文本，返回 collection_id → query_vector 映射
+        
+        设计理念：跨模型联合搜索时，各 Collection 需要使用各自绑定的 Embedding
+        模型来嵌入查询文本，确保在正确的语义空间中检索。
+        
+        参考业界最佳实践：
+        - LlamaIndex MultiIndex: 各 Index 绑定自己的 QueryEngine，独立 embed + 检索
+        - LangChain EnsembleRetriever: 各 retriever 独立运行（含各自的 embedding），
+          RRF/Reranker 融合结果
+        
+        Args:
+            query_text: 查询文本
+            model_groups: {model_name: [collection_id, ...]} 分组映射
+            
+        Returns:
+            {collection_id: query_vector} 映射
+        """
+        collection_vectors: Dict[str, np.ndarray] = {}
+        
+        # 并行为每种模型嵌入查询文本
+        async def embed_for_model(model_name: str, cids: List[str]):
+            actual_model = None if model_name == "__default__" else model_name
+            vector = await self._embed_query(query_text, model_name=actual_model)
+            return cids, vector
+        
+        tasks = [
+            embed_for_model(model_name, cids)
+            for model_name, cids in model_groups.items()
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for res in results:
+            if isinstance(res, Exception):
+                logger.error(f"按模型嵌入查询失败: {str(res)}")
+                continue
+            cids, vector = res
+            for cid in cids:
+                collection_vectors[cid] = vector
+        
+        logger.info(
+            f"跨模型嵌入完成: {len(model_groups)} 种模型, "
+            f"{len(collection_vectors)} 个 Collection 获得查询向量"
+        )
+        return collection_vectors
+
     async def _multi_collection_search(
         self,
         collection_ids: List[str],
         query_text: str,
-        query_vector: np.ndarray,
+        collection_vectors: Dict[str, np.ndarray],
         search_mode_requested: str = "auto",
         reranker_top_n: int = 20,
         reranker_top_k: int = 10,
@@ -1155,15 +1275,17 @@ class SearchService:
         start_time: float = 0
     ) -> Dict[str, Any]:
         """
-        T028: 多 Collection 联合搜索
+        T028: 多 Collection 联合搜索（支持跨模型）
         
         使用 asyncio.gather() 并行在各 Collection 执行检索，
-        合并候选集后统一调用 _rerank_candidates()。
+        每个 Collection 使用各自对应的 query_vector（按绑定的 Embedding 模型嵌入），
+        合并候选集后统一调用 _rerank_candidates()（Reranker 基于文本，不涉及向量，
+        天然支持跨模型精排）。
         
         Args:
             collection_ids: Collection ID 列表
             query_text: 查询文本
-            query_vector: 稠密查询向量
+            collection_vectors: {collection_id: query_vector} 映射
             其他: 搜索配置参数
             
         Returns:
@@ -1172,8 +1294,13 @@ class SearchService:
         search_start = time.time()
         total_bm25_ms = 0
         
-        # 并行在各 Collection 执行检索
+        # 并行在各 Collection 执行检索，每个 Collection 使用对应的 query_vector
         async def search_one(cid):
+            query_vector = collection_vectors.get(cid)
+            if query_vector is None:
+                logger.warning(f"Collection {cid} 无对应的查询向量，跳过")
+                return [], "dense_only", 0
+            
             actual_mode = self._determine_search_mode(cid, search_mode_requested)
             if actual_mode == "hybrid":
                 results, mode, bm25_ms = await self._hybrid_search_in_collection(
@@ -1262,8 +1389,11 @@ class SearchService:
         """
         将逻辑 Collection 名称列表解析为对应的索引记录 ID 列表
         
-        用户在前端选择的 Collection 是逻辑知识库名（如 default_collection），
+        用户在前端选择的 Collection 是逻辑知识库名（如 default_kb_qwen3_embedding_8b），
         需要映射到该 Collection 下所有 READY 状态的 VectorIndex 记录 ID。
+        
+        设计理念：一个知识库对应一种 Embedding 模型，同一逻辑 Collection 下
+        所有索引的 source_model 和 dimension 天然一致，无需额外过滤。
         
         Args:
             collection_names: 逻辑 Collection 名称列表
@@ -1295,6 +1425,74 @@ class SearchService:
         except Exception as e:
             logger.error(f"Failed to resolve collection names to index IDs: {str(e)}")
             return []
+
+    def _resolve_embedding_model_for_collections(self, collection_ids: List[str]) -> Optional[str]:
+        """
+        根据目标索引 ID 列表，解析知识库绑定的嵌入模型（返回第一个模型，
+        用于单 Collection 场景或所有 Collection 使用相同模型的场景）
+        
+        Args:
+            collection_ids: 索引记录 ID 列表（数据库自增 ID 字符串）
+            
+        Returns:
+            嵌入模型名称，如 "qwen3-embedding-8b"，解析失败返回 None
+        """
+        model_groups = self._group_collections_by_embedding_model(collection_ids)
+        if not model_groups:
+            return None
+        # 返回第一个模型（兼容单 Collection 场景）
+        return next(iter(model_groups.keys()))
+
+    def _group_collections_by_embedding_model(self, collection_ids: List[str]) -> Dict[str, List[str]]:
+        """
+        按 Embedding 模型对 Collection 进行分组
+        
+        设计理念：不同知识库可能绑定不同的 Embedding 模型（如 qwen3-embedding-8b、bge-m3）。
+        跨模型联合搜索时，需要按模型分组，各自使用对应模型嵌入查询文本，
+        确保各 Collection 的检索在正确的语义空间中进行。
+        
+        参考业界最佳实践：
+        - LlamaIndex MultiIndex: 各 Index 绑定自己的 QueryEngine，独立 embed
+        - LangChain EnsembleRetriever: 各 retriever 独立运行（含各自的 embedding）
+        
+        Args:
+            collection_ids: 索引记录 ID 列表（数据库自增 ID 字符串）
+            
+        Returns:
+            {model_name: [index_id, ...]} 分组映射，
+            模型未知的索引归入 "__default__" 组
+        """
+        try:
+            ids = [int(id) for id in collection_ids if str(id).isdigit()]
+            if not ids:
+                return {}
+            
+            indexes = self.db.query(VectorIndex).filter(
+                VectorIndex.id.in_(ids),
+                VectorIndex.status == IndexStatus.READY
+            ).all()
+            
+            model_groups: Dict[str, List[str]] = {}
+            for idx in indexes:
+                model_name = idx.source_model or "__default__"
+                if model_name not in model_groups:
+                    model_groups[model_name] = []
+                model_groups[model_name].append(str(idx.id))
+            
+            if len(model_groups) > 1:
+                models_info = {m: len(ids) for m, ids in model_groups.items()}
+                logger.info(f"多 Collection 跨模型分组: {models_info}")
+            elif model_groups:
+                model_name = next(iter(model_groups.keys()))
+                logger.info(
+                    f"Resolved embedding model for search: {model_name} "
+                    f"(all {len(ids)} collections use same model)"
+                )
+            
+            return model_groups
+        except Exception as e:
+            logger.warning(f"Failed to group collections by embedding model: {str(e)}")
+            return {}
 
     def get_available_collections(self) -> List[Dict[str, Any]]:
         """
@@ -1331,6 +1529,7 @@ class SearchService:
                         "vector_count": 0,
                         "dimensions": set(),
                         "metric_types": set(),
+                        "embedding_models": set(),  # 该 Collection 绑定的嵌入模型集合
                         "has_sparse": False,
                         "document_count": 0,
                         "created_at": index.created_at,
@@ -1344,6 +1543,8 @@ class SearchService:
                     info["dimensions"].add(index.dimension)
                 if index.metric_type:
                     info["metric_types"].add(index.metric_type)
+                if index.source_model:
+                    info["embedding_models"].add(index.source_model)
                 if index.has_sparse:
                     info["has_sparse"] = True
                 # 取最新的 created_at
@@ -1372,6 +1573,10 @@ class SearchService:
                 metric_types = list(info["metric_types"])
                 primary_metric = metric_types[0] if metric_types else "cosine"
                 
+                # 取绑定的嵌入模型（一个知识库应该只有一种模型）
+                embedding_models = list(info["embedding_models"])
+                primary_model = embedding_models[0] if embedding_models else None
+                
                 collections.append({
                     "id": coll_name,  # 使用 collection_name 作为 ID
                     "name": coll_name,
@@ -1379,6 +1584,7 @@ class SearchService:
                     "vector_count": info["vector_count"],
                     "dimension": primary_dimension,
                     "metric_type": primary_metric,
+                    "embedding_model": primary_model,  # 知识库绑定的嵌入模型
                     "has_sparse": info["has_sparse"],
                     "document_count": info["document_count"],
                     "created_at": info["created_at"].isoformat() if info["created_at"] else None

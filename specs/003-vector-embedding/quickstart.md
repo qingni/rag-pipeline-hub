@@ -184,7 +184,6 @@ Expected response:
   "models_available": [
     "qwen3-embedding-8b",
     "bge-m3",
-    "hunyuan-embedding",
     "qwen3-vl-embedding-8b"  ],
   "authentication": "valid",
   "timestamp": "2025-12-17T10:30:45Z"
@@ -457,7 +456,7 @@ curl -X POST http://localhost:8000/api/embeddings/from-chunking-result \
 
 ```bash
 # Vectorize same document with different models
-for model in "bge-m3" "qwen3-embedding-8b" "hunyuan-embedding"; do
+for model in "bge-m3" "qwen3-embedding-8b"; do
   echo "Vectorizing with $model..."
   curl -X POST http://localhost:8000/api/embeddings/from-document \
     -H "X-API-Key: $API_KEY" \

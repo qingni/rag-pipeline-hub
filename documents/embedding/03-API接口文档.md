@@ -327,15 +327,6 @@ print(result['data']['embedding'])
         "description": "通义千问 Embedding 8B，高精度、长文本支持、动态维度输出"
       },
       {
-        "name": "hunyuan-embedding",
-        "display_name": "腾讯混元 Embedding",
-        "dimension": 1024,
-        "max_sequence_length": 1024,
-        "provider": "hunyuan",
-        "model_type": "text",
-        "description": "腾讯混元提供的 Embedding 模型"
-      },
-      {
         "name": "qwen3-vl-embedding-8b",
         "display_name": "Qwen3 VL Embedding 8B",
         "dimension": 4096,
@@ -467,7 +458,7 @@ print(result['data']['embedding'])
   "detail": {
     "error_code": "E001",
     "model": "unknown-model",
-    "available_models": ["bge-m3", "qwen3-embedding-8b", "hunyuan-embedding", "qwen3-vl-embedding-8b"]
+    "available_models": ["bge-m3", "qwen3-embedding-8b", "qwen3-vl-embedding-8b"]
   }
 }
 ```

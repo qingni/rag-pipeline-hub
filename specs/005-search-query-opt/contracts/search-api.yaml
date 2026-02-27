@@ -260,7 +260,7 @@ components:
           default: 10
           minimum: 1
           maximum: 100
-          description: 最终返回结果数量
+          description: 最多返回结果数量
         threshold:
           type: number
           format: float
@@ -290,7 +290,7 @@ components:
         reranker_top_k:
           type: integer
           minimum: 1
-          description: Reranker 最终返回数（默认使用 top_k）
+          description: Reranker 最大返回数（默认使用 top_k）
 
     # ==================== 响应模型 ====================
 

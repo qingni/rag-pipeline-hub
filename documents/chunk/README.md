@@ -129,7 +129,7 @@
 - **内容类型**: 文本、表格、图片、代码
 - **最大文档**: 50MB
 - **版本管理**: 智能覆盖/多版本并存
-- **语义分块**: 支持Embedding增强（bge-m3, qwen3-embedding-8b, hunyuan-embedding）
+- **语义分块**: 支持Embedding增强（bge-m3, qwen3-embedding-8b）
 - **性能目标**: 
   - 标准文档(10k字符) < 5秒
   - 大型文档(50k字符) < 30秒

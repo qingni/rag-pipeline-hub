@@ -151,21 +151,6 @@ class ModelCapabilityService:
             description='通义千问 Embedding 8B',
         )
         
-        # Hunyuan-Embedding
-        self._models['hunyuan-embedding'] = ModelCapabilityInfo(
-            model_name='hunyuan-embedding',
-            display_name='Hunyuan-Embedding',
-            provider='hunyuan',
-            dimension=1024,
-            model_type='text',
-            language_scores=LanguageScores(zh=0.92, en=0.85, ja=0.60, ko=0.60, default=0.50),
-            domain_scores=DomainScores(general=0.85, technical=0.80, legal=0.85, medical=0.75,
-                                       financial=0.85, academic=0.75, news=0.85, default=0.75),
-            multimodal_score=0.0,
-            performance_scores=PerformanceScores(throughput=0.90, latency=0.85, cost=0.85),
-            description='腾讯混元 Embedding',
-        )
-        
         # Qwen3-VL-Embedding-8B (multimodal)
         self._models['qwen3-vl-embedding-8b'] = ModelCapabilityInfo(
             model_name='qwen3-vl-embedding-8b',

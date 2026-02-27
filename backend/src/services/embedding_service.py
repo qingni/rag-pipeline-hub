@@ -54,17 +54,6 @@ TEXT_EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
         "max_batch_size": 1000,
         "model_type": "text",
     },
-    "hunyuan-embedding": {
-        "name": "hunyuan-embedding",
-        "dimension": 1024,
-        "max_sequence_length": 1024,
-        "description": "腾讯混元提供的 Embedding 模型",
-        "provider": "hunyuan",
-        "supports_multilingual": True,
-        "supports_instruction": False,
-        "max_batch_size": 1000,
-        "model_type": "text",
-    },
 }
 
 # ============================================================================
@@ -160,7 +149,6 @@ class EmbeddingService:
         model: Literal[
             "bge-m3",
             "qwen3-embedding-8b",
-            "hunyuan-embedding",
             "qwen3-vl-embedding-8b",
         ] = "qwen3-embedding-8b",
         base_url: str = "",  # 必须通过参数传入，不提供默认值

@@ -144,7 +144,7 @@ As a RAG system user, I need to immediately see the latest embedding results whe
 1. **Given** a document has one embedding result created at "2025-12-17 10:00" with model "bge-m3", **When** user selects that document, **Then** the system displays the embedding result in right panel within 500ms with header showing "DocumentName · bge-m3 · 1024维 · 50/50块 · 1250ms"
 2. **Given** a document has multiple embedding results with different models, **When** user selects that document, **Then** the system displays the result with the latest created_at timestamp (most recent vectorization)
 3. **Given** user selects a document with embedding result created using "qwen3-embedding-8b", **When** result is displayed, **Then** the left-side model selector automatically switches to "qwen3-embedding-8b" selection
-4. **Given** user views historical embedding result with model "bge-m3", **When** user manually changes model selector to "hunyuan-embedding", **Then** the button text remains "重新向量化" and the displayed result does not change
+4. **Given** user views historical embedding result with model "bge-m3", **When** user manually changes model selector to "qwen3-embedding-8b", **Then** the button text remains "重新向量化" and the displayed result does not change
 5. **Given** user views historical result and changes model to a different one, **When** user clicks "重新向量化", **Then** system triggers new vectorization with the newly selected model, creates new database record, and auto-switches display to show new result
 6. **Given** user selects a document with no embedding history, **When** page loads, **Then** right panel shows empty state, model selector shows default selection, and button displays "开始向量化" text
 7. **Given** user selects document A (with embedding history), then selects document B (with different embedding history), **When** second selection is made, **Then** system immediately replaces displayed result with document B's latest embedding result and auto-switches model selector to match
@@ -196,7 +196,7 @@ As a system administrator, I need to choose from multiple embedding models (BGE-
 
 1. **Given** the model name "qwen3-embedding-8b", **When** service is initialized, **Then** vectors are generated with 4096 dimensions
 2. **Given** the model name "bge-m3", **When** service is initialized, **Then** vectors are generated with 1024 dimensions
-3. **Given** the model name "hunyuan-embedding", **When** service is initialized, **Then** vectors are generated with 1024 dimensions
+3. **Given** the model name "qwen3-vl-embedding-8b", **When** service is initialized, **Then** vectors are generated with 4096 dimensions
 4. **Given** the model name "qwen3-vl-embedding-8b", **When** service is initialized, **Then** vectors are generated with 4096 dimensions
 5. **Given** an unsupported model name, **When** service initialization is attempted, **Then** the system returns a clear error listing supported models
 

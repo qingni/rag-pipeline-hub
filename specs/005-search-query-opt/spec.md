@@ -148,7 +148,7 @@
 - **FR-UI-003**: 每个结果卡片显示：文本摘要、相似度分数（百分比）、来源文档名、操作按钮（查看详情）
 - **FR-UI-004**: 混合检索结果卡片额外显示：search_mode 标签（hybrid/dense_only）、rrf_score、reranker_score、检索耗时指标
 - **FR-UI-005**: 提供搜索配置面板，包含 Collection 选择（按逻辑知识库聚合展示，每个选项显示知识库名称、文档数量、总向量数量，而非展示单个文档级别的索引记录）、TopK 设置、相似度阈值。检索模式由系统自动决定：默认使用混合检索，稀疏向量不可用时自动降级为纯稠密检索（降级原因包括：Collection 无稀疏字段、BM25 统计数据缺失、稀疏向量生成失败等）。用户无需手动选择检索模式，配置面板以只读状态文本提示当前实际检索模式（如「当前：混合检索」或「当前：纯稠密检索」）。注意：RRF 融合参数 k 不在前端暴露，仅后端可配置 [Updated: 2026-02-26]
-- **FR-UI-006**: 混合检索模式下额外显示 Reranker 参数配置（top_n 候选集大小、top_k 最终返回数）
+- **FR-UI-006**: 混合检索模式下额外显示 Reranker 参数配置（top_n 候选集大小、top_k 最大返回数）
 - **FR-UI-007**: 提供搜索历史侧边栏，显示最近的搜索记录（最多50条）
 - **FR-UI-008**: 搜索过程中显示加载状态，搜索完成后显示结果数量和耗时
 - **FR-UI-009**: 界面样式与现有模块（文档处理、向量化、向量索引）保持一致，使用 TDesign Vue Next 组件库
@@ -285,3 +285,6 @@
 | 2026-02-26 | BEHAVIOR_CHANGE [VIBE] | Collection 选择器从展示文档级别的索引记录（VectorIndex）改为按 collection_name 聚合的逻辑知识库级别。后端 `get_available_collections()` 按 collection_name 聚合，`CollectionInfo` 新增 document_count 字段，id 从索引 ID 改为 collection_name。前端混合检索请求中 collection_ids 参数从索引 ID 改为 collection_name，后端新增 `_resolve_collection_names_to_index_ids()` 做映射转换并向后兼容旧数据。 | FR-UI-005, US4, US6 |
 | 2026-02-26 | BEHAVIOR_CHANGE [VIBE] | Reranker 精排从本地 FlagEmbedding 模型推理改为远程 API 调用（OpenAI-compatible `/rerank` 端点）。移除 `FlagEmbedding>=1.2.0` 本地依赖，改用 `openai` SDK 调用远程服务。新增配置项 `RERANKER_API_KEY`、`RERANKER_API_BASE_URL`、`RERANKER_TIMEOUT`，移除 `RERANKER_USE_FP16`、`RERANKER_BATCH_SIZE`。健康检查改为 API 连通性测试。 | FR-HYB-004, FR-HYB-008, US2 |
 | 2026-02-27 | BEHAVIOR_CHANGE [VIBE] | Reranker 模型从支持 3 种（qwen3-reranker-4b / bge-reranker-v2-m3 / bge-reranker-large）精简为仅支持 qwen3-reranker-4b。移除 bge-reranker-v2-m3 和 bge-reranker-large 相关配置和代码，默认模型改为 qwen3-reranker-4b。 | FR-HYB-004, US2 |
+| 2026-02-27 | BUG_FIX [VIBE] | 统一 Top-K 参数描述：从"最终返回数/最终返回结果数量"修改为"最大返回数/最多返回结果数量"，明确 Top-K 为上限语义（at most K），实际返回数量取决于召回结果。前端 UI 标签、提示文字、后端 Schema description、API 契约、Spec 数据模型同步更新。 | FR-UI-006, FR-003, US4 |
+| 2026-02-27 | BEHAVIOR_CHANGE [VIBE] | **一个知识库对应一种 Embedding 模型**：重构 Collection 命名策略，不同嵌入模型自动对应不同逻辑 Collection。1）`vector_config.py` 新增 `get_default_collection_name_for_model()` 函数，按 `default_kb_{model_name}` 格式生成逻辑 Collection 名。2）`create_index_from_embedding()` 当 collection_name 为空时根据嵌入模型自动路由到对应知识库。3）`SearchService` 新增 `_get_embedding_service_for_model()` 和 `_resolve_embedding_model_for_collections()` 方法，搜索时自动使用知识库绑定的模型嵌入查询文本。4）`get_available_collections()` 返回新增 `embedding_model` 字段。5）前端 Collection 选择器展示绑定的嵌入模型信息。 | FR-UI-005, US6 |
+| 2026-02-27 | BEHAVIOR_CHANGE [VIBE] | **跨模型联合搜索**：多 Collection 联合搜索现在支持跨不同 Embedding 模型的 Collection。1）新增 `_group_collections_by_embedding_model()` 方法，按 Embedding 模型对 Collection 进行分组。2）新增 `_embed_query_per_model_group()` 方法，使用 `asyncio.gather()` 并行为每种模型嵌入查询文本。3）`_multi_collection_search()` 从接收单一 `query_vector` 改为接收 `collection_vectors: Dict[str, np.ndarray]`（collection_id → query_vector 映射），每个 Collection 使用各自绑定模型生成的查询向量进行检索。4）合并候选集后统一 Reranker 精排（Reranker 基于文本，天然支持跨模型）。5）`_resolve_embedding_model_for_collections()` 保持向后兼容，单 Collection 场景不受影响。参考业界实践：LlamaIndex MultiIndex 各 Index 独立 embed + 检索，LangChain EnsembleRetriever 各 retriever 独立运行后 RRF/Reranker 融合。 | US6, FR-HYB-004 |

@@ -204,7 +204,7 @@ class VectorIndexService:
         Returns:
             VectorIndex 对象
         """
-        from ..vector_config import DEFAULT_COLLECTION_NAME, get_physical_collection_name
+        from ..vector_config import DEFAULT_COLLECTION_NAME, get_physical_collection_name, get_default_collection_name_for_model
         
         try:
             # 1. 获取向量化任务
@@ -221,7 +221,20 @@ class VectorIndexService:
                 )
             
             # 2. 确定目标 Collection 名称
-            target_collection = collection_name or DEFAULT_COLLECTION_NAME
+            # 设计理念：一个知识库对应一种 Embedding 模型
+            # 当未指定 collection_name 时，根据嵌入模型自动路由到对应的默认知识库
+            if collection_name:
+                target_collection = collection_name
+            else:
+                # 根据嵌入模型名自动生成逻辑 Collection 名称
+                # 如 qwen3-embedding-8b → default_kb_qwen3_embedding_8b
+                source_model = embedding_result.model
+                if source_model:
+                    target_collection = get_default_collection_name_for_model(source_model)
+                    logger.info(f"Auto-routed to collection '{target_collection}' for model '{source_model}'")
+                else:
+                    target_collection = DEFAULT_COLLECTION_NAME
+                    logger.warning(f"Embedding result has no model info, using default collection")
             
             # 3. 生成索引记录名称（用于标识本次导入）
             if not name:
@@ -436,11 +449,20 @@ class VectorIndexService:
                 # 提取所有维度
                 dimensions = [p["dimension"] for p in physical_list if p["dimension"] is not None]
                 
+                # 获取绑定的嵌入模型（一个知识库对应一种模型）
+                model_index = self.db.query(VectorIndex).filter(
+                    VectorIndex.collection_name == logical_name,
+                    VectorIndex.source_model.isnot(None),
+                    VectorIndex.status == IndexStatus.READY
+                ).first()
+                embedding_model = model_index.source_model if model_index else None
+                
                 collections.append({
                     "collection_name": logical_name,
                     "is_default": logical_name == DEFAULT_COLLECTION_NAME,
                     "document_count": doc_count,
                     "total_vectors": total_vectors,
+                    "embedding_model": embedding_model,
                     "physical_collections": physical_list,
                     "dimensions": sorted(dimensions),
                     "physical_count": len(physical_list)
@@ -1635,7 +1657,7 @@ class VectorIndexService:
             query_dense_vector: 稠密查询向量
             query_sparse_vector: 稀疏查询向量
             top_n: 粗排候选集大小
-            top_k: 最终返回结果数量
+            top_k: 最多返回结果数量
             enable_reranker: 是否启用 Reranker 精排
             rrf_k: RRF 排名平滑因子
             search_params: 搜索参数

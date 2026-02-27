@@ -328,7 +328,7 @@ async def get_smart_chunking_params(
 # NEW: GET /api/chunking/embedding-params - Get embedding model specific parameters
 @router.get("/embedding-params")
 async def get_embedding_model_params(
-    embedding_model: Optional[str] = Query(None, description="Embedding model name (bge-m3, qwen3-embedding-8b, hunyuan-embedding)")
+    embedding_model: Optional[str] = Query(None, description="Embedding model name (bge-m3, qwen3-embedding-8b)")
 ):
     """
     获取 Embedding 模型特定的语义分块参数。
@@ -377,7 +377,6 @@ def _get_embedding_usage_tips(model_name: str) -> str:
     tips = {
         "bge-m3": "推荐用于大多数场景，速度快，1024维向量。适合中等长度文档。",
         "qwen3-embedding-8b": "适合需要高精度的场景，4096维向量，支持32K上下文。适合超长文档和复杂语义。",
-        "hunyuan-embedding": "腾讯混元提供，1024维向量。适合中文文档处理。",
         "default": "默认配置，适用于未知模型。"
     }
     return tips.get(model_name, tips["default"])

@@ -1339,7 +1339,7 @@ class MilvusProvider(BaseProvider):
                 
                 results = collection.hybrid_search(
                     reqs=[dense_req, sparse_req],
-                    ranker=reranker,
+                    rerank=reranker,
                     limit=top_n,
                     output_fields=output_fields
                 )

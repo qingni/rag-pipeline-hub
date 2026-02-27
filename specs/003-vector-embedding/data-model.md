@@ -23,7 +23,7 @@ This document defines the data entities, relationships, validation rules, and st
 | result_id | TEXT | NO | UUID | PRIMARY KEY | Unique identifier for embedding result |
 | document_id | TEXT | NO | - | FOREIGN KEY → documents.document_id | Source document reference |
 | chunking_result_id | TEXT | NO | - | FOREIGN KEY → chunking_results.result_id | Source chunking result reference |
-| model | TEXT | NO | - | IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'qwen3-vl-embedding-8b') | Embedding model used |
+| model | TEXT | NO | - | IN ('bge-m3', 'qwen3-embedding-8b', 'qwen3-vl-embedding-8b') | Embedding model used |
 | status | TEXT | NO | - | IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS') | Processing status |
 | successful_count | INTEGER | NO | - | >= 0 | Number of successfully vectorized chunks |
 | failed_count | INTEGER | NO | - | >= 0 | Number of failed chunks |
@@ -161,7 +161,6 @@ This document defines the data entities, relationships, validation rules, and st
 |------|-----------|----------|--------------|-----------|------|-------------|
 | bge-m3 | 1024 | bge | Yes | 1000 | text | BGE-M3 多语言模型，支持密集检索、多向量检索和稀疏检索 |
 | qwen3-embedding-8b | 4096 | qwen | Yes | 1000 | text | 通义千问 Embedding 8B，高精度、长文本支持、动态维度输出 |
-| hunyuan-embedding | 1024 | hunyuan | Yes | 1000 | text | 腾讯混元提供的 Embedding 模型 |
 | qwen3-vl-embedding-8b | 64-4096 | qwen | Yes | 1000 | multimodal | 通义千问多模态 Embedding 8B，支持文本、图像、视频及任意多模态组合输入 |
 
 **Validation Rules**:
@@ -493,7 +492,7 @@ CHECK (
 CHECK (successful_count + failed_count > 0)
 
 -- Enforce valid model names
-CHECK (model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'qwen3-vl-embedding-8b'))
+CHECK (model IN ('bge-m3', 'qwen3-embedding-8b', 'qwen3-vl-embedding-8b'))
 
 -- Enforce valid status values
 CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS'))
@@ -558,7 +557,7 @@ CREATE TABLE IF NOT EXISTS embedding_results (
     ),
     
     CHECK (successful_count + failed_count > 0),
-    CHECK (model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'qwen3-vl-embedding-8b')),
+    CHECK (model IN ('bge-m3', 'qwen3-embedding-8b', 'qwen3-vl-embedding-8b')),
     CHECK (status IN ('SUCCESS', 'FAILED', 'PARTIAL_SUCCESS')),
     CHECK (vector_dimension >= 64 AND vector_dimension <= 4096)
 );

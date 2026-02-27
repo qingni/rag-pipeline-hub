@@ -8,7 +8,7 @@
 |------|------|------|
 | 文档处理 | PDF、DOCX、XLSX、PPTX、HTML、CSV 等 20+ 格式文档上传与加载（Docling 集成） | ✅ |
 | 文档分块 | 固定大小、语义分块、递归分块、按标题分块 | ✅ |
-| 向量嵌入 | bge-m3、qwen3-embedding-8b、hunyuan-embedding 等向量化 | ✅ |
+| 向量嵌入 | bge-m3、qwen3-embedding-8b 等向量化 | ✅ |
 | 向量索引 | Milvus、FAISS 向量存储与索引 | ✅ |
 | 语义搜索 | 向量相似度搜索、混合搜索 | ✅ |
 | 文本生成 | 基于检索上下文的 LLM 智能问答 | ✅ |
@@ -124,7 +124,7 @@ rag-framework-spec/
 
 将文本块转换为向量表示：
 
-- **模型支持**: bge-m3、qwen3-embedding-8b、hunyuan-embedding、qwen3-vl-embedding-8b
+- **模型支持**: bge-m3、qwen3-embedding-8b、qwen3-vl-embedding-8b
 - **批量处理**: 支持大规模文档的批量向量化
 - **维度**: 1024-4096 维（根据模型不同）
 

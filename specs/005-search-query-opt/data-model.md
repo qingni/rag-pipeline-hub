@@ -18,12 +18,12 @@
 |------|------|------|--------|---------|------|
 | query_text | string | ✅ | - | 1 ≤ len ≤ 2000 | 查询文本 |
 | collection_ids | string[] | ❌ | [] | 0 ≤ len ≤ 5 | 目标 Collection ID 列表 |
-| top_k | int | ❌ | 10 | 1 ≤ val ≤ 100 | 最终返回结果数量 |
+| top_k | int | ❌ | 10 | 1 ≤ val ≤ 100 | 最多返回结果数量 |
 | threshold | float | ❌ | 0.5 | 0 ≤ val ≤ 1 | 相似度阈值 |
 | metric_type | enum | ❌ | "cosine" | cosine/euclidean/dot_product | 相似度计算方法 |
 | **search_mode** | enum | ❌ | "auto" | auto/hybrid/dense_only | 🆕 检索模式 |
 | **reranker_top_n** | int | ❌ | 20 | 10 ≤ val ≤ 100 | 🆕 Reranker 候选集大小 |
-| **reranker_top_k** | int | ❌ | null | 1 ≤ val ≤ top_n | 🆕 Reranker 最终返回数（null 时使用 top_k） |
+| **reranker_top_k** | int | ❌ | null | 1 ≤ val ≤ top_n | 🆕 Reranker 最大返回数（null 时使用 top_k） |
 
 **search_mode 枚举**:
 - `auto`: 系统默认值。自动检测 Collection 是否含稀疏向量，有则混合检索，无则纯稠密。等价于「乐观尝试混合检索 + 自动降级」，用户无需手动选择，仅供 API 调用方使用

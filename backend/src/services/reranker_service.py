@@ -129,7 +129,7 @@ class RerankerService:
         Args:
             query: 原始查询文本
             candidates: 候选集列表，每条包含 text 字段
-            top_k: 最终返回数量
+            top_k: 最大返回数量
             text_key: 候选集中文本字段的 key
             
         Returns:

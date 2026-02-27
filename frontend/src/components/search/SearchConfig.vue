@@ -49,7 +49,7 @@
           />
         </div>
         <div class="param-row">
-          <span class="param-label">最终返回数 (Top-K)</span>
+          <span class="param-label">最大返回数 (Top-K)</span>
           <t-input-number
             v-model="localConfig.topK"
             :min="1"
@@ -61,7 +61,7 @@
           />
         </div>
       </div>
-      <p class="config-hint">Top-N: Reranker 精排候选集大小；Top-K: 最终返回给用户的结果数量</p>
+      <p class="config-hint">Top-N: Reranker 精排候选集大小；Top-K: 最终最多返回的结果数量（实际数量取决于召回结果）</p>
     </div>
     
     <!-- 返回数量 (Top K) — 非混合模式下显示 -->
@@ -202,9 +202,9 @@ watch(() => props.config, (newVal) => {
 // 🆕 Collection 选项（按逻辑知识库聚合，含 has_sparse 标识）
 const collectionOptions = computed(() => {
   return props.availableCollections.map(col => ({
-    label: `${col.name} (${col.document_count || 0} 文档, ${col.vector_count} 向量)${col.has_sparse ? ' 🔀' : ''}`,
+    label: `${col.name} (${col.embedding_model || '未知模型'}, ${col.document_count || 0} 文档, ${col.vector_count} 向量)${col.has_sparse ? ' 🔀' : ''}`,
     value: col.id,
-    title: col.has_sparse ? '支持混合检索（含稀疏向量）' : '仅支持纯稠密检索'
+    title: `绑定模型: ${col.embedding_model || '未知'}${col.has_sparse ? ' | 支持混合检索（含稀疏向量）' : ' | 仅支持纯稠密检索'}`
   }))
 })
 

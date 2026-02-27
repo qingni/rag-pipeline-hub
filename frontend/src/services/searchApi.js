@@ -26,11 +26,11 @@ export async function executeSearch(params) {
  * @param {Object} params - 搜索参数
  * @param {string} params.query_text - 查询文本
  * @param {string[]} [params.collection_ids] - 目标 Collection ID 列表（最多5个）
- * @param {number} [params.top_k=10] - 最终返回结果数量
+ * @param {number} [params.top_k=10] - 最多返回结果数量
  * @param {number} [params.threshold=0.5] - 相似度阈值
  * @param {string} [params.search_mode='auto'] - 检索模式 (auto/hybrid/dense_only)
  * @param {number} [params.reranker_top_n=20] - Reranker 候选集大小
- * @param {number} [params.reranker_top_k] - Reranker 最终返回数
+ * @param {number} [params.reranker_top_k] - Reranker 最大返回数
  * @param {number} [params.page=1] - 页码
  * @param {number} [params.page_size=10] - 每页数量
  * @returns {Promise<Object>} 混合检索响应

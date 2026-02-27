@@ -25,13 +25,13 @@
 - **CHARACTER（按字数）**：固定字符数切分，支持重叠
 - **PARAGRAPH（按段落）**：以自然段落为单位
 - **HEADING（按标题）**：按 H1/H2/H3 层级切分
-- **SEMANTIC（按语义）**：基于统一 EmbeddingService 的语义相似度算法识别语义边界，支持 bge-m3、qwen3-embedding-8b、hunyuan-embedding 模型，TF-IDF 作为 fallback 机制
+- **SEMANTIC（按语义）**：基于统一 EmbeddingService 的语义相似度算法识别语义边界，支持 bge-m3、qwen3-embedding-8b 模型，TF-IDF 作为 fallback 机制
 
 ### 优化方向
 
 1. **分块策略增强**：引入父子文档分块、滑动窗口优化、混合分块策略
 2. **多模态支持**：针对表格、图片等嵌入对象的独立分块处理
-3. **向量模型扩展**：支持统一 EmbeddingService（bge-m3、qwen3-embedding-8b、hunyuan-embedding）用于语义分块，qwen3-vl-embedding-8b 用于多模态分块（未来扩展）
+3. **向量模型扩展**：支持统一 EmbeddingService（bge-m3、qwen3-embedding-8b）用于语义分块，qwen3-vl-embedding-8b 用于多模态分块（未来扩展）
 4. **前端体验优化**：智能策略推荐、分块预览增强、效果对比功能
 
 ## User Scenarios & Testing *(mandatory)*
@@ -198,7 +198,7 @@
 
 **注意**: 以下需求为向量化**数据准备**，实际向量化操作在 003-vector-embedding 分支实现。
 
-- **FR-017**: 语义分块必须支持统一 EmbeddingService，可选模型包括：bge-m3（推荐，1024维，8K上下文，快速）、qwen3-embedding-8b（4096维，32K上下文，高精度）、hunyuan-embedding（1024维）
+- **FR-017**: 语义分块必须支持统一 EmbeddingService，可选模型包括：bge-m3（推荐，1024维，8K上下文，快速）、qwen3-embedding-8b（4096维，32K上下文，高精度）
 - **FR-017a**: 语义分块采用三级降级机制：1) 首选 EmbeddingService 2) TF-IDF 相似度 3) 句子累加
 - **FR-017b**: 分块结果必须包含支持后续向量化所需的数据结构（chunk_type、image_base64、table_markdown）
 - **FR-018**: 系统必须为不同类型分块保存向量化所需的完整数据：
@@ -210,7 +210,7 @@
 #### 前端交互优化
 
 - **FR-020**: 分块配置界面必须以卡片形式展示策略推荐，包含推荐策略、推荐理由、预估效果
-- **FR-020a**: 语义分块和混合分块配置界面必须提供 Embedding 模型选择器，支持 bge-m3、qwen3-embedding-8b、hunyuan-embedding，并显示各模型的维度、上下文长度、特点说明
+- **FR-020a**: 语义分块和混合分块配置界面必须提供 Embedding 模型选择器，支持 bge-m3、qwen3-embedding-8b，并显示各模型的维度、上下文长度、特点说明
 - **FR-021**: 分块结果展示必须支持树形视图（用于父子分块）和列表视图（用于普通分块）的切换
 - **FR-022**: 分块结果列表必须使用图标区分不同类型的分块（文本/表格/图片/代码）
 - **FR-023**: 前端必须支持实时参数预览，用户调整参数时即时更新预估结果
@@ -329,7 +329,7 @@
 语义分块采用三级降级策略确保稳定性：
 
 ```
-1. 首选: EmbeddingService（支持 bge-m3、qwen3-embedding-8b、hunyuan-embedding）
+1. 首选: EmbeddingService（支持 bge-m3、qwen3-embedding-8b）
    │
    ├─ 成功 → 使用 Embedding 向量计算句子间相似度
    │
@@ -353,7 +353,6 @@
 |------|------|------------|------|
 | bge-m3 | 1024 | 8K | 多语言、速度快（推荐） |
 | qwen3-embedding-8b | 4096 | 32K | 高精度、长上下文 |
-| hunyuan-embedding | 1024 | - | 腾讯混元 |
 
 #### ImageExtractor 统一图片提取模块
 

@@ -15,6 +15,10 @@ DEFAULT_VECTOR_PROVIDER = "milvus"
 DEFAULT_COLLECTION_NAME = os.getenv("DEFAULT_COLLECTION_NAME", "default_collection")
 DEFAULT_COLLECTION_DESCRIPTION = "默认知识库 Collection，用于存储所有文档的向量数据"
 
+# 默认知识库命名模板（按嵌入模型拆分）
+# 格式: default_kb_{模型名}，如 default_kb_qwen3_embedding_8b
+DEFAULT_KB_TEMPLATE = os.getenv("DEFAULT_KB_TEMPLATE", "default_kb_{model_name}")
+
 # 物理 Collection 命名模板（Dify 方案：按维度拆分物理 Collection）
 # 格式: {逻辑知识库名}_{dim}{维度数}，如 default_collection_dim1024
 PHYSICAL_COLLECTION_TEMPLATE = os.getenv("PHYSICAL_COLLECTION_TEMPLATE", "{collection_name}_dim{dimension}")
@@ -38,6 +42,24 @@ def get_physical_collection_name(logical_name: str, dimension: int) -> str:
         collection_name=logical_name,
         dimension=dimension
     )
+
+
+def get_default_collection_name_for_model(model_name: str) -> str:
+    """
+    根据嵌入模型名生成默认的逻辑 Collection 名称
+    
+    设计理念：一个知识库对应一种 Embedding 模型。
+    不同嵌入模型的文档自动归入不同的默认知识库，从根源杜绝语义空间冲突。
+    
+    Args:
+        model_name: 嵌入模型名称（如 qwen3-embedding-8b, bge-m3）
+        
+    Returns:
+        逻辑 Collection 名称（如 default_kb_qwen3_embedding_8b）
+    """
+    # 将模型名中的特殊字符替换为下划线，确保 Milvus Collection 命名合法
+    safe_model_name = model_name.replace("-", "_").replace(".", "_").lower()
+    return DEFAULT_KB_TEMPLATE.format(model_name=safe_model_name)
 
 
 def parse_physical_collection_name(physical_name: str) -> tuple:

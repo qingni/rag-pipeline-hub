@@ -38,12 +38,12 @@ class HybridSearchRequest(BaseModel):
     """混合检索请求"""
     query_text: str = Field(..., min_length=1, max_length=2000, description="查询文本")
     collection_ids: Optional[List[str]] = Field(default=None, max_length=5, description="目标 Collection ID 列表（最多5个）")
-    top_k: int = Field(default=10, ge=1, le=100, description="最终返回结果数量")
+    top_k: int = Field(default=10, ge=1, le=100, description="最多返回结果数量")
     threshold: float = Field(default=0.5, ge=0, le=1, description="相似度阈值")
     metric_type: MetricType = Field(default=MetricType.COSINE, description="相似度计算方法")
     search_mode: SearchMode = Field(default=SearchMode.AUTO, description="检索模式")
     reranker_top_n: int = Field(default=20, ge=10, le=100, description="Reranker 候选集大小")
-    reranker_top_k: Optional[int] = Field(default=None, ge=1, description="Reranker 最终返回数（默认使用 top_k）")
+    reranker_top_k: Optional[int] = Field(default=None, ge=1, description="Reranker 最大返回数（默认使用 top_k）")
     page: int = Field(default=1, ge=1, description="页码")
     page_size: int = Field(default=10, ge=1, le=100, description="每页数量")
 

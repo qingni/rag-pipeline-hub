@@ -20,7 +20,7 @@ from ..storage.database import Base
 # ============================================================================
 # 支持的模型列表 (统一定义，保持一致性)
 # ============================================================================
-SUPPORTED_TEXT_MODELS = ["bge-m3", "qwen3-embedding-8b", "hunyuan-embedding"]
+SUPPORTED_TEXT_MODELS = ["bge-m3", "qwen3-embedding-8b"]
 SUPPORTED_MULTIMODAL_MODELS = ["qwen3-vl-embedding-8b"]
 SUPPORTED_MODELS = SUPPORTED_TEXT_MODELS + SUPPORTED_MULTIMODAL_MODELS
 
@@ -179,7 +179,7 @@ class EmbeddingResult(Base):
             name='check_status_enum'
         ),
         CheckConstraint(
-            "model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'qwen3-vl-embedding-8b')",
+            "model IN ('bge-m3', 'qwen3-embedding-8b', 'qwen3-vl-embedding-8b')",
             name='check_model_enum'
         ),
         CheckConstraint(

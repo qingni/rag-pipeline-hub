@@ -45,7 +45,7 @@ export const useSearchStore = defineStore('search', () => {
     threshold: 0.5,
     metricType: 'cosine',
     rerankerTopN: 20,          // 🆕 Reranker 候选集大小
-    rerankerTopK: null,        // 🆕 Reranker 最终返回数（null 时使用 topK）
+    rerankerTopK: null,        // 🆕 Reranker 最大返回数（null 时使用 topK）
   })
   
   // 可用索引
@@ -112,6 +112,8 @@ export const useSearchStore = defineStore('search', () => {
         metric_type: config.value.metricType,
         search_mode: 'auto',
         reranker_top_n: config.value.rerankerTopN,
+        page: 1,
+        page_size: config.value.topK,  // 确保一次性返回所有 top_k 结果
       }
       
       if (config.value.rerankerTopK) {

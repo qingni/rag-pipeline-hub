@@ -324,7 +324,7 @@ class ChunkingParameterValidator:
         
         # Embedding model validation (支持的模型列表)
         embedding_model = params.get('embedding_model', 'bge-m3')
-        valid_embedding_models = ['bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding']
+        valid_embedding_models = ['bge-m3', 'qwen3-embedding-8b']
         if embedding_model not in valid_embedding_models:
             raise ValueError(f"embedding_model must be one of {valid_embedding_models}")
         

@@ -8,7 +8,7 @@ from .base_chunker import BaseChunker
 logger = logging.getLogger(__name__)
 
 # 支持的 Embedding 模型列表
-SUPPORTED_EMBEDDING_MODELS = ['bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding']
+SUPPORTED_EMBEDDING_MODELS = ['bge-m3', 'qwen3-embedding-8b']
 
 
 class SemanticChunker(BaseChunker):
@@ -16,14 +16,13 @@ class SemanticChunker(BaseChunker):
     Chunker that splits text by semantic similarity.
     
     Strategy:
-    1. Primary: Use unified EmbeddingService (bge-m3 / qwen3-embedding-8b / hunyuan-embedding)
+    1. Primary: Use unified EmbeddingService (bge-m3 / qwen3-embedding-8b)
     2. Fallback 1: TF-IDF similarity (no external API)
     3. Fallback 2: Sentence accumulation (simple)
     
     Supported embedding models:
     - bge-m3: 1024维，8K上下文，多语言，速度快（推荐）
     - qwen3-embedding-8b: 4096维，32K上下文，高精度
-    - hunyuan-embedding: 1024维，腾讯混元
     """
     
     def __init__(self, **params):
@@ -32,7 +31,7 @@ class SemanticChunker(BaseChunker):
         
         Supported params:
         - embedding_model: Model name (default: 'bge-m3')
-            Options: 'bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding'
+            Options: 'bge-m3', 'qwen3-embedding-8b'
         - use_embedding: Enable/disable embedding (default: True)
         - similarity_threshold: Merge threshold for TF-IDF fallback (default: 0.3)
         - embedding_similarity_threshold: Merge threshold for embedding (default: 0.7)
@@ -74,7 +73,7 @@ class SemanticChunker(BaseChunker):
         Initialize unified EmbeddingService.
         
         Uses the same EmbeddingService as document vectorization,
-        supporting bge-m3, qwen3-embedding-8b, hunyuan-embedding.
+        supporting bge-m3, qwen3-embedding-8b.
         
         Returns:
             True if successful, False otherwise

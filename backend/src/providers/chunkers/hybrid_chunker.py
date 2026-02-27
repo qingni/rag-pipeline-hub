@@ -17,7 +17,7 @@ from ...models.chunk_metadata import ChunkTypeEnum, create_chunk_metadata
 logger = logging.getLogger(__name__)
 
 # 支持的 Embedding 模型列表（与 SemanticChunker 保持一致）
-SUPPORTED_EMBEDDING_MODELS = ['bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding']
+SUPPORTED_EMBEDDING_MODELS = ['bge-m3', 'qwen3-embedding-8b']
 
 
 class HybridChunker(BaseChunker):
@@ -33,7 +33,6 @@ class HybridChunker(BaseChunker):
     语义分块时支持的 Embedding 模型：
     - bge-m3: 1024维，8K上下文，多语言，速度快（推荐）
     - qwen3-embedding-8b: 4096维，32K上下文，高精度
-    - hunyuan-embedding: 1024维，腾讯混元
     
     图片提取使用统一的 ImageExtractor，确保所有分块策略的图片处理保持一致。
     """
