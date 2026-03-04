@@ -60,6 +60,11 @@ Thumbs.db
 .codebuddy/*
 !.codebuddy/commands/
 
+# Cursor - 忽略除 commands 和 rules 外的所有内容
+.cursor/*
+!.cursor/commands/
+!.cursor/rules/
+
 # Logs
 logs/
 *.log
