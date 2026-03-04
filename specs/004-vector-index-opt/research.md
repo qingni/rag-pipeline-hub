@@ -404,25 +404,25 @@ def hybrid_search(collection, dense_vector, sparse_vector, top_n=20):
 
 ---
 
-## Research Task 10: bge-reranker-v2-m3 精排集成
+## Research Task 10: Reranker 精排集成
 
 ### Decision
-使用 FlagEmbedding 库加载 `bge-reranker-v2-m3` 模型，对 RRF 粗排后的候选集进行精排重排序。
+通过远程 API 服务（OpenAI-compatible `/rerank` 端点）调用 qwen3-reranker-4b 模型，对 RRF 粗排后的候选集进行精排重排序。
 
 ### Rationale
-1. bge-reranker-v2-m3 是 BAAI 发布的多语言 Reranker 模型，中英文效果优秀
-2. FlagEmbedding 库是官方推荐的 Python 集成方式
-3. 支持 batch 推理，20 条候选集精排延迟可控（< 100ms on CPU）
-4. 与 BGE-M3 Embedding 模型同系列，兼容性好
+1. qwen3-reranker-4b 是阿里云发布的多语言 Reranker 模型，支持 100+ 语言，32K 序列长度
+2. 通过远程 API 调用，无需本地加载模型，资源开销小
+3. 20 条候选集精排延迟可控（< 100ms）
+4. 与 OpenAI-compatible API 兼容，集成简单
 
 ### Implementation
 ```python
-from FlagEmbedding import FlagReranker
+from openai import OpenAI
 
 class RerankerService:
-    """bge-reranker-v2-m3 精排服务"""
+    """qwen3-reranker-4b 精排服务（远程 API）"""
     
-    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3"):
+    def __init__(self, model_name: str = "qwen3-reranker-4b"):
         self.reranker = FlagReranker(model_name, use_fp16=True)
     
     def rerank(
@@ -466,9 +466,10 @@ class RerankerService:
 ### Configuration
 ```python
 # .env 配置
-RERANKER_MODEL=BAAI/bge-reranker-v2-m3
-RERANKER_USE_FP16=true
-RERANKER_BATCH_SIZE=32
+RERANKER_MODEL=qwen3-reranker-4b
+RERANKER_API_KEY=your_api_key
+RERANKER_API_BASE_URL=http://your-reranker-api-server/api/llmproxy
+RERANKER_TIMEOUT=30
 RERANKER_TOP_N=20  # 粗排候选集大小
 ```
 
@@ -770,7 +771,7 @@ class RecommendationEngine:
 | Dependency | Version | Purpose |
 |------------|---------|---------|
 | pymilvus | 2.4.9 | Milvus Python SDK（支持 hybrid_search） |
-| FlagEmbedding | >=1.2.0 | bge-reranker-v2-m3 精排模型加载 |
+| FlagEmbedding | >=1.2.0 | ~~bge-reranker-v2-m3 精排模型加载~~（已替换为远程 API 调用 qwen3-reranker-4b） |
 | FastAPI | >=0.110.0 | Web 框架 |
 | Pydantic | 2.7.4 | 数据验证 |
 | SQLAlchemy | 2.0.23 | 元数据 ORM |
@@ -792,7 +793,7 @@ class RecommendationEngine:
 7. ✅ 并发控制：Milvus 原生 + 异步 I/O
 8. ✅ 多向量字段 Schema：同一 Collection 中稠密+稀疏向量字段共存
 9. ✅ RRF 粗排融合：Milvus hybrid_search + RRFRanker(k=60)
-10. ✅ Reranker 精排：bge-reranker-v2-m3 + FlagEmbedding
+10. ✅ Reranker 精排：qwen3-reranker-4b + 远程 API
 11. ✅ 稀疏向量降级：自动降级到纯稠密检索 + Reranker
 12. ✅ 稀疏索引：SPARSE_INVERTED_INDEX + IP + drop_ratio_build=0.2
 13. ✅ 智能推荐引擎：分层规则匹配（数据量→维度→模型），JSON 配置表，兜底 HNSW+COSINE

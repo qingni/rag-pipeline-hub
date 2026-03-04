@@ -354,7 +354,7 @@ components:
           description: 是否使用 Embedding 进行语义分块
         embedding_model:
           type: string
-          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding]
+          enum: [bge-m3, qwen3-embedding-8b]
           default: bge-m3
           description: 语义分块使用的 Embedding 模型
         # Parent-Child

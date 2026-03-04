@@ -415,26 +415,30 @@ async def get_documents_with_chunking(
     from ..models.chunking_result import ChunkingResult, ResultStatus
     from ..models.chunking_task import ChunkingTask
     from ..models.document import Document
-    from sqlalchemy import func, distinct, cast, String
+    from sqlalchemy import func, distinct, cast, String, desc
     
     try:
-        # 查询有已完成分块结果的文档
-        # 注意：数据库中存储的是枚举名称（大写），使用 cast 转换后比较
+        # 查询有已完成分块结果的文档，并取每个文档的最新分块时间
         subquery = db.query(
-            distinct(ChunkingTask.source_document_id).label('document_id')
+            ChunkingTask.source_document_id.label('document_id'),
+            func.max(ChunkingResult.created_at).label('latest_chunking_time')
         ).join(
             ChunkingResult,
             ChunkingTask.task_id == ChunkingResult.task_id
         ).filter(
             cast(ChunkingResult.status, String) == "COMPLETED"
+        ).group_by(
+            ChunkingTask.source_document_id
         ).subquery()
         
         # 获取总数
         total = db.query(func.count()).select_from(subquery).scalar() or 0
         
-        # 分页查询文档
+        # 分页查询文档，按最新分块时间倒序排列（最近分块的文档排在前面）
         offset = (page - 1) * page_size
-        document_ids = db.query(subquery.c.document_id).offset(offset).limit(page_size).all()
+        document_ids = db.query(subquery.c.document_id).order_by(
+            desc(subquery.c.latest_chunking_time)
+        ).offset(offset).limit(page_size).all()
         document_ids = [d[0] for d in document_ids]
         
         # 获取文档详情
@@ -453,16 +457,19 @@ async def get_documents_with_chunking(
                 ).order_by(ChunkingResult.created_at.desc()).first()
                 
                 # Document 模型字段: id, filename, format, size_bytes, upload_time
+                # 使用最近一次分块完成时间作为显示时间，方便用户识别最新分块的文档
+                chunking_time = latest_chunking.created_at.isoformat() if latest_chunking and latest_chunking.created_at else None
                 documents.append({
                     "document_id": doc.id,
                     "filename": doc.filename,
                     "file_type": doc.format,
                     "file_size": doc.size_bytes,
-                    "created_at": doc.upload_time.isoformat() if doc.upload_time else None,
+                    "created_at": chunking_time or (doc.upload_time.isoformat() if doc.upload_time else None),
+                    "upload_time": doc.upload_time.isoformat() if doc.upload_time else None,
                     "chunking_result": {
                         "result_id": latest_chunking.result_id if latest_chunking else None,
                         "total_chunks": latest_chunking.total_chunks if latest_chunking else 0,
-                        "created_at": latest_chunking.created_at.isoformat() if latest_chunking and latest_chunking.created_at else None,
+                        "created_at": chunking_time,
                     } if latest_chunking else None
                 })
         
@@ -722,6 +729,7 @@ async def embed_from_chunking_result(
                 processing_time_ms=item.processing_time_ms,
                 source_text=item.source_text,  # Include source text
                 chunk_type=getattr(item, 'chunk_type', 'text'),  # Include chunk type
+                chunk_metadata=getattr(item, 'chunk_metadata', None),  # Include structured chunk metadata
             )
             for item in result.vectors
         ]
@@ -923,6 +931,7 @@ async def embed_from_document(
                 processing_time_ms=item.processing_time_ms,
                 source_text=item.source_text,  # Include source text
                 chunk_type=getattr(item, 'chunk_type', 'text'),  # Include chunk type
+                chunk_metadata=getattr(item, 'chunk_metadata', None),  # Include structured chunk metadata
             )
             for item in result.vectors
         ]

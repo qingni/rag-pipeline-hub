@@ -472,8 +472,7 @@ const tableStrategyOptions = [
 // Embedding model options (unified with document vectorization)
 const embeddingModelOptions = [
   { label: 'BGE-M3（推荐，1024维，8K上下文，快速）', value: 'bge-m3' },
-  { label: 'Qwen3-Embedding-8B（4096维，32K上下文，高精度）', value: 'qwen3-embedding-8b' },
-  { label: '混元 Embedding（1024维）', value: 'hunyuan-embedding' }
+  { label: 'Qwen3-Embedding-8B（4096维，32K上下文，高精度）', value: 'qwen3-embedding-8b' }
 ]
 
 // ========== 智能正文策略推荐 ==========
@@ -511,8 +510,7 @@ const applyRecommendedTextStrategy = () => {
 const getEmbeddingModelTips = (model) => {
   const tips = {
     'bge-m3': '多语言支持，速度快，适合大多数场景。推荐阈值: 0.55',
-    'qwen3-embedding-8b': '超长文本支持（32K），高维向量（4096维），适合高精度场景。推荐阈值: 0.45',
-    'hunyuan-embedding': '腾讯混元提供的 Embedding 模型。推荐阈值: 0.55'
+    'qwen3-embedding-8b': '超长文本支持（32K），高维向量（4096维），适合高精度场景。推荐阈值: 0.45'
   }
   return tips[model] || '选择 Embedding 模型'
 }
@@ -521,8 +519,7 @@ const getEmbeddingModelTips = (model) => {
 const getEmbeddingModelDefaults = (model) => {
   const defaults = {
     'bge-m3': { similarity_threshold: 0.55, min_chunk_size: 200, max_chunk_size: 1000 },
-    'qwen3-embedding-8b': { similarity_threshold: 0.45, min_chunk_size: 300, max_chunk_size: 1500 },
-    'hunyuan-embedding': { similarity_threshold: 0.55, min_chunk_size: 200, max_chunk_size: 1000 }
+    'qwen3-embedding-8b': { similarity_threshold: 0.45, min_chunk_size: 300, max_chunk_size: 1500 }
   }
   return defaults[model] || defaults['bge-m3']
 }

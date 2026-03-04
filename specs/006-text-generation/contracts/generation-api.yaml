@@ -242,8 +242,8 @@ components:
           description: 用户问题
         model:
           type: string
-          default: deepseek-v3
-          enum: [deepseek-v3, deepseek-r1, kimi-k2-instruct]
+          default: deepseek-v3.2
+          enum: [deepseek-v3.2, deepseek-v3.1]
           description: 生成模型
         temperature:
           type: number

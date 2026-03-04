@@ -126,7 +126,7 @@ paths:
         执行混合检索流程：
         1. 稠密向量 + 稀疏向量双路 ANN 召回
         2. Milvus RRFRanker 粗排融合（Top-N 候选集）
-        3. bge-reranker-v2-m3 精排重排序（Top-K 最终结果）
+        3. qwen3-reranker-4b 精排重排序（Top-K 最终结果）
         
         降级策略：当稀疏向量为空或不可用时，自动降级到纯稠密检索 + Reranker。
       operationId: hybridSearch

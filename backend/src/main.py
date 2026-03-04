@@ -21,6 +21,14 @@ async def lifespan(app: FastAPI):
     from .storage.database import init_db, SessionLocal
     from .utils.init_strategies import init_default_strategies
     
+    # [诊断] 强制重置 RerankerService 单例，确保使用最新代码
+    try:
+        from .services.reranker_service import RerankerService
+        RerankerService.reset_instance()
+        print("[诊断] RerankerService 单例已重置")
+    except Exception as e:
+        print(f"[诊断] RerankerService 重置失败: {e}")
+    
     # Import all models to ensure they are registered with SQLAlchemy
     from .models import document, processing_result, chunk, chunking_result
     from .models import chunking_strategy, chunking_task, embedding_models

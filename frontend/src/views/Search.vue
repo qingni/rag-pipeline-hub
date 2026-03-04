@@ -1,10 +1,14 @@
 <template>
   <div class="flex flex-1">
-    <ControlPanel title="搜索配置" description="配置搜索参数">
+    <ControlPanel title="搜索配置">
       <SearchConfig
         :config="searchStore.config"
         :available-indexes="searchStore.availableIndexes"
+        :available-collections="searchStore.availableCollections"
         :is-loading-indexes="searchStore.isLoadingIndexes"
+        :is-loading-collections="searchStore.isLoadingCollections"
+        :search-mode="searchStore.searchMode"
+        :reranker-health="searchStore.rerankerHealth"
         @update:config="searchStore.updateConfig"
         @reset="searchStore.resetConfig"
       />
@@ -35,6 +39,9 @@
             :total-count="searchStore.totalCount"
             :execution-time="searchStore.executionTimeMs"
             :is-loading="searchStore.isSearching"
+            :search-mode="searchStore.searchMode"
+            :reranker-available="searchStore.rerankerAvailable"
+            :timing="searchStore.searchTiming"
           />
         </t-tab-panel>
         
@@ -55,7 +62,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import ControlPanel from '../components/layout/ControlPanel.vue'
 import ContentArea from '../components/layout/ContentArea.vue'
 import SearchInput from '../components/Search/SearchInput.vue'
@@ -67,18 +74,52 @@ import { useSearchStore } from '../stores/searchStore'
 const searchStore = useSearchStore()
 const activeTab = ref('results')
 
-// 页面加载时获取可用索引和历史记录
+// 搜索防抖（300ms）
+let searchDebounceTimer = null
+const SEARCH_DEBOUNCE_MS = 300
+const SEARCH_TIMEOUT_MS = 30000  // 30 秒超时
+
+// 页面加载时获取可用索引、Collection 列表、Reranker 健康状态和历史记录
 onMounted(async () => {
   await Promise.all([
     searchStore.loadAvailableIndexes(),
+    searchStore.loadAvailableCollections(),
+    searchStore.loadRerankerHealth(),
     searchStore.loadHistory()
   ])
 })
 
-// 执行搜索
+onUnmounted(() => {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+})
+
+// 执行搜索（含防抖 + 超时保护）
 async function handleSearch() {
-  await searchStore.search()
-  activeTab.value = 'results'
+  // 清除上次防抖定时器
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+  
+  searchDebounceTimer = setTimeout(async () => {
+    // 超时保护：Promise.race
+    const searchPromise = searchStore.search()
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('搜索超时，请稍后重试')), SEARCH_TIMEOUT_MS)
+    })
+    
+    try {
+      await Promise.race([searchPromise, timeoutPromise])
+    } catch (error) {
+      if (error.message === '搜索超时，请稍后重试') {
+        searchStore.searchError = error.message
+        searchStore.isSearching = false
+      }
+    }
+    
+    activeTab.value = 'results'
+  }, SEARCH_DEBOUNCE_MS)
 }
 
 // 清空搜索

@@ -419,7 +419,6 @@ curl -X DELETE http://localhost:8000/api/embedding/cache
 |------|------|--------|------|
 | bge-m3 | 1024 | ❌ | 多语言，速度快（推荐默认） |
 | qwen3-embedding-8b | 4096 | ❌ | 高精度，长上下文 |
-| hunyuan-embedding | 1024 | ❌ | 腾讯混元 |
 | qwen3-vl-embedding-8b | 4096 | ✅ | 图文多模态 |
 
 ### 环境变量

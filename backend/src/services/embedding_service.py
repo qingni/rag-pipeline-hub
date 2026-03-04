@@ -54,17 +54,6 @@ TEXT_EMBEDDING_MODELS: Dict[str, Dict[str, object]] = {
         "max_batch_size": 1000,
         "model_type": "text",
     },
-    "hunyuan-embedding": {
-        "name": "hunyuan-embedding",
-        "dimension": 1024,
-        "max_sequence_length": 1024,
-        "description": "腾讯混元提供的 Embedding 模型",
-        "provider": "hunyuan",
-        "supports_multilingual": True,
-        "supports_instruction": False,
-        "max_batch_size": 1000,
-        "model_type": "text",
-    },
 }
 
 # ============================================================================
@@ -124,6 +113,7 @@ class DocumentVectorResult:
     processing_time_ms: float
     source_text: str  # Add original source text
     chunk_type: str = "text"  # 分块类型: text, table, image, code
+    chunk_metadata: Optional[Dict[str, Any]] = None  # chunker 提取的结构化 metadata（heading_path, section_title 等）
 
 
 @dataclass
@@ -160,7 +150,6 @@ class EmbeddingService:
         model: Literal[
             "bge-m3",
             "qwen3-embedding-8b",
-            "hunyuan-embedding",
             "qwen3-vl-embedding-8b",
         ] = "qwen3-embedding-8b",
         base_url: str = "",  # 必须通过参数传入，不提供默认值
@@ -284,7 +273,8 @@ class EmbeddingService:
 
     def embed_documents(
         self, texts: Sequence[str], request_id: Optional[str] = None,
-        chunk_types: Optional[List[str]] = None
+        chunk_types: Optional[List[str]] = None,
+        chunk_metadata_list: Optional[List[Optional[Dict[str, Any]]]] = None
     ) -> BatchEmbeddingResult:
         """Vectorize multiple texts with true batch API call for better performance.
         
@@ -319,11 +309,15 @@ class EmbeddingService:
         # 如果没有传入chunk_types，默认全部为text
         if chunk_types is None:
             chunk_types = ["text"] * len(texts)
+        # 如果没有传入chunk_metadata_list，默认全部为None
+        if chunk_metadata_list is None:
+            chunk_metadata_list = [None] * len(texts)
 
         # 第一步：验证所有文本，分离有效和无效文本
         validated_texts: List[str] = []
         valid_indices: List[int] = []  # 记录有效文本的原始索引
         valid_chunk_types: List[str] = []  # 记录有效文本对应的chunk_type
+        valid_chunk_metadata: List[Optional[Dict[str, Any]]] = []  # 记录有效文本对应的chunk_metadata
         
         for index, raw_text in enumerate(texts):
             try:
@@ -331,6 +325,7 @@ class EmbeddingService:
                 validated_texts.append(validated_text)
                 valid_indices.append(index)
                 valid_chunk_types.append(chunk_types[index] if index < len(chunk_types) else "text")
+                valid_chunk_metadata.append(chunk_metadata_list[index] if index < len(chunk_metadata_list) else None)
             except InvalidTextError as err:
                 failures.append(
                     self._build_failure(
@@ -377,6 +372,7 @@ class EmbeddingService:
                 for i, (vector, original_index) in enumerate(zip(all_vectors, valid_indices)):
                     validated_text = validated_texts[i]
                     current_chunk_type = valid_chunk_types[i] if i < len(valid_chunk_types) else "text"
+                    current_chunk_metadata = valid_chunk_metadata[i] if i < len(valid_chunk_metadata) else None
                     try:
                         vector = self._validate_vector_dimensions(vector, batch_request_id)
                         vectors.append(
@@ -388,6 +384,7 @@ class EmbeddingService:
                                 processing_time_ms=avg_duration_per_doc,
                                 source_text=validated_text,
                                 chunk_type=current_chunk_type,
+                                chunk_metadata=current_chunk_metadata,
                             )
                         )
                     except VectorDimensionMismatchError as err:
@@ -1368,6 +1365,7 @@ class EmbeddingService:
         # 文本模型：使用普通的批量嵌入
         embedding_inputs = []
         chunk_types_list = []  # 收集每个chunk的类型
+        chunk_metadata_list = []  # 收集每个chunk的结构化metadata（heading_path, section_title等）
         for chunk in chunks:
             text_content, chunk_type, _, _ = self._prepare_chunk_for_embedding(
                 chunk, is_multimodal=False
@@ -1375,8 +1373,25 @@ class EmbeddingService:
             # 文本模型：所有块都使用文本内容
             embedding_inputs.append(text_content)
             chunk_types_list.append(chunk_type or "text")
+            # 收集 chunk 的结构化 metadata（来自 chunker 的 heading_path、section_title 等）
+            raw_metadata = chunk.chunk_metadata if hasattr(chunk, 'chunk_metadata') else None
+            if isinstance(raw_metadata, dict):
+                # 只保留对检索有价值的结构化字段，过滤掉位置等冗余信息
+                chunk_metadata_list.append({
+                    k: v for k, v in raw_metadata.items()
+                    if k in ('heading_path', 'heading_text', 'section_title', 'parent_heading',
+                             'heading_level', 'chunk_index', 'chunk_type',
+                             'context_before', 'context_after')
+                    and v is not None
+                })
+            else:
+                chunk_metadata_list.append(None)
         
-        return self.embed_documents(embedding_inputs, request_id=request_id, chunk_types=chunk_types_list)
+        return self.embed_documents(
+            embedding_inputs, request_id=request_id,
+            chunk_types=chunk_types_list,
+            chunk_metadata_list=chunk_metadata_list
+        )
 
     def embed_document_latest_chunks(
         self,
@@ -1440,6 +1455,7 @@ class EmbeddingService:
         # 文本模型：使用普通的批量嵌入
         embedding_inputs = []
         chunk_types_list = []  # 收集每个chunk的类型
+        chunk_metadata_list = []  # 收集每个chunk的结构化metadata
         for chunk in chunks:
             text_content, chunk_type, _, _ = self._prepare_chunk_for_embedding(
                 chunk, is_multimodal=False
@@ -1447,8 +1463,24 @@ class EmbeddingService:
             # 文本模型：所有块都使用文本内容
             embedding_inputs.append(text_content)
             chunk_types_list.append(chunk_type or "text")
+            # 收集 chunk 的结构化 metadata
+            raw_metadata = chunk.chunk_metadata if hasattr(chunk, 'chunk_metadata') else None
+            if isinstance(raw_metadata, dict):
+                chunk_metadata_list.append({
+                    k: v for k, v in raw_metadata.items()
+                    if k in ('heading_path', 'heading_text', 'section_title', 'parent_heading',
+                             'heading_level', 'chunk_index', 'chunk_type',
+                             'context_before', 'context_after')
+                    and v is not None
+                })
+            else:
+                chunk_metadata_list.append(None)
         
-        return self.embed_documents(embedding_inputs, request_id=request_id, chunk_types=chunk_types_list)
+        return self.embed_documents(
+            embedding_inputs, request_id=request_id,
+            chunk_types=chunk_types_list,
+            chunk_metadata_list=chunk_metadata_list
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke test

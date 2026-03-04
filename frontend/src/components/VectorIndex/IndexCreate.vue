@@ -210,7 +210,7 @@
           <t-form-item label="目标Collection" name="collection_name">
             <t-select
               v-model="embeddingFormData.collection_name"
-              placeholder="默认 Collection（留空使用 default_collection）"
+              placeholder="留空将根据嵌入模型自动创建对应知识库"
               :loading="loadingCollections"
               clearable
               filterable
@@ -229,12 +229,12 @@
                     <t-tag v-if="coll.is_default" size="small" theme="primary" variant="light" style="margin-left: 4px">默认</t-tag>
                   </div>
                   <div class="option-desc">
-                    {{ coll.document_count }} 个文档 · {{ coll.total_vectors }} 个向量
+                    {{ coll.embedding_model || '未知模型' }} · {{ coll.document_count }} 个文档 · {{ coll.total_vectors }} 个向量
                   </div>
                 </div>
               </t-option>
             </t-select>
-            <div class="form-tip">选择向量写入的目标 Collection（知识库）。留空使用默认 Collection，也可输入新名称创建。</div>
+            <div class="form-tip">选择向量写入的目标知识库。留空将根据向量化任务的嵌入模型自动创建对应知识库，也可手动输入新名称创建。一个知识库对应一种嵌入模型。</div>
           </t-form-item>
 
           <t-form-item label="索引名称" name="name">

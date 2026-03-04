@@ -2,12 +2,16 @@
  * 搜索查询 Pinia Store
  * 
  * 管理搜索状态、配置、结果和历史记录
+ * 支持混合检索（hybrid）和纯稠密检索（dense_only）
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import {
   executeSearch as apiExecuteSearch,
+  executeHybridSearch as apiExecuteHybridSearch,
   getAvailableIndexes as apiGetAvailableIndexes,
+  getAvailableCollections as apiGetAvailableCollections,
+  getRerankerHealth as apiGetRerankerHealth,
   getSearchHistory as apiGetSearchHistory,
   deleteSearchHistory as apiDeleteSearchHistory,
   clearSearchHistory as apiClearSearchHistory
@@ -27,17 +31,33 @@ export const useSearchStore = defineStore('search', () => {
   const executionTimeMs = ref(0)
   const queryId = ref(null)
   
+  // 🆕 混合检索结果元数据
+  const searchMode = ref('auto')        // 实际使用的检索模式
+  const rerankerAvailable = ref(false)   // Reranker 是否可用
+  const rrfK = ref(null)                 // RRF k 值
+  const searchTiming = ref(null)         // 各阶段耗时明细
+  
   // 搜索配置
   const config = ref({
     selectedIndexIds: [],
+    selectedCollectionIds: [],  // 🆕 Collection 选择
     topK: 10,
     threshold: 0.5,
-    metricType: 'cosine'
+    metricType: 'cosine',
+    rerankerTopN: 20,          // 🆕 Reranker 候选集大小
+    rerankerTopK: null,        // 🆕 Reranker 最大返回数（null 时使用 topK）
   })
   
   // 可用索引
   const availableIndexes = ref([])
   const isLoadingIndexes = ref(false)
+  
+  // 🆕 可用 Collection（含 has_sparse 标识）
+  const availableCollections = ref([])
+  const isLoadingCollections = ref(false)
+  
+  // 🆕 Reranker 健康状态
+  const rerankerHealth = ref(null)
   
   // 搜索历史
   const history = ref([])
@@ -56,10 +76,23 @@ export const useSearchStore = defineStore('search', () => {
       .join(', ')
   })
   
-  // ==================== 搜索操作 (US1) ====================
+  // 🆕 是否混合检索模式
+  const isHybridMode = computed(() => searchMode.value === 'hybrid')
+  
+  // 🆕 当前检索模式标签
+  const searchModeLabel = computed(() => {
+    const modeMap = {
+      hybrid: '混合检索',
+      dense_only: '纯稠密检索',
+      auto: '自动检测'
+    }
+    return modeMap[searchMode.value] || searchMode.value
+  })
+  
+  // ==================== 搜索操作 (US1 + US2) ====================
   
   /**
-   * 执行搜索
+   * 执行搜索（自动选择纯稠密或混合检索）
    */
   async function search() {
     if (!queryText.value.trim()) {
@@ -71,29 +104,47 @@ export const useSearchStore = defineStore('search', () => {
     searchError.value = null
     
     try {
+      // 使用混合检索端点（支持自动降级）
       const params = {
         query_text: queryText.value.trim(),
         top_k: config.value.topK,
         threshold: config.value.threshold,
-        metric_type: config.value.metricType
+        metric_type: config.value.metricType,
+        search_mode: 'auto',
+        reranker_top_n: config.value.rerankerTopN,
+        page: 1,
+        page_size: config.value.topK,  // 确保一次性返回所有 top_k 结果
       }
       
-      if (config.value.selectedIndexIds.length > 0) {
-        params.index_ids = config.value.selectedIndexIds
+      if (config.value.rerankerTopK) {
+        params.reranker_top_k = config.value.rerankerTopK
       }
       
-      const response = await apiExecuteSearch(params)
+      // 优先使用 Collection IDs
+      if (config.value.selectedCollectionIds.length > 0) {
+        params.collection_ids = config.value.selectedCollectionIds
+      } else if (config.value.selectedIndexIds.length > 0) {
+        params.collection_ids = config.value.selectedIndexIds
+      }
+      
+      const response = await apiExecuteHybridSearch(params)
       
       if (response.success && response.data) {
         results.value = response.data.results || []
         totalCount.value = response.data.total_count || 0
         executionTimeMs.value = response.data.execution_time_ms || 0
         queryId.value = response.data.query_id
+        
+        // 🆕 混合检索元数据
+        searchMode.value = response.data.search_mode || 'dense_only'
+        rerankerAvailable.value = response.data.reranker_available || false
+        rrfK.value = response.data.rrf_k || null
+        searchTiming.value = response.data.timing || null
       } else {
         throw new Error(response.error?.message || '搜索失败')
       }
     } catch (error) {
-      searchError.value = error.message || '搜索请求失败'
+      searchError.value = error.response?.data?.detail?.error?.message || error.message || '搜索请求失败'
       results.value = []
       totalCount.value = 0
     } finally {
@@ -110,9 +161,13 @@ export const useSearchStore = defineStore('search', () => {
     executionTimeMs.value = 0
     queryId.value = null
     searchError.value = null
+    searchMode.value = 'auto'
+    rerankerAvailable.value = false
+    rrfK.value = null
+    searchTiming.value = null
   }
   
-  // ==================== 配置操作 (US3) ====================
+  // ==================== 配置操作 ====================
   
   /**
    * 加载可用索引列表
@@ -134,6 +189,40 @@ export const useSearchStore = defineStore('search', () => {
   }
   
   /**
+   * 🆕 加载可用 Collection 列表（含 has_sparse 标识）
+   */
+  async function loadAvailableCollections() {
+    isLoadingCollections.value = true
+    
+    try {
+      const response = await apiGetAvailableCollections()
+      
+      if (response.success) {
+        availableCollections.value = response.data || []
+      }
+    } catch (error) {
+      console.error('Failed to load collections:', error)
+    } finally {
+      isLoadingCollections.value = false
+    }
+  }
+  
+  /**
+   * 🆕 加载 Reranker 健康状态
+   */
+  async function loadRerankerHealth() {
+    try {
+      const response = await apiGetRerankerHealth()
+      if (response.success) {
+        rerankerHealth.value = response.data || null
+      }
+    } catch (error) {
+      console.error('Failed to load reranker health:', error)
+      rerankerHealth.value = { available: false }
+    }
+  }
+  
+  /**
    * 更新搜索配置
    * @param {Object} newConfig - 新配置
    */
@@ -147,13 +236,17 @@ export const useSearchStore = defineStore('search', () => {
   function resetConfig() {
     config.value = {
       selectedIndexIds: [],
+      selectedCollectionIds: [],
       topK: 10,
       threshold: 0.5,
-      metricType: 'cosine'
+      metricType: 'cosine',
+      rerankerTopN: 20,
+      rerankerTopK: null,
     }
+    searchMode.value = 'auto'
   }
   
-  // ==================== 历史记录操作 (US4) ====================
+  // ==================== 历史记录操作 ====================
   
   /**
    * 加载搜索历史
@@ -215,11 +308,29 @@ export const useSearchStore = defineStore('search', () => {
    */
   function searchFromHistory(historyItem) {
     queryText.value = historyItem.query_text
+    // 历史记录中的 index_ids 是数据库主键（数字ID），不是 collection_name，
+    // 不能直接赋值给 selectedCollectionIds（期望的是 collection_name 字符串）。
+    // 尝试根据 index_ids 反查匹配的 collection name，如果匹配不上则清空选择（搜索所有）。
+    const matchedCollectionIds = []
+    if (historyItem.index_ids && historyItem.index_ids.length > 0 && availableCollections.value.length > 0) {
+      // 构建 collection name → id 映射
+      const validIds = new Set(availableCollections.value.map(c => c.id))
+      for (const id of historyItem.index_ids) {
+        const strId = String(id)
+        if (validIds.has(strId)) {
+          matchedCollectionIds.push(strId)
+        }
+      }
+    }
     config.value = {
-      selectedIndexIds: historyItem.index_ids || [],
+      ...config.value,
+      selectedIndexIds: matchedCollectionIds,
+      selectedCollectionIds: matchedCollectionIds,
       topK: historyItem.config?.top_k || 10,
       threshold: historyItem.config?.threshold || 0.5,
-      metricType: historyItem.config?.metric_type || 'cosine'
+      metricType: historyItem.config?.metric_type || 'cosine',
+      rerankerTopN: historyItem.config?.reranker_top_n || 20,
+      rerankerTopK: null,
     }
     search()
   }
@@ -236,19 +347,32 @@ export const useSearchStore = defineStore('search', () => {
     config,
     availableIndexes,
     isLoadingIndexes,
+    availableCollections,
+    isLoadingCollections,
+    rerankerHealth,
     history,
     historyTotal,
     isLoadingHistory,
+    
+    // 🆕 混合检索元数据
+    searchMode,
+    rerankerAvailable,
+    rrfK,
+    searchTiming,
     
     // 计算属性
     hasResults,
     hasHistory,
     selectedIndexNames,
+    isHybridMode,
+    searchModeLabel,
     
     // 方法
     search,
     clearResults,
     loadAvailableIndexes,
+    loadAvailableCollections,
+    loadRerankerHealth,
     updateConfig,
     resetConfig,
     loadHistory,

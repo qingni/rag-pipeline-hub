@@ -17,7 +17,7 @@ info:
 servers:
   - url: http://localhost:8000
     description: Local development server
-  - url: http://dev.fit-ai.woa.com
+  - url: http://dev.example.com
     description: Development environment
 
 tags:
@@ -302,7 +302,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
+            enum: [bge-m3, qwen3-embedding-8b, qwen3-vl-embedding-8b]
           description: Model identifier
       responses:
         '200':
@@ -320,7 +320,7 @@ paths:
               example:
                 error:
                   code: "MODEL_NOT_FOUND"
-                  message: "Model 'invalid-model' not found. Supported models: bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b"
+                  message: "Model 'invalid-model' not found. Supported models: bge-m3, qwen3-embedding-8b, qwen3-vl-embedding-8b"
 
   /embedding/health:
     get:
@@ -689,7 +689,7 @@ components:
 
     ModelName:
       type: string
-      enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
+      enum: [bge-m3, qwen3-embedding-8b, qwen3-vl-embedding-8b]
       description: Supported embedding model identifier
 
     ResponseStatus:

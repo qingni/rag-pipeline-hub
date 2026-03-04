@@ -25,7 +25,7 @@ class SearchHistory(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     query_text = Column(Text, nullable=False)
     index_ids = Column(JSON, nullable=False)  # JSON array of index IDs
-    config = Column(JSON, nullable=False)  # JSON object with top_k, threshold, metric_type
+    config = Column(JSON, nullable=False)  # JSON object: {top_k, threshold, metric_type, search_mode?, reranker_available?, rrf_k?, reranker_top_n?}
     result_count = Column(Integer, nullable=False, default=0)
     execution_time_ms = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=get_local_now)

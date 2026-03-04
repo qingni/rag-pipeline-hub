@@ -34,6 +34,7 @@ export const useChunkingStore = defineStore('chunking', {
     // Chunking task
     currentTask: null,
     taskPollingInterval: null,
+    isCreatingTask: false,
 
     // Chunking results
     currentResult: null,
@@ -91,7 +92,7 @@ export const useChunkingStore = defineStore('chunking', {
      * Check if chunking is in progress
      */
     isChunking: (state) => {
-      return state.currentTask && ['pending', 'processing'].includes(state.currentTask.status)
+      return state.isCreatingTask || (state.currentTask && ['pending', 'processing'].includes(state.currentTask.status))
     },
 
     /**
@@ -302,6 +303,7 @@ export const useChunkingStore = defineStore('chunking', {
         throw new Error('Please select document and strategy')
       }
 
+      this.isCreatingTask = true
       try {
         const response = await chunkingService.createChunkingTask(
           this.selectedDocument.id,
@@ -318,6 +320,8 @@ export const useChunkingStore = defineStore('chunking', {
       } catch (error) {
         console.error('Failed to create chunking task:', error)
         throw error
+      } finally {
+        this.isCreatingTask = false
       }
     },
 

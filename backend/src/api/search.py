@@ -17,7 +17,16 @@ from ..schemas.search import (
     HistoryListData,
     SuccessResponse,
     ErrorResponse,
-    ErrorDetail
+    ErrorDetail,
+    HybridSearchRequest,
+    HybridSearchResponse,
+    HybridSearchResponseData,
+    HybridSearchResultItem,
+    SearchTiming,
+    CollectionListResponse,
+    CollectionInfo,
+    RerankerHealthResponse,
+    RerankerHealthData,
 )
 from ..services.search_service import (
     SearchService,
@@ -28,6 +37,7 @@ from ..services.search_service import (
     EmbeddingServiceError,
     SearchTimeoutError
 )
+from ..config import settings
 
 router = APIRouter(prefix="/search", tags=["Search"])
 
@@ -127,6 +137,154 @@ async def execute_search(
                     "message": f"搜索失败: {str(e)}"
                 }
             }
+        )
+
+
+@router.post("/hybrid", response_model=HybridSearchResponse)
+async def execute_hybrid_search(
+    request: HybridSearchRequest,
+    service: SearchService = Depends(get_search_service)
+):
+    """
+    执行混合检索（稠密+稀疏双路召回 + RRF + Reranker）
+    
+    支持多 Collection 联合搜索（最多5个）、智能降级
+    """
+    try:
+        # T030: collection_ids 数量校验
+        if request.collection_ids and len(request.collection_ids) > settings.MAX_COLLECTIONS:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "MAX_COLLECTIONS_EXCEEDED",
+                        "message": f"联合搜索最多支持 {settings.MAX_COLLECTIONS} 个 Collection"
+                    }
+                }
+            )
+        
+        result = await service.hybrid_search(request)
+        
+        # 构造 Timing 对象
+        timing_data = result.get("timing")
+        timing = SearchTiming(**timing_data) if timing_data else None
+        
+        # 构造结果项
+        all_items = []
+        for item in result.get("results", []):
+            all_items.append(HybridSearchResultItem(**item))
+        
+        # T037: 分页截断
+        total_count = len(all_items)
+        page = getattr(request, 'page', 1) or 1
+        page_size = getattr(request, 'page_size', 10) or 10
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paged_items = all_items[start_idx:end_idx]
+        
+        response_data = HybridSearchResponseData(
+            query_id=result["query_id"],
+            query_text=result["query_text"],
+            search_mode=result["search_mode"],
+            reranker_available=result.get("reranker_available", False),
+            rrf_k=result.get("rrf_k"),
+            results=paged_items,
+            total_count=total_count,
+            execution_time_ms=result["execution_time_ms"],
+            timing=timing
+        )
+        
+        return HybridSearchResponse(success=True, data=response_data)
+        
+    except HTTPException:
+        raise
+    except EmptyQueryError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": {"code": "EMPTY_QUERY", "message": str(e)}}
+        )
+    except QueryTooLongError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": {"code": "QUERY_TOO_LONG", "message": str(e)}}
+        )
+    except IndexNotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail={"success": False, "error": {"code": "INDEX_NOT_FOUND", "message": str(e)}}
+        )
+    except EmbeddingServiceError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={"success": False, "error": {"code": "EMBEDDING_SERVICE_ERROR", "message": str(e)}}
+        )
+    except SearchTimeoutError as e:
+        raise HTTPException(
+            status_code=504,
+            detail={"success": False, "error": {"code": "SEARCH_TIMEOUT", "message": str(e)}}
+        )
+    except SearchServiceError as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error": {"code": "SEARCH_ERROR", "message": str(e)}}
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error": {"code": "INTERNAL_ERROR", "message": f"混合检索失败: {str(e)}"}}
+        )
+
+
+@router.get("/collections", response_model=CollectionListResponse)
+async def get_available_collections(
+    service: SearchService = Depends(get_search_service)
+):
+    """
+    获取可用 Collection 列表（含 has_sparse 标识）
+    """
+    try:
+        collections = service.get_available_collections()
+        collection_infos = [CollectionInfo(**c) for c in collections]
+        return CollectionListResponse(success=True, data=collection_infos)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error": {"code": "INTERNAL_ERROR", "message": f"获取 Collection 列表失败: {str(e)}"}}
+        )
+
+
+@router.get("/reranker/health", response_model=RerankerHealthResponse)
+async def get_reranker_health():
+    """
+    Reranker 健康检查
+    """
+    try:
+        from ..services.reranker_service import RerankerService
+        reranker = RerankerService.get_instance(
+            model_name=settings.RERANKER_MODEL,
+            api_key=settings.RERANKER_API_KEY,
+            api_base_url=settings.RERANKER_API_BASE_URL,
+            timeout=settings.RERANKER_TIMEOUT
+        )
+        # 确保先初始化 API 客户端（延迟初始化）
+        if not reranker.available:
+            reranker.init()
+        health = reranker.health_check()
+        return RerankerHealthResponse(
+            success=True,
+            data=RerankerHealthData(**health)
+        )
+    except Exception as e:
+        return RerankerHealthResponse(
+            success=True,
+            data=RerankerHealthData(
+                available=False,
+                model_name=settings.RERANKER_MODEL,
+                api_base_url=settings.RERANKER_API_BASE_URL,
+                api_connected=False,
+                supported_models=[]
+            )
         )
 
 

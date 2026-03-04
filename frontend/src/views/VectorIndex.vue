@@ -314,21 +314,32 @@
               <template #header>
                 <div class="card-header">
                   <span class="card-title">索引历史</span>
-                  <t-space size="small">
-                    <t-button variant="text" @click="loadIndexes">
-                      <template #icon><RefreshIcon :size="14" /></template>
-                      刷新
-                    </t-button>
+                  <div class="header-actions">
                     <t-popconfirm
                       content="确定要清空所有历史记录吗？此操作不可恢复。"
                       @confirm="handleClearAllHistory"
                     >
-                      <t-button variant="text" theme="danger" :disabled="!indexes.length">
+                      <t-button
+                        v-if="indexes.length > 0"
+                        theme="danger"
+                        variant="outline"
+                        size="small"
+                      >
                         <template #icon><TrashIcon :size="14" /></template>
-                        一键清空
+                        清空
                       </t-button>
                     </t-popconfirm>
-                  </t-space>
+                    <t-button
+                      theme="default"
+                      variant="outline"
+                      size="small"
+                      @click="loadIndexes"
+                      :loading="loadingIndexes"
+                    >
+                      <template #icon><RefreshIcon :size="14" /></template>
+                      刷新
+                    </t-button>
+                  </div>
                 </div>
               </template>
 
@@ -991,12 +1002,23 @@ onUnmounted(() => {
 .search-results-card,
 .history-card {
   background: var(--td-bg-color-container);
+
+  :deep(.t-card__header) {
+    width: 100%;
+  }
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 100%;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .card-title {

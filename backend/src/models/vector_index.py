@@ -293,7 +293,7 @@ class HybridSearchRequest(BaseModel):
         None, description="稀疏查询向量（格式：{index: weight}）"
     )
     top_n: int = Field(default=20, ge=5, le=100, description="粗排候选集大小")
-    top_k: int = Field(default=5, ge=1, le=50, description="最终返回结果数量")
+    top_k: int = Field(default=5, ge=1, le=50, description="最多返回结果数量")
     enable_reranker: bool = Field(default=True, description="是否启用 Reranker 精排")
     rrf_k: int = Field(default=60, description="RRF 排名平滑因子")
     search_params: Optional[Dict[str, Any]] = Field(None, description="搜索参数")

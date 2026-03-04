@@ -24,24 +24,17 @@ from ..schemas.generation import (
 # ============== Model Configuration ==============
 
 GENERATION_MODELS: Dict[str, Dict[str, Any]] = {
-    "deepseek-v3": {
-        "name": "deepseek-v3",
+    "deepseek-v3.2": {
+        "name": "deepseek-v3.2",
         "context_length": 128000,
-        "description": "DeepSeek V3 - 0324最新版本，稳定可靠",
+        "description": "DeepSeek V3.2 - 685B参数，【文本推荐】，工具使用和代理任务方面性能显著提高",
         "default_temperature": 0.7,
         "default_max_tokens": 4096,
     },
-    "deepseek-r1": {
-        "name": "deepseek-r1",
+    "deepseek-v3.1": {
+        "name": "deepseek-v3.1",
         "context_length": 128000,
-        "description": "DeepSeek R1 - 支持 Function Calling，128K超长上下文",
-        "default_temperature": 0.7,
-        "default_max_tokens": 4096,
-    },
-    "kimi-k2-instruct": {
-        "name": "kimi-k2-instruct",
-        "context_length": 128000,
-        "description": "Kimi K2 Instruct - 1TB参数，即插即用",
+        "description": "DeepSeek V3.1 - 671B参数，【文本推荐】，支持思考与非思考模式",
         "default_temperature": 0.7,
         "default_max_tokens": 4096,
     },

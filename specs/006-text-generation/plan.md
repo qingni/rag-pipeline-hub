@@ -9,7 +9,7 @@
 
 **核心功能**:
 - RAG 问答生成：将检索结果作为上下文，结合用户问题生成回答
-- 多模型支持：deepseek-v3、deepseek-r1、kimi-k2-instruct 三种模型
+- 多模型支持：deepseek-v3.2、deepseek-v3.1 两种模型
 - 流式输出：实时展示生成内容，提升用户体验
 - 参数配置：支持温度、最大输出长度等参数调整
 - 生成历史：保存生成记录，支持回顾和对比
@@ -38,7 +38,7 @@
 | Principle | Status | Evidence |
 |-----------|--------|----------|
 | **I. 模块化架构** | ✅ PASS | 独立 `generation_service.py`，与 SearchService 解耦 |
-| **II. 多提供商支持** | ✅ PASS | 支持 deepseek-v3、deepseek-r1、kimi-k2-instruct 三种模型 |
+| **II. 多提供商支持** | ✅ PASS | 支持 deepseek-v3.2、deepseek-v3.1 两种模型 |
 | **III. 结果持久化** | ✅ PASS | 生成历史存储在数据库，JSON 格式配置 |
 | **IV. 用户体验优先** | ✅ PASS | Vue3 + TDesign，流式输出，与现有模块一致的布局风格 |
 | **V. API标准化** | ✅ PASS | RESTful API + SSE，统一响应格式，OpenAPI 文档 |

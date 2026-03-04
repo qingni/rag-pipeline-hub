@@ -22,7 +22,7 @@
 ### Session 2026-02-06
 
 - Q: 稀疏向量的生成方式？ → A: ~~使用 BGE-M3 模型同时输出稠密向量和稀疏向量（一次推理，双路输出）~~ [Updated: 2026-02-25] 使用 BM25 算法独立生成稀疏向量（jieba 分词 + 自建词表），与嵌入模型 API 的稠密向量分离生成
-- Q: 混合检索的融合与排序策略？ → A: 两阶段方案——Milvus 原生 RRFRanker 做多路粗排融合 + bge-reranker-v2-m3 模型做精排重排序
+- Q: 混合检索的融合与排序策略？ → A: 两阶段方案——Milvus 原生 RRFRanker 做多路粗排融合 + qwen3-reranker-4b 模型做精排重排序
 - Q: 稀疏向量为空或质量低时的降级策略？ → A: 自动降级到纯稠密向量检索（跳过 RRF 融合），直接将稠密检索 Top-N 送入 Reranker 精排
 - Q: 稀疏向量索引类型选择？ → A: 使用 SPARSE_INVERTED_INDEX（Milvus 专用稀疏向量倒排索引），度量方式为 IP（内积）
 - Q: 稀疏向量生成的集成位置？ → A: ~~在现有 Embedding 模块中启用 BGE-M3 的稀疏向量输出（一次推理同时输出稠密和稀疏向量），Embedding 接口同时返回双路向量~~ [Updated: 2026-02-25] 在索引构建阶段（VectorIndexService.create_index_from_embedding）中由 BM25SparseService 独立生成稀疏向量，与嵌入模型 API 解耦
@@ -264,7 +264,7 @@
 
 - **FR-HYB-001**: 系统必须支持混合检索模式，同时使用稠密向量（FLOAT_VECTOR）和稀疏向量（SPARSE_FLOAT_VECTOR）进行双路召回
 - **FR-HYB-002**: 系统必须使用 Milvus 原生 RRFRanker（Reciprocal Rank Fusion）对稠密和稀疏两路检索结果进行粗排融合
-- **FR-HYB-003**: 系统必须集成 bge-reranker-v2-m3 模型，对 RRFRanker 融合后的候选集（Top-N）进行精排重排序，输出最终 Top-K 结果
+- **FR-HYB-003**: 系统必须集成 qwen3-reranker-4b 模型，对 RRFRanker 融合后的候选集（Top-N）进行精排重排序，输出最终 Top-K 结果
 - **FR-HYB-004**: 精排阶段的候选集大小（N）应可配置，默认为 20
 - **FR-HYB-005**: 当稀疏向量为空或不可用时，系统必须自动降级到纯稠密向量检索模式（跳过 RRF 融合），直接将稠密检索 Top-N 结果送入 Reranker 精排，确保检索服务不中断
 
@@ -280,7 +280,7 @@
 
 - **性能（稠密检索）**: 对于10000条向量的 Milvus 索引，单次纯稠密 TopK 查询响应时间应在100ms以内（P95）
 - **性能（混合检索）**: 混合检索 Top-K 查询（含 RRF 粗排 + Reranker 精排）总耗时应在200ms以内（P95）
-- **性能（Reranker 精排）**: bge-reranker-v2-m3 对 20 条候选集的精排推理耗时应在100ms以内（P95，CPU 环境）
+- **性能（Reranker 精排）**: qwen3-reranker-4b 对 20 条候选集的精排推理耗时应在100ms以内（P95）
 - **可扩展性**: Milvus 索引应支持从1000到100万级别的向量规模
 - **可靠性**: Milvus 原生支持数据持久化，数据不应因系统故障而丢失
 - **并发性**: 利用 Milvus 原生的并发控制，支持多读多写操作
@@ -301,7 +301,7 @@
 - **SC-007**: 系统在处理无效输入时100%返回明确的错误信息，不发生崩溃
 - **SC-008**: Milvus 连接失败时，系统能在3次重试内恢复或向用户提供明确的错误提示
 - **SC-009**: 混合检索 Top-K 查询（含 RRF 粗排 + Reranker 精排，候选集 N=20）的总响应时间在200ms以内（P95）
-- **SC-010**: bge-reranker-v2-m3 对 20 条候选集的精排推理耗时在100ms以内（P95，CPU 环境）
+- **SC-010**: qwen3-reranker-4b 对 20 条候选集的精排推理耗时在100ms以内（P95）
 - **SC-011**: 稀疏向量为空或 Reranker 不可用时，系统自动降级到纯稠密检索，降级响应时间不超过纯稠密检索的110%
 - **SC-012**: 智能推荐引擎的推荐采纳率 ≥ 80%（用户未手动修改推荐值的比例，统计周期为上线后首月）
 - **SC-013**: 智能推荐引擎从用户选择向量化任务到推荐值填充完成的延迟 ≤ 500ms（P95）
@@ -324,7 +324,7 @@
 - 依赖文档管理模块提供文档的元数据信息
 - **核心依赖**: Milvus 向量数据库（2.x 版本）及其 Python SDK（pymilvus）
 - 依赖 Milvus 服务的网络可达性和可用性
-- 依赖 bge-reranker-v2-m3 模型（通过 FlagEmbedding>=1.2.0 本地加载），用于混合检索的精排重排序
+- 依赖 qwen3-reranker-4b 模型（通过远程 API 调用），用于混合检索的精排重排序
 
 ## Out of Scope
 

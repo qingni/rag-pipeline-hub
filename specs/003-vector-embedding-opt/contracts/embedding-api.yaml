@@ -251,7 +251,7 @@ components:
         model:
           type: string
           description: 向量化模型
-          enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
+          enum: [bge-m3, qwen3-embedding-8b, qwen3-vl-embedding-8b]
         config:
           $ref: '#/components/schemas/EmbeddingConfig'
 

@@ -13,11 +13,12 @@ import logging
 from .base_chunker import BaseChunker
 from .image_extractor import ImageExtractor
 from ...models.chunk_metadata import ChunkTypeEnum, create_chunk_metadata
+from ...utils.chunking_helpers import HeadingDetector
 
 logger = logging.getLogger(__name__)
 
 # 支持的 Embedding 模型列表（与 SemanticChunker 保持一致）
-SUPPORTED_EMBEDDING_MODELS = ['bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding']
+SUPPORTED_EMBEDDING_MODELS = ['bge-m3', 'qwen3-embedding-8b']
 
 
 class HybridChunker(BaseChunker):
@@ -33,7 +34,6 @@ class HybridChunker(BaseChunker):
     语义分块时支持的 Embedding 模型：
     - bge-m3: 1024维，8K上下文，多语言，速度快（推荐）
     - qwen3-embedding-8b: 4096维，32K上下文，高精度
-    - hunyuan-embedding: 1024维，腾讯混元
     
     图片提取使用统一的 ImageExtractor，确保所有分块策略的图片处理保持一致。
     """
@@ -176,6 +176,7 @@ class HybridChunker(BaseChunker):
             elif text_strategy == 'heading':
                 text_params['min_heading_level'] = self.params.get('min_heading_level', 1)
                 text_params['max_heading_level'] = self.params.get('max_heading_level', 3)
+                text_params['min_chunk_content_size'] = self.params.get('min_chunk_content_size', 100)
             
             self._sub_chunkers['text'] = get_chunker(text_strategy, **text_params)
         
@@ -605,6 +606,85 @@ class HybridChunker(BaseChunker):
 
         return chunks, regions
     
+    def _build_heading_structure(
+        self, text: str
+    ) -> List[Tuple[int, int, str, int]]:
+        """
+        解析文本中的标题层级结构。
+        
+        复用 HeadingDetector 的标题检测能力，返回按位置排序的标题列表。
+        用于在非 heading 分块策略（semantic/paragraph/character）中，
+        为每个 chunk 反查所属的标题层级。
+        
+        Returns:
+            标题列表: [(start_pos, end_pos, heading_text, level), ...]
+        """
+        return HeadingDetector.detect_headings(text)
+    
+    def _inject_heading_info(
+        self,
+        chunks: List[Dict[str, Any]],
+        headings: List[Tuple[int, int, str, int]],
+        full_text: str,
+        global_offset: int
+    ) -> None:
+        """
+        为文本 chunk 注入 heading_path 和 section_title。
+        
+        根据每个 chunk 的 start_position，在标题结构中定位其所属章节，
+        构建完整的标题路径（heading_path）和直接章节标题（section_title）。
+        
+        这是 RAG 检索优化的关键步骤：
+        - heading_path 让 Reranker 能看到 chunk 的完整层级位置
+        - section_title 提供最直接的章节归属信息
+        
+        参考业界实践：
+        - LlamaIndex HierarchicalNodeParser: 自动继承父级标题到 node metadata
+        - LangChain MarkdownHeaderTextSplitter: 每个 chunk 继承所有父级标题
+        
+        Args:
+            chunks: 需要注入标题信息的 chunk 列表（会直接修改 metadata）
+            headings: 从 _build_heading_structure 获取的标题列表
+            full_text: 完整的原始文本（用于定位）
+            global_offset: 全局偏移量（页面在整个文档中的偏移）
+        """
+        if not headings or not chunks:
+            return
+        
+        for chunk in chunks:
+            metadata = chunk.get('metadata', {})
+            
+            # 跳过已有 heading_path 的 chunk（如 heading 策略产出的 chunk）
+            if metadata.get('heading_path'):
+                continue
+            
+            # 获取 chunk 在原文中的相对位置（去掉 global_offset）
+            chunk_start = metadata.get('start_position', 0) - global_offset
+            
+            # 查找该位置之前最近的各级标题，构建标题栈
+            heading_stack = []  # [(heading_text, level), ...]
+            
+            for h_start, h_end, h_text, h_level in headings:
+                if h_start > chunk_start:
+                    break  # 标题在 chunk 之后，停止
+                
+                # 弹出所有级别 >= 当前标题级别的标题（同级或下级）
+                while heading_stack and heading_stack[-1][1] >= h_level:
+                    heading_stack.pop()
+                
+                heading_stack.append((h_text, h_level))
+            
+            # 构建 heading_path 和 section_title
+            if heading_stack:
+                heading_path = [h[0] for h in heading_stack]
+                section_title = heading_stack[-1][0]  # 最近的（最低级别的）标题
+                
+                metadata['heading_path'] = heading_path
+                metadata['section_title'] = section_title
+                # 也记录直接父标题（倒数第二个，如果有的话）
+                if len(heading_stack) > 1:
+                    metadata['parent_heading'] = heading_stack[-2][0]
+    
     def _extract_text_from_page(
         self,
         text: str,
@@ -653,6 +733,17 @@ class HybridChunker(BaseChunker):
                 )
             
             chunks.extend(segment_chunks)
+        
+        # 对非 heading 策略的文本 chunk，统一注入标题层级信息（heading_path、section_title）
+        # heading 策略自身已经在 HeadingChunker 中处理了标题信息，无需重复注入
+        if text_strategy != 'heading' and chunks:
+            headings = self._build_heading_structure(text)
+            if headings:
+                self._inject_heading_info(chunks, headings, text, global_offset)
+                logger.debug(
+                    f"Injected heading info into {len(chunks)} text chunks "
+                    f"(strategy={text_strategy}, headings_found={len(headings)})"
+                )
         
         return chunks
     

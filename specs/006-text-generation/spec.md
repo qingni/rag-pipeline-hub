@@ -3,13 +3,13 @@
 **Feature Branch**: `006-text-generation`  
 **Created**: 2025-12-26  
 **Status**: Draft  
-**Input**: 用户描述: "实现文本生成功能，基于RAG检索结果和用户输入，使用deepseek-v3、deepseek-r1、kimi-k2-instruct模型生成回答"
+**Input**: 用户描述: "实现文本生成功能，基于RAG检索结果和用户输入，使用deepseek-v3.2、deepseek-v3.1模型生成回答"
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - RAG问答生成 (Priority: P1)
 
-用户在搜索查询模块完成向量检索后，希望基于检索到的相关文档片段和自己的问题，让大模型生成一个综合性的回答。用户可以选择不同的生成模型（deepseek-v3、deepseek-r1、kimi-k2-instruct），系统将检索结果作为上下文，结合用户问题生成高质量的回答。
+用户在搜索查询模块完成向量检索后，希望基于检索到的相关文档片段和自己的问题，让大模型生成一个综合性的回答。用户可以选择不同的生成模型（deepseek-v3.2、deepseek-v3.1），系统将检索结果作为上下文，结合用户问题生成高质量的回答。
 
 **Why this priority**: 这是RAG系统的核心价值所在，将检索与生成结合，提供智能问答能力。
 
@@ -33,9 +33,9 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** 用户进入文本生成配置, **When** 查看模型列表, **Then** 显示三个可用模型（deepseek-v3、deepseek-r1、kimi-k2-instruct）及其描述
+1. **Given** 用户进入文本生成配置, **When** 查看模型列表, **Then** 显示两个可用模型（deepseek-v3.2、deepseek-v3.1）及其描述
 2. **Given** 用户选择某个模型, **When** 调整生成参数（温度、最大长度）, **Then** 参数设置被保存并应用于后续生成
-3. **Given** 用户未选择模型, **When** 点击生成, **Then** 系统使用默认模型（deepseek-v3）进行生成
+3. **Given** 用户未选择模型, **When** 点击生成, **Then** 系统使用默认模型（deepseek-v3.2）进行生成
 
 ---
 
@@ -66,7 +66,7 @@
 
 ### Functional Requirements
 
-- **FR-001**: 系统必须支持三种生成模型：deepseek-v3、deepseek-r1、kimi-k2-instruct
+- **FR-001**: 系统必须支持两种生成模型：deepseek-v3.2、deepseek-v3.1
 - **FR-002**: 系统必须能够将RAG检索结果作为上下文传递给生成模型
 - **FR-003**: 系统必须支持流式输出（Streaming），实时展示生成内容
 - **FR-004**: 系统必须允许用户配置生成参数：温度(temperature)、最大输出长度(max_tokens)
@@ -98,7 +98,7 @@
 ## Assumptions
 
 - API服务（base_url）与现有embedding模型相同，已配置且可用
-- 三个模型（deepseek-v3、deepseek-r1、kimi-k2-instruct）均支持OpenAI兼容的API格式
+- 两个模型（deepseek-v3.2、deepseek-v3.1）均支持OpenAI兼容的API格式
 - 用户已完成向量检索，有可用的检索结果作为上下文
 - 系统运行环境具备稳定的网络连接
 - 默认温度参数为0.7，默认最大输出长度为4096 tokens

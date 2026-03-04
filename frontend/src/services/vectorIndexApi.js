@@ -344,7 +344,7 @@ export async function healthCheck() {
  * @param {Array<number>} searchData.query_dense_vector - 稠密查询向量
  * @param {Object} searchData.query_sparse_vector - 稀疏查询向量 {index: weight}（可选）
  * @param {number} searchData.top_n - 粗排候选集大小（默认 20）
- * @param {number} searchData.top_k - 最终返回结果数量（默认 5）
+ * @param {number} searchData.top_k - 最多返回结果数量（默认 5）
  * @param {boolean} searchData.enable_reranker - 是否启用 Reranker 精排（默认 true）
  * @param {number} searchData.rrf_k - RRF 排名平滑因子（默认 60）
  * @returns {Promise<Object>} HybridSearchResponse

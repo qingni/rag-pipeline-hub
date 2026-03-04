@@ -56,7 +56,7 @@ def tokenize(text: str) -> List[str]:
     else:
         tokens = _simple_tokenize(text)
     
-    # 过滤：去除空白、标点符号和过短的 token
+    # 过滤：去除空白、标点符号和过短的 token，并统一英文为小写
     filtered = []
     for token in tokens:
         token = token.strip()
@@ -65,6 +65,8 @@ def tokenize(text: str) -> List[str]:
         # 过滤纯标点和空白
         if all(c in '，。！？、；：""''（）【】《》—…·\n\r\t ,.!?;:\'"()[]{}/-_=+' for c in token):
             continue
+        # 统一英文为小写，确保词表构建和查询时大小写一致
+        token = token.lower()
         filtered.append(token)
     
     return filtered
@@ -72,11 +74,23 @@ def tokenize(text: str) -> List[str]:
 
 # 中文停用词表（常见高频无意义词）
 CHINESE_STOPWORDS = {
+    # 常用虚词、助词、连词
     "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一", "一个",
     "上", "也", "很", "到", "说", "要", "去", "你", "会", "着", "没有", "看", "好",
     "自己", "这", "他", "她", "它", "们", "那", "些", "什么", "怎么", "这个", "那个",
     "但", "而", "或", "如果", "因为", "所以", "虽然", "但是", "可以", "能", "被",
     "把", "从", "对", "与", "以", "及", "等", "为", "于", "中", "之", "其",
+    # 口语词、请求词（用户查询中常见但无检索语义）
+    "帮", "帮我", "帮忙", "请", "请问", "麻烦", "查", "查下", "查一下", "查看",
+    "看下", "看看", "看一下", "找", "找下", "找一下", "告诉", "告诉我",
+    "想", "想要", "需要", "知道", "了解", "一下", "下",
+    # 疑问词、指示词（对检索无实质贡献）
+    "哪些", "哪个", "哪里", "哪", "怎样", "怎么样", "如何", "为什么", "为何",
+    "多少", "几个", "几", "谁", "吗", "呢", "吧", "啊", "嘛", "呀",
+    # 指代词、方位词
+    "中有", "里面", "里", "上面", "下面", "左边", "右边", "前面", "后面",
+    "这里", "那里", "哪里", "这些", "那些", "所有", "全部", "每个",
+    # 英文停用词
     "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
     "have", "has", "had", "do", "does", "did", "will", "would", "could",
     "should", "may", "might", "shall", "can", "need", "dare", "ought",
@@ -84,6 +98,8 @@ CHINESE_STOPWORDS = {
     "about", "between", "through", "during", "before", "after", "above",
     "below", "to", "from", "in", "out", "on", "off", "over", "under",
     "this", "that", "these", "those", "it", "its", "not", "no", "nor",
+    "what", "which", "who", "whom", "how", "where", "when", "why",
+    "please", "help", "show", "find", "tell", "me", "my",
 }
 
 
@@ -197,11 +213,7 @@ class BM25SparseGenerator:
         self.df = {token: token_df[token] for token in self.vocab}
         
         # 计算 IDF（使用 BM25 标准 IDF 公式）
-        self.idf = {}
-        for token, df in self.df.items():
-            # IDF = log((N - df + 0.5) / (df + 0.5) + 1)
-            # 加 1 是为了避免负值（当 df > N/2 时原始公式可能为负）
-            self.idf[token] = math.log((self.doc_count - df + 0.5) / (df + 0.5) + 1)
+        self._recompute_idf()
         
         self._fitted = True
         
@@ -214,6 +226,98 @@ class BM25SparseGenerator:
         )
         
         return self
+    
+    def incremental_fit(self, new_corpus: List[str]) -> "BM25SparseGenerator":
+        """
+        增量构建 BM25 统计信息（在已有统计基础上合并新文档）
+        
+        将新文档的 token 统计与已有统计合并，重新计算词表和 IDF。
+        这样每次添加新文档时，之前文档的词汇不会丢失。
+        
+        参考业内最佳实践（Elasticsearch / Lucene BM25）：
+        - BM25 的 IDF 统计应当基于整个语料库（所有文档），而非单个文档
+        - 增量更新时需要重新计算 avgdl 和 IDF，以反映语料库的全局特征
+        
+        Args:
+            new_corpus: 新增文档文本列表
+            
+        Returns:
+            self（支持链式调用）
+        """
+        start_time = time.time()
+        
+        if not new_corpus:
+            logger.warning("新增语料库为空，跳过增量构建")
+            return self
+        
+        new_doc_count = len(new_corpus)
+        new_doc_lengths = []
+        new_token_df: Counter = Counter()  # 新文档中每个 token 的文档频率
+        
+        # 遍历新文档：计算文档频率和文档长度
+        for doc_text in new_corpus:
+            tokens = self._tokenize_and_filter(doc_text)
+            new_doc_lengths.append(len(tokens))
+            
+            unique_tokens = set(tokens)
+            for token in unique_tokens:
+                new_token_df[token] += 1
+        
+        # 合并文档计数
+        old_doc_count = self.doc_count
+        self.doc_count = old_doc_count + new_doc_count
+        
+        # 合并平均文档长度（加权平均）
+        old_total_length = self.avgdl * old_doc_count
+        new_total_length = sum(new_doc_lengths)
+        self.avgdl = (old_total_length + new_total_length) / self.doc_count if self.doc_count > 0 else 1.0
+        
+        # 合并文档频率：old_df + new_df
+        merged_df: Counter = Counter(self.df)  # 复制旧的 df
+        for token, df in new_token_df.items():
+            merged_df[token] += df
+        
+        # 重建词表：过滤极低频和极高频词
+        max_df = int(self.doc_count * self.max_df_ratio)
+        vocab_id = 0
+        self.vocab = {}
+        
+        for token in sorted(merged_df.keys()):  # 排序确保可重复性
+            df = merged_df[token]
+            if df < self.min_df:
+                continue  # 过滤极稀有词
+            if df > max_df:
+                continue  # 过滤极高频词（类停用词）
+            self.vocab[token] = vocab_id
+            vocab_id += 1
+        
+        # 保存合并后的文档频率
+        self.df = {token: merged_df[token] for token in self.vocab}
+        
+        # 重新计算 IDF
+        self._recompute_idf()
+        
+        self._fitted = True
+        
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"BM25 增量 fit 完成: {old_doc_count} + {new_doc_count} = {self.doc_count} 个文档, "
+            f"词表大小 {len(self.vocab)}, "
+            f"平均文档长度 {self.avgdl:.1f} 个 token, "
+            f"耗时 {elapsed_ms:.1f}ms"
+        )
+        
+        return self
+    
+    def _recompute_idf(self) -> None:
+        """
+        根据当前的 doc_count 和 df 重新计算 IDF 值
+        
+        IDF 公式：IDF(t) = log((N - df + 0.5) / (df + 0.5) + 1)
+        """
+        self.idf = {}
+        for token, df in self.df.items():
+            self.idf[token] = math.log((self.doc_count - df + 0.5) / (df + 0.5) + 1)
     
     def encode_document(self, text: str) -> Dict[int, float]:
         """
@@ -467,12 +571,13 @@ class BM25SparseService:
         texts: List[str]
     ) -> List[Dict[int, float]]:
         """
-        从文本列表构建 BM25 统计信息并生成稀疏向量
+        增量构建 BM25 统计信息并生成稀疏向量
         
-        这是索引构建时的核心方法：
-        1. 用所有文本作为语料库 fit BM25
-        2. 为每个文本生成 sparse 向量
-        3. 持久化 BM25 统计信息（用于后续查询）
+        这是索引构建时的核心方法，支持增量更新：
+        1. 如果已有 BM25 统计信息，加载后与新文档合并（增量 fit）
+        2. 如果没有已有统计，从新文档全量构建（全量 fit）
+        3. 为当前批次的文档生成 sparse 向量
+        4. 持久化合并后的 BM25 统计信息
         
         Args:
             index_id: 索引 ID（用于关联 BM25 统计）
@@ -487,25 +592,43 @@ class BM25SparseService:
         
         start_time = time.time()
         
-        # 1. 构建 BM25 统计
-        generator = BM25SparseGenerator()
-        generator.fit(texts)
+        # 1. 尝试加载已有的 BM25 统计信息进行增量构建
+        stats_path = self._get_stats_path(index_id)
+        existing_generator = self._get_generator(index_id)
         
-        # 2. 为每个文档生成稀疏向量
+        if existing_generator is not None and existing_generator.is_fitted:
+            # 增量模式：在已有统计基础上合并新文档
+            logger.info(
+                f"BM25 增量构建: 索引={index_id}, "
+                f"已有 {existing_generator.doc_count} 个文档, "
+                f"新增 {len(texts)} 个文档"
+            )
+            generator = existing_generator
+            generator.incremental_fit(texts)
+        else:
+            # 全量模式：从零构建
+            logger.info(
+                f"BM25 全量构建: 索引={index_id}, "
+                f"{len(texts)} 个文档"
+            )
+            generator = BM25SparseGenerator()
+            generator.fit(texts)
+        
+        # 2. 为当前批次的文档生成稀疏向量（使用合并后的词表和 IDF）
         sparse_vectors = generator.encode_documents(texts)
         
-        # 3. 持久化 BM25 统计
-        stats_path = self._get_stats_path(index_id)
+        # 3. 持久化合并后的 BM25 统计
         generator.save_stats(stats_path)
         
-        # 4. 缓存
+        # 4. 更新缓存
         self._generators[index_id] = generator
         
         elapsed_ms = (time.time() - start_time) * 1000
         non_empty = sum(1 for sv in sparse_vectors if sv)
         logger.info(
             f"BM25 build_and_encode 完成: 索引={index_id}, "
-            f"{len(texts)} 个文档, {non_empty} 个非空稀疏向量, "
+            f"总文档数={generator.doc_count}, 本批次={len(texts)}, "
+            f"{non_empty} 个非空稀疏向量, 词表大小={len(generator.vocab)}, "
             f"耗时 {elapsed_ms:.1f}ms"
         )
         
@@ -586,3 +709,44 @@ class BM25SparseService:
         if generator:
             return generator.get_stats()
         return None
+    
+    def rebuild_stats(self, index_id: str, all_texts: List[str]) -> None:
+        """
+        从所有文本重建 BM25 统计信息（全量重建）
+        
+        用于修复词表损坏或需要重新校准的场景。
+        会删除旧的统计文件并从头构建。
+        
+        Args:
+            index_id: 索引 ID
+            all_texts: 该索引下所有文档的文本列表
+        """
+        if not all_texts:
+            logger.warning(f"索引 {index_id} 的文本列表为空，无法重建")
+            return
+        
+        logger.info(
+            f"BM25 全量重建开始: 索引={index_id}, "
+            f"{len(all_texts)} 个文档"
+        )
+        
+        # 清除缓存
+        if index_id in self._generators:
+            del self._generators[index_id]
+        
+        # 全量构建
+        generator = BM25SparseGenerator()
+        generator.fit(all_texts)
+        
+        # 持久化
+        stats_path = self._get_stats_path(index_id)
+        generator.save_stats(stats_path)
+        
+        # 更新缓存
+        self._generators[index_id] = generator
+        
+        logger.info(
+            f"BM25 全量重建完成: 索引={index_id}, "
+            f"文档数={generator.doc_count}, 词表大小={len(generator.vocab)}, "
+            f"平均文档长度={generator.avgdl:.1f}"
+        )

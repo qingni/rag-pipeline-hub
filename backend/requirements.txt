@@ -54,8 +54,7 @@ tiktoken==0.12.0
 pymilvus==2.5.18
 pinecone-client==2.2.4
 
-# Reranker (混合检索精排)
-FlagEmbedding>=1.2.0
+# Reranker 精排通过远程 API 调用（复用 openai 库），无需额外依赖
 
 # BM25 稀疏向量生成 (中文分词)
 jieba>=0.42.1

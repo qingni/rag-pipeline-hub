@@ -1,0 +1,696 @@
+openapi: "3.1.0"
+info:
+  title: 检索查询模块优化版 API
+  description: |
+    搜索查询模块的 API 契约定义。
+    基于 005-search-query 扩展，新增混合检索、多 Collection 联合搜索、Reranker 精排能力。
+  version: "2.0.0"
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: 开发环境
+
+paths:
+  /search:
+    post:
+      summary: 执行语义搜索（纯稠密模式，向后兼容）
+      operationId: executeSearch
+      description: |
+        将查询文本转换为向量并在指定索引中检索相似文档。
+        此端点保持向后兼容，仅支持纯稠密检索。
+      tags: [Search]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: 搜索成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: 请求参数错误（空查询/文本过长）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 索引不存在
+        "503":
+          description: Embedding 服务不可用
+        "504":
+          description: 搜索超时
+
+  /search/hybrid:
+    post:
+      summary: 执行混合检索（稠密+稀疏双路召回 + RRF + Reranker）
+      operationId: executeHybridSearch
+      description: |
+        混合检索端点，支持：
+        - 稠密+稀疏双路召回 + RRF 粗排融合
+        - Reranker (qwen3-reranker-4b) 精排重排序
+        - 多 Collection 联合搜索（最多 5 个）
+        - 智能降级（稀疏不可用→纯稠密，Reranker不可用→跳过精排）
+      tags: [Search - Hybrid]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HybridSearchRequest"
+      responses:
+        "200":
+          description: 搜索成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HybridSearchResponse"
+        "400":
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                emptyQuery:
+                  summary: 空查询
+                  value:
+                    success: false
+                    error:
+                      code: EMPTY_QUERY
+                      message: "查询文本不能为空"
+                tooLong:
+                  summary: 文本过长
+                  value:
+                    success: false
+                    error:
+                      code: QUERY_TOO_LONG
+                      message: "查询文本超过最大长度限制 (2000 字符)"
+                tooManyCollections:
+                  summary: Collection 数量超限
+                  value:
+                    success: false
+                    error:
+                      code: MAX_COLLECTIONS_EXCEEDED
+                      message: "联合搜索最多支持 5 个 Collection"
+        "404":
+          description: Collection 不存在
+        "503":
+          description: Embedding 服务不可用
+        "504":
+          description: 搜索超时
+
+  /search/collections:
+    get:
+      summary: 获取可用 Collection 列表
+      operationId: getAvailableCollections
+      description: 返回所有可用于搜索的 Milvus Collection，包含是否含稀疏向量字段的标识。
+      tags: [Search]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionListResponse"
+
+  /search/indexes:
+    get:
+      summary: 获取可用索引列表（向后兼容）
+      operationId: getAvailableIndexes
+      tags: [Search]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexListResponse"
+
+  /search/reranker/health:
+    get:
+      summary: Reranker 健康检查
+      operationId: getRerankerHealth
+      description: 检查 Reranker 服务的可用性和状态
+      tags: [Search - Reranker]
+      responses:
+        "200":
+          description: 健康状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RerankerHealthResponse"
+
+  /search/history:
+    get:
+      summary: 获取搜索历史
+      operationId: getSearchHistory
+      tags: [Search - History]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryListResponse"
+    delete:
+      summary: 清空搜索历史
+      operationId: clearSearchHistory
+      tags: [Search - History]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /search/history/{historyId}:
+    delete:
+      summary: 删除单条历史记录
+      operationId: deleteSearchHistory
+      tags: [Search - History]
+      parameters:
+        - name: historyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "404":
+          description: 记录不存在
+
+components:
+  schemas:
+    # ==================== 请求模型 ====================
+
+    SearchRequest:
+      type: object
+      required: [query_text]
+      properties:
+        query_text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 查询文本
+        index_ids:
+          type: array
+          items:
+            type: string
+          description: 目标索引 ID 列表（向后兼容）
+        top_k:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 100
+          description: 返回结果数量
+        threshold:
+          type: number
+          format: float
+          default: 0.5
+          minimum: 0
+          maximum: 1
+          description: 相似度阈值
+        metric_type:
+          type: string
+          enum: [cosine, euclidean, dot_product]
+          default: cosine
+
+    HybridSearchRequest:
+      type: object
+      required: [query_text]
+      properties:
+        query_text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 查询文本
+        collection_ids:
+          type: array
+          items:
+            type: string
+          maxItems: 5
+          description: 目标 Collection ID 列表（最多 5 个）
+        top_k:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 100
+          description: 最多返回结果数量
+        threshold:
+          type: number
+          format: float
+          default: 0.5
+          minimum: 0
+          maximum: 1
+          description: 相似度阈值
+        metric_type:
+          type: string
+          enum: [cosine, euclidean, dot_product]
+          default: cosine
+        search_mode:
+          type: string
+          enum: [auto, hybrid, dense_only]
+          default: auto
+          description: |
+            检索模式：
+            - auto: 自动检测（默认）
+            - hybrid: 强制混合检索
+            - dense_only: 强制纯稠密
+        reranker_top_n:
+          type: integer
+          default: 20
+          minimum: 10
+          maximum: 100
+          description: Reranker 候选集大小（每个 Collection 的 Top-N）
+        reranker_top_k:
+          type: integer
+          minimum: 1
+          description: Reranker 最大返回数（默认使用 top_k）
+        enable_query_enhancement:
+          type: boolean
+          default: true
+          description: 是否启用查询增强（Query Rewrite + Multi-query）
+        page:
+          type: integer
+          default: 1
+          minimum: 1
+          description: 分页页码
+        page_size:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 100
+          description: 每页数量
+
+    # ==================== 响应模型 ====================
+
+    SearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/SearchResponseData"
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+
+    HybridSearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/HybridSearchResponseData"
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+
+    SearchResponseData:
+      type: object
+      properties:
+        query_id:
+          type: string
+        query_text:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResultItem"
+        total_count:
+          type: integer
+        execution_time_ms:
+          type: integer
+
+    HybridSearchResponseData:
+      type: object
+      properties:
+        query_id:
+          type: string
+          format: uuid
+        query_text:
+          type: string
+        search_mode:
+          type: string
+          enum: [hybrid, dense_only]
+          description: 实际使用的检索模式
+        reranker_available:
+          type: boolean
+          description: Reranker 是否可用
+        rrf_k:
+          type: integer
+          description: 使用的 RRF k 值
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/HybridSearchResultItem"
+        total_count:
+          type: integer
+        execution_time_ms:
+          type: integer
+        timing:
+          $ref: "#/components/schemas/SearchTiming"
+        query_enhancement:
+          $ref: "#/components/schemas/QueryEnhancementInfo"
+
+    SearchResultItem:
+      type: object
+      properties:
+        id:
+          type: string
+        chunk_id:
+          type: string
+        text_content:
+          type: string
+        text_summary:
+          type: string
+          maxLength: 200
+        similarity_score:
+          type: number
+          format: float
+        similarity_percent:
+          type: string
+        source_index:
+          type: string
+        source_document:
+          type: string
+        chunk_position:
+          type: integer
+        metadata:
+          type: object
+        rank:
+          type: integer
+
+    HybridSearchResultItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        chunk_id:
+          type: string
+        text_content:
+          type: string
+        text_summary:
+          type: string
+          maxLength: 200
+        similarity_score:
+          type: number
+          format: float
+        rrf_score:
+          type: number
+          format: float
+          description: RRF 融合分数（混合检索模式）
+        reranker_score:
+          type: number
+          format: float
+          description: Reranker 精排分数
+        search_mode:
+          type: string
+          enum: [hybrid, dense_only]
+        source_collection:
+          type: string
+          description: 来源 Collection 名称
+        source_document:
+          type: string
+        chunk_position:
+          type: integer
+        metadata:
+          type: object
+        rank:
+          type: integer
+
+    SearchTiming:
+      type: object
+      description: 各阶段耗时明细
+      properties:
+        query_enhancement_ms:
+          type: integer
+          description: 查询增强耗时（Query Rewrite + Multi-query）
+        embedding_ms:
+          type: integer
+          description: 查询向量化耗时
+        bm25_ms:
+          type: integer
+          description: BM25 稀疏向量生成耗时
+        search_ms:
+          type: integer
+          description: 向量检索耗时（含 RRF）
+        reranker_ms:
+          type: integer
+          description: Reranker 精排耗时
+        total_ms:
+          type: integer
+          description: 总耗时
+
+    QueryEnhancementInfo:
+      type: object
+      description: 查询增强信息（用于调试和前端展示）
+      properties:
+        enabled:
+          type: boolean
+          description: 是否启用了查询增强
+        original_query:
+          type: string
+          description: 原始查询
+        rewritten_query:
+          type: string
+          description: 改写后的主查询
+        is_complex:
+          type: boolean
+          description: 是否为复杂查询（触发 Multi-query）
+        sub_queries:
+          type: array
+          items:
+            type: string
+          description: 多查询变体列表
+        all_queries:
+          type: array
+          items:
+            type: string
+          description: 所有实际执行的查询
+        enhancement_time_ms:
+          type: integer
+          description: 查询增强耗时（毫秒）
+        error:
+          type: string
+          nullable: true
+          description: 查询增强错误信息
+
+    # ==================== Collection/Index 模型 ====================
+
+    CollectionInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+        vector_count:
+          type: integer
+        dimension:
+          type: integer
+        metric_type:
+          type: string
+        has_sparse:
+          type: boolean
+          description: 是否含稀疏向量字段
+        document_count:
+          type: integer
+          description: 文档数量（该 Collection 下的索引记录数）
+        embedding_model:
+          type: string
+          nullable: true
+          description: 知识库绑定的嵌入模型名称（如 qwen3-embedding-8b）
+        created_at:
+          type: string
+          format: date-time
+
+    CollectionListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CollectionInfo"
+
+    IndexListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/IndexInfo"
+
+    IndexInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+        vector_count:
+          type: integer
+        dimension:
+          type: integer
+        metric_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ==================== Reranker 模型 ====================
+
+    RerankerHealthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            available:
+              type: boolean
+              description: Reranker 是否可用
+            model_name:
+              type: string
+              description: 模型名称
+            api_base_url:
+              type: string
+              description: API 基础 URL
+            api_connected:
+              type: boolean
+              description: API 是否已连接
+            supported_models:
+              type: array
+              items:
+                type: string
+              description: 支持的模型列表
+
+    # ==================== 历史记录模型 ====================
+
+    HistoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        query_text:
+          type: string
+        index_ids:
+          type: array
+          items:
+            type: string
+        config:
+          type: object
+          properties:
+            top_k:
+              type: integer
+            threshold:
+              type: number
+            metric_type:
+              type: string
+            search_mode:
+              type: string
+            reranker_available:
+              type: boolean
+        result_count:
+          type: integer
+        execution_time_ms:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    HistoryListData:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryItem"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    HistoryListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/HistoryListData"
+
+    # ==================== 通用模型 ====================
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: true
+        message:
+          type: string
+
+    ErrorDetail:
+      type: object
+      properties:
+        code:
+          type: string
+          description: |
+            错误码：
+            - EMPTY_QUERY: 空查询
+            - QUERY_TOO_LONG: 文本过长
+            - INDEX_NOT_FOUND: 索引不存在
+            - MAX_COLLECTIONS_EXCEEDED: Collection 数量超限
+            - EMBEDDING_SERVICE_ERROR: Embedding 服务错误
+            - SEARCH_TIMEOUT: 搜索超时
+            - ERR_VALIDATION: 参数验证错误
+            - SEARCH_ERROR: 搜索内部错误
+            - INTERNAL_ERROR: 系统内部错误
+        message:
+          type: string
+        details:
+          type: object
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: false
+        error:
+          $ref: "#/components/schemas/ErrorDetail"

@@ -110,7 +110,7 @@ class ModelCapability(Base):
     provider = Column(
         String(50), 
         nullable=False,
-        comment="Model provider (e.g., bge, qwen, hunyuan)"
+        comment="Model provider (e.g., bge, qwen)"
     )
     
     # Technical specs

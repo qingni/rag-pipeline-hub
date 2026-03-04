@@ -5,16 +5,33 @@
         <History :size="20" class="header-icon" />
         <h3 class="card-title">向量化历史</h3>
       </div>
-      <t-button
-        theme="default"
-        variant="outline"
-        size="small"
-        @click="handleRefresh"
-        :loading="loading"
-      >
-        <RefreshCw :size="14" />
-        刷新
-      </t-button>
+      <div class="header-actions">
+        <t-popconfirm
+          content="确定要清空所有向量化记录吗？此操作不可恢复。"
+          @confirm="handleClearAll"
+        >
+          <t-button
+            v-if="historyList.length > 0"
+            theme="danger"
+            variant="outline"
+            size="small"
+            :loading="clearing"
+          >
+            <Trash2 :size="14" />
+            清空
+          </t-button>
+        </t-popconfirm>
+        <t-button
+          theme="default"
+          variant="outline"
+          size="small"
+          @click="handleRefresh"
+          :loading="loading"
+        >
+          <RefreshCw :size="14" />
+          刷新
+        </t-button>
+      </div>
     </div>
     
     <div class="filter-section">
@@ -185,6 +202,7 @@ const emit = defineEmits(['view', 'delete', 'download'])
 
 const store = useEmbeddingStore()
 const loading = ref(false)
+const clearing = ref(false)
 const searchText = ref('')
 const statusFilter = ref(null)
 const selectedId = ref(null)
@@ -244,6 +262,18 @@ async function loadHistory() {
 
 function handleRefresh() {
   loadHistory()
+}
+
+async function handleClearAll() {
+  try {
+    clearing.value = true
+    await store.clearAllEmbeddingResults()
+    MessagePlugin.success('已清空所有向量化记录')
+  } catch (error) {
+    MessagePlugin.error(error.message || '清空失败')
+  } finally {
+    clearing.value = false
+  }
 }
 
 function handleSearch() {
@@ -339,6 +369,12 @@ async function copyPath(path) {
   padding: 20px 24px;
   border-bottom: 1px solid #e5e7eb;
   background-color: #f9fafb;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .header-left {

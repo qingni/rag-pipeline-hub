@@ -20,12 +20,23 @@
         v-for="item in history"
         :key="item.id"
         class="history-item"
-        @click="handleSelect(item)"
+        @mousedown="onMouseDown"
+        @click="handleItemClick($event, item)"
       >
         <div class="item-content">
           <div class="query-text">{{ item.query_text }}</div>
           <div class="item-meta">
+            <!-- 🆕 检索模式标签 -->
+            <t-tag 
+              v-if="item.config?.search_mode"
+              :theme="item.config.search_mode === 'hybrid' ? 'primary' : 'default'"
+              variant="light"
+              size="small"
+            >
+              {{ item.config.search_mode === 'hybrid' ? '混合' : '稠密' }}
+            </t-tag>
             <span>{{ item.result_count }} 条结果</span>
+            <span v-if="item.execution_time_ms">{{ item.execution_time_ms }}ms</span>
             <span>{{ formatTime(item.created_at) }}</span>
           </div>
         </div>
@@ -88,7 +99,25 @@ const hasMore = computed(() => {
   return props.history.length < props.total
 })
 
-function handleSelect(item) {
+// 记录鼠标按下位置，用于区分点击与文本选中
+let mouseDownX = 0
+let mouseDownY = 0
+
+function onMouseDown(e) {
+  mouseDownX = e.clientX
+  mouseDownY = e.clientY
+}
+
+function handleItemClick(e, item) {
+  // 如果用户拖拽选中了文本（鼠标移动超过 5px），不触发搜索
+  const dx = Math.abs(e.clientX - mouseDownX)
+  const dy = Math.abs(e.clientY - mouseDownY)
+  if (dx > 5 || dy > 5) return
+
+  // 如果当前有选中文本，也不触发搜索
+  const selection = window.getSelection()
+  if (selection && selection.toString().trim().length > 0) return
+
   emit('select', item)
 }
 
@@ -185,6 +214,7 @@ function formatTime(dateStr) {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 0.25rem;
+  user-select: text;
 }
 
 .item-meta {

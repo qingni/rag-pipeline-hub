@@ -70,7 +70,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
+            enum: [bge-m3, qwen3-embedding-8b, qwen3-vl-embedding-8b]
           description: Filter by embedding model (optional)
       responses:
         '200':
@@ -124,7 +124,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [bge-m3, qwen3-embedding-8b, hunyuan-embedding, qwen3-vl-embedding-8b]
+            enum: [bge-m3, qwen3-embedding-8b, qwen3-vl-embedding-8b]
           description: Filter by embedding model
         - name: status
           in: query

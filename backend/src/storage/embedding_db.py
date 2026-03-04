@@ -350,6 +350,26 @@ class EmbeddingResultDB:
         
         return result.rowcount > 0
 
+    def clear_all_results(self) -> Tuple[int, List[str]]:
+        """
+        清空所有向量化结果记录。
+        
+        Returns:
+            Tuple[int, List[str]]: (删除的记录数, 关联的JSON文件路径列表)
+        """
+        # 先查询所有记录的JSON文件路径，用于后续清理
+        stmt = select(EmbeddingResult.json_file_path).where(
+            EmbeddingResult.json_file_path.isnot(None)
+        )
+        json_paths = [row[0] for row in self.session.execute(stmt).fetchall()]
+        
+        # 删除所有记录
+        delete_stmt = EmbeddingResult.__table__.delete()
+        result = self.session.execute(delete_stmt)
+        self.session.commit()
+        
+        return result.rowcount, json_paths
+
 
 def get_embedding_db(session: Session) -> EmbeddingResultDB:
     """

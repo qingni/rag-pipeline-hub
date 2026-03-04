@@ -655,9 +655,122 @@ class MilvusProvider(BaseProvider):
             logger.error(f"Milvus search failed: {str(e)}")
             raise SearchError(index_id, str(e))
 
+    def delete_by_doc_id(self, index_id: str, doc_id: str) -> int:
+        """
+        按 doc_id 删除 Collection 中属于指定文档的所有向量
+        
+        这是「逻辑与物理分层」架构下的正确删除方式：
+        多个文档共享同一个物理 Collection，删除某个文档的索引记录时
+        只应删除该文档的向量，而非 drop 整个 Collection。
+        
+        Args:
+            index_id: 物理 Collection 名称（即 provider_index_id）
+            doc_id: 文档 ID（Partition Key 字段值）
+            
+        Returns:
+            删除的向量数量（近似值）
+        """
+        self._ensure_connected()
+        
+        try:
+            collection = self._get_collection(index_id)
+            collection.load()
+            
+            # 先查询该 doc_id 下有多少条向量（用于日志记录）
+            try:
+                count_results = collection.query(
+                    expr=f'doc_id == "{doc_id}"',
+                    output_fields=["count(*)"],
+                )
+                deleted_count = count_results[0].get("count(*)", 0) if count_results else 0
+            except Exception:
+                deleted_count = -1  # 查询计数失败，不影响删除
+            
+            # 按 doc_id 删除该文档的所有向量
+            expr = f'doc_id == "{doc_id}"'
+            collection.delete(expr)
+            collection.flush()
+            
+            logger.info(
+                f"Deleted vectors by doc_id from Collection '{collection.name}': "
+                f"doc_id='{doc_id}', deleted_count≈{deleted_count}"
+            )
+            return deleted_count if deleted_count >= 0 else 0
+            
+        except Exception as e:
+            logger.error(f"Failed to delete vectors by doc_id: {str(e)}")
+            raise IndexBuildError(f"Failed to delete vectors by doc_id: {str(e)}")
+
+    def get_collection_entity_count(self, index_id: str) -> int:
+        """
+        获取物理 Collection 中的实体总数
+        
+        Args:
+            index_id: 物理 Collection 名称
+            
+        Returns:
+            实体总数
+        """
+        self._ensure_connected()
+        try:
+            collection = self._get_collection(index_id)
+            collection.flush()
+            return collection.num_entities
+        except Exception as e:
+            logger.warning(f"Failed to get entity count for {index_id}: {e}")
+            return -1
+
+    def drop_collection_if_empty(self, index_id: str) -> bool:
+        """
+        如果物理 Collection 为空，则 drop 它
+        
+        在删除文档向量后调用此方法进行清理：
+        - 如果 Collection 中还有其他文档的向量 → 保留 Collection
+        - 如果 Collection 已经完全为空 → drop Collection 释放资源
+        
+        Args:
+            index_id: 物理 Collection 名称
+            
+        Returns:
+            True 如果 Collection 被 drop 了，False 如果保留
+        """
+        self._ensure_connected()
+        
+        try:
+            entity_count = self.get_collection_entity_count(index_id)
+            
+            if entity_count == 0:
+                collection = self._get_collection(index_id)
+                collection_name = collection.name
+                collection.release()
+                utility.drop_collection(collection_name)
+                
+                # 从缓存中移除
+                if index_id in self._collections:
+                    del self._collections[index_id]
+                
+                # 删除元数据文件
+                self._delete_index_metadata(index_id)
+                
+                logger.info(f"Collection '{collection_name}' is empty after deletion, dropped it.")
+                return True
+            else:
+                logger.info(
+                    f"Collection '{index_id}' still has {entity_count} entities, keeping it."
+                )
+                return False
+                
+        except Exception as e:
+            logger.warning(f"Failed to check/drop empty collection {index_id}: {e}")
+            return False
+
     def delete_index(self, index_id: str) -> None:
         """
-        删除索引
+        删除索引（强制 drop 整个物理 Collection）
+        
+        ⚠️ 警告：此方法会删除整个物理 Collection，包括其中所有文档的向量。
+        一般情况下应使用 delete_by_doc_id() + drop_collection_if_empty() 组合。
+        此方法仅在明确需要清除整个 Collection 时使用（如 clear_all）。
         
         Args:
             index_id: 索引 ID
@@ -681,7 +794,7 @@ class MilvusProvider(BaseProvider):
             # 删除元数据文件
             self._delete_index_metadata(index_id)
             
-            logger.info(f"Deleted Milvus index: {collection_name} (ID: {index_id})")
+            logger.info(f"Force dropped Milvus Collection: {collection_name} (ID: {index_id})")
             
         except Exception as e:
             logger.error(f"Failed to delete Milvus index: {str(e)}")
@@ -1235,6 +1348,7 @@ class MilvusProvider(BaseProvider):
         top_n: int = 20,
         rrf_k: int = 60,
         output_fields: Optional[List[str]] = None,
+        filter_expr: Optional[str] = None,
         **search_params
     ) -> Tuple[List[Dict[str, Any]], str]:
         """
@@ -1249,6 +1363,7 @@ class MilvusProvider(BaseProvider):
             top_n: 粗排候选集大小
             rrf_k: RRF 排名平滑因子
             output_fields: 返回字段列表
+            filter_expr: 过滤表达式（如 'doc_id == "xxx"'），用于 Partition Key 级别的文档隔离
             
         Returns:
             (results: List[Dict], search_mode: str)
@@ -1314,12 +1429,20 @@ class MilvusProvider(BaseProvider):
                 if search_params.get("ef"):
                     dense_search_params = {"ef": search_params["ef"]}
                 
+                # 构建过滤表达式（用于 Partition Key 文档隔离）
+                # 参考 Dify 架构：多文档共享同一物理 Collection 时，
+                # 通过 expr 过滤实现文档级别的检索隔离
+                expr = filter_expr if filter_expr else None
+                if expr:
+                    logger.info(f"混合检索应用文档过滤: {expr}")
+                
                 # 稠密向量检索请求（Dify 方案：固定 embedding 字段名）
                 dense_req = AnnSearchRequest(
                     data=[dense_vec],
                     anns_field=target_dense_field,
                     param={"metric_type": metric_type, "params": dense_search_params},
-                    limit=top_n
+                    limit=top_n,
+                    expr=expr
                 )
                 
                 # 准备稀疏向量
@@ -1331,7 +1454,8 @@ class MilvusProvider(BaseProvider):
                     data=[milvus_sparse],
                     anns_field="sparse_embedding",
                     param={"metric_type": "IP", "params": {}},
-                    limit=top_n
+                    limit=top_n,
+                    expr=expr
                 )
                 
                 # RRF 融合
@@ -1339,7 +1463,7 @@ class MilvusProvider(BaseProvider):
                 
                 results = collection.hybrid_search(
                     reqs=[dense_req, sparse_req],
-                    ranker=reranker,
+                    rerank=reranker,
                     limit=top_n,
                     output_fields=output_fields
                 )

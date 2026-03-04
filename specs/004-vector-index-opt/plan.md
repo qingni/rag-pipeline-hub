@@ -75,7 +75,7 @@ backend/
 │   │   ├── search_service.py          # 检索 + 混合检索服务
 │   │   ├── providers/
 │   │   │   └── milvus_provider.py     # Milvus 连接管理/CRUD
-│   │   ├── reranker_service.py        # bge-reranker-v2-m3 精排服务
+│   │   ├── reranker_service.py        # qwen3-reranker-4b 精排服务
 │   │   └── recommendation_service.py  # 智能推荐引擎（NEW）
 │   ├── api/
 │   │   └── vector_index.py            # 索引管理 + 检索 + 推荐 REST 端点（统一入口）

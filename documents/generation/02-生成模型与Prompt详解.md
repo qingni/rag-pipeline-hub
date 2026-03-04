@@ -22,24 +22,17 @@
 
 ```python
 GENERATION_MODELS = {
-    "deepseek-v3": {
-        "name": "deepseek-v3",
+    "deepseek-v3.2": {
+        "name": "deepseek-v3.2",
         "context_length": 128000,
-        "description": "DeepSeek V3 - 0324最新版本，稳定可靠",
+        "description": "DeepSeek V3.2 - 685B参数，【文本推荐】，工具使用和代理任务方面性能显著提高",
         "default_temperature": 0.7,
         "default_max_tokens": 4096,
     },
-    "deepseek-r1": {
-        "name": "deepseek-r1",
+    "deepseek-v3.1": {
+        "name": "deepseek-v3.1",
         "context_length": 128000,
-        "description": "DeepSeek R1 - 支持 Function Calling，128K超长上下文",
-        "default_temperature": 0.7,
-        "default_max_tokens": 4096,
-    },
-    "kimi-k2-instruct": {
-        "name": "kimi-k2-instruct",
-        "context_length": 128000,
-        "description": "Kimi K2 Instruct - 1TB参数，即插即用",
+        "description": "DeepSeek V3.1 - 671B参数，【文本推荐】，支持思考与非思考模式",
         "default_temperature": 0.7,
         "default_max_tokens": 4096,
     },
@@ -50,9 +43,8 @@ GENERATION_MODELS = {
 
 | 模型 | 上下文长度 | 特点 | 适用场景 |
 |------|-----------|------|----------|
-| deepseek-v3 | 128K | 稳定可靠，响应快 | 通用问答、日常使用 |
-| deepseek-r1 | 128K | 支持Function Calling | 需要工具调用的场景 |
-| kimi-k2-instruct | 128K | 1TB参数，能力强 | 复杂推理、长文档分析 |
+| deepseek-v3.2 | 128K | 685B参数，工具使用和代理任务性能强 | 通用问答、复杂推理（推荐） |
+| deepseek-v3.1 | 128K | 671B参数，支持思考模式 | 通用问答、日常使用 |
 
 ### 1.3 模型选择建议
 
@@ -62,14 +54,12 @@ GENERATION_MODELS = {
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  问题类型？                                                  │
-│  ├── 简单问答 → deepseek-v3 (快速稳定)                      │
-│  ├── 复杂推理 → kimi-k2-instruct (能力强)                   │
-│  └── 需要工具 → deepseek-r1 (Function Calling)              │
+│  ├── 通用问答 → deepseek-v3.2 (推荐，性能最强)              │
+│  └── 日常使用 → deepseek-v3.1 (稳定可靠)                  │
 │                                                             │
 │  上下文长度？                                                │
 │  ├── <10K tokens → 任意模型                                 │
-│  ├── 10K-50K tokens → 推荐 deepseek-v3/r1                  │
-│  └── >50K tokens → 推荐 kimi-k2-instruct                   │
+│  └── >10K tokens → 推荐 deepseek-v3.2                    │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -92,13 +82,13 @@ GENERATION_MODELS = {
 **代码示例**:
 ```python
 # 事实性问答，使用低温度
-llm = ChatOpenAI(model="deepseek-v3", temperature=0.3)
+llm = ChatOpenAI(model="deepseek-v3.2", temperature=0.3)
 
 # 通用问答，使用中等温度
-llm = ChatOpenAI(model="deepseek-v3", temperature=0.7)
+llm = ChatOpenAI(model="deepseek-v3.2", temperature=0.7)
 
 # 创意写作，使用高温度
-llm = ChatOpenAI(model="deepseek-v3", temperature=1.0)
+llm = ChatOpenAI(model="deepseek-v3.2", temperature=1.0)
 ```
 
 ### 2.2 最大Token数 (Max Tokens)

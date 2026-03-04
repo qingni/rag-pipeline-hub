@@ -187,14 +187,6 @@ EMBEDDING_MODEL_PARAMS = {
         "max_context": 32768,
         "description": "Qwen3 高精度模型，4096维，32K上下文"
     },
-    "hunyuan-embedding": {
-        "similarity_threshold": 0.55,
-        "min_chunk_size": 200,
-        "max_chunk_size": 1000,
-        "dimension": 1024,
-        "max_context": 8192,
-        "description": "腾讯混元 Embedding，1024维"
-    },
     "default": {
         "similarity_threshold": 0.5,
         "min_chunk_size": 200,

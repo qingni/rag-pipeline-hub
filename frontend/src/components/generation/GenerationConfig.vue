@@ -136,7 +136,7 @@ import { Settings } from 'lucide-vue-next'
 const props = defineProps({
   model: {
     type: String,
-    default: 'deepseek-v3'
+    default: 'deepseek-v3.2'
   },
   temperature: {
     type: Number,

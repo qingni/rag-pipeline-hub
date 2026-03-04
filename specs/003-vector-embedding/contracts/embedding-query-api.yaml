@@ -98,7 +98,6 @@ paths:
             enum:
               - bge-m3
               - qwen3-embedding-8b
-              - hunyuan-embedding
               - qwen3-vl-embedding-8b
           description: Filter by embedding model
           example: "qwen3-embedding-8b"
@@ -258,7 +257,6 @@ paths:
             enum:
               - bge-m3
               - qwen3-embedding-8b
-              - hunyuan-embedding
               - qwen3-vl-embedding-8b
           description: Filter by specific model
           example: "qwen3-embedding-8b"
@@ -363,7 +361,6 @@ components:
           enum:
             - bge-m3
             - qwen3-embedding-8b
-            - hunyuan-embedding
             - qwen3-vl-embedding-8b
           description: Embedding model used
           example: "qwen3-embedding-8b"

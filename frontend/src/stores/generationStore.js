@@ -23,7 +23,7 @@ export const useGenerationStore = defineStore('generation', () => {
   
   // 模型配置
   const availableModels = ref([])
-  const selectedModel = ref('deepseek-v3')
+  const selectedModel = ref('deepseek-v3.2')
   const temperature = ref(0.7)
   const maxTokens = ref(4096)
   

@@ -20,7 +20,7 @@ from ..storage.database import Base
 # ============================================================================
 # 支持的模型列表 (统一定义，保持一致性)
 # ============================================================================
-SUPPORTED_TEXT_MODELS = ["bge-m3", "qwen3-embedding-8b", "hunyuan-embedding"]
+SUPPORTED_TEXT_MODELS = ["bge-m3", "qwen3-embedding-8b"]
 SUPPORTED_MULTIMODAL_MODELS = ["qwen3-vl-embedding-8b"]
 SUPPORTED_MODELS = SUPPORTED_TEXT_MODELS + SUPPORTED_MULTIMODAL_MODELS
 
@@ -179,7 +179,7 @@ class EmbeddingResult(Base):
             name='check_status_enum'
         ),
         CheckConstraint(
-            "model IN ('bge-m3', 'qwen3-embedding-8b', 'hunyuan-embedding', 'qwen3-vl-embedding-8b')",
+            "model IN ('bge-m3', 'qwen3-embedding-8b', 'qwen3-vl-embedding-8b')",
             name='check_model_enum'
         ),
         CheckConstraint(
@@ -328,6 +328,7 @@ class Vector(BaseModel):
     processing_time_ms: Optional[float] = Field(None, ge=0, description="Processing time")
     source_text: Optional[str] = Field(None, description="Original source text for this chunk")
     chunk_type: Optional[str] = Field("text", description="Chunk type: text, table, image, code")
+    chunk_metadata: Optional[dict] = Field(None, description="Structured chunk metadata from chunker (heading_path, section_title, etc.)")
     
     @field_validator('dimension')
     @classmethod

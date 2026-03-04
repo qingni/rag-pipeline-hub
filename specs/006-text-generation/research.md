@@ -11,7 +11,7 @@
 **Decision**: 使用 langchain-openai 的 ChatOpenAI 类
 
 **Rationale**:
-- 三个目标模型（deepseek-v3、deepseek-r1、kimi-k2-instruct）均支持 OpenAI 兼容 API
+- 两个目标模型（deepseek-v3.2、deepseek-v3.1）均支持 OpenAI 兼容 API
 - 与现有 EmbeddingService 使用相同的 base_url，保持一致性
 - langchain-openai 提供了完善的流式输出支持
 - 内置重试机制和错误处理
@@ -28,7 +28,7 @@
 from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(
-    model="deepseek-v3",
+model="deepseek-v3.2",
     openai_api_key=api_key,
     openai_api_base=base_url,  # 与 Embedding 相同
     temperature=0.7,
@@ -86,9 +86,8 @@ eventSource.onmessage = (event) => {
 
 | 模型 | 上下文长度 | 默认温度 | 特点 |
 |------|-----------|---------|------|
-| deepseek-v3 | 128K | 0.7 | 0324最新版本，稳定可靠 |
-| deepseek-r1 | 128K | 0.7 | 支持 Function Calling |
-| kimi-k2-instruct | 128K | 0.7 | 1TB参数，代理体验好 |
+| deepseek-v3.2 | 128K | 0.7 | 685B参数，【文本推荐】，工具使用和代理任务方面性能显著提高 |
+| deepseek-v3.1 | 128K | 0.7 | 671B参数，【文本推荐】，支持思考与非思考模式 |
 
 **Common Parameters**:
 - `temperature`: 0.0 - 2.0，默认 0.7
@@ -98,24 +97,17 @@ eventSource.onmessage = (event) => {
 **Implementation Notes**:
 ```python
 GENERATION_MODELS = {
-    "deepseek-v3": {
-        "name": "deepseek-v3",
+    "deepseek-v3.2": {
+        "name": "deepseek-v3.2",
         "context_length": 128000,
-        "description": "DeepSeek V3 - 0324最新版本，稳定可靠",
+        "description": "DeepSeek V3.2 - 685B参数，【文本推荐】，工具使用和代理任务方面性能显著提高",
         "default_temperature": 0.7,
         "default_max_tokens": 4096,
     },
-    "deepseek-r1": {
-        "name": "deepseek-r1",
+    "deepseek-v3.1": {
+        "name": "deepseek-v3.1",
         "context_length": 128000,
-        "description": "DeepSeek R1 - 支持 Function Calling，128K超长上下文",
-        "default_temperature": 0.7,
-        "default_max_tokens": 4096,
-    },
-    "kimi-k2-instruct": {
-        "name": "kimi-k2-instruct",
-        "context_length": 128000,
-        "description": "Kimi K2 Instruct - 1TB参数，即插即用",
+        "description": "DeepSeek V3.1 - 671B参数，【文本推荐】，支持思考与非思考模式",
         "default_temperature": 0.7,
         "default_max_tokens": 4096,
     },

@@ -49,7 +49,7 @@
 
 **Goal**: Configure and validate all four embedding models (BGE-M3, Qwen3-Embedding-8B, Hunyuan-Embedding, Qwen3-VL-Embedding-8B) with OpenAI-compatible protocol
 
-**Independent Test**: Initialize service with each model and verify vectors generated with correct dimensions (1024 for bge-m3/hunyuan, 4096 for qwen3/qwen3-vl)
+**Independent Test**: Initialize service with each model and verify vectors generated with correct dimensions (1024 for bge-m3, 4096 for qwen3/qwen3-vl)
 
 ### Implementation for User Story 6
 
