@@ -26,8 +26,12 @@
         <span class="info-value">{{ selectedDocInfo.filename }}</span>
       </div>
       <div class="info-row">
+        <span class="info-label">分块时间:</span>
+        <span class="info-value">{{ formatDateTime(selectedDocInfo.created_at) }}</span>
+      </div>
+      <div class="info-row">
         <span class="info-label">上传时间:</span>
-        <span class="info-value">{{ formatDateTime(selectedDocInfo.created_at || selectedDocInfo.upload_time) }}</span>
+        <span class="info-value">{{ formatDateTime(selectedDocInfo.upload_time) }}</span>
       </div>
       <div class="info-row">
         <span class="info-label">文件大小:</span>

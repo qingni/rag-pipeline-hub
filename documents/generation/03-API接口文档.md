@@ -56,10 +56,9 @@
 ```json
 {
   "question": "如何在自选股中添加股票？",
-  "model": "deepseek-v3",
+  "model": "deepseek-v3.2",
   "temperature": 0.7,
-  "max_tokens": 4096,
-  "context": [
+  "max_tokens": 4096,  "context": [
     {
       "content": "在股票APP的自选页面中，添加股票到自选列表主要有以下两种方式...",
       "source_file": "技术文档.md",
@@ -73,7 +72,7 @@
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | question | string | 是 | - | 用户问题，1-10000字符 |
-| model | string | 否 | deepseek-v3 | 模型名称 |
+| model | string | 否 | deepseek-v3.2 | 模型名称 |
 | temperature | float | 否 | 0.7 | 温度参数，0-2 |
 | max_tokens | int | 否 | 4096 | 最大输出长度，1-8192 |
 | context | array | 否 | [] | 检索上下文 |
@@ -95,7 +94,7 @@
 {
   "request_id": "550e8400-e29b-41d4-a716-446655440000",
   "answer": "根据参考资料，在自选股中添加股票主要有以下两种方式：\n\n### 1. 通过搜索功能添加 [1]\n- 点击顶部导航栏的搜索栏\n- 输入股票名称或代码进行搜索\n- 在搜索结果中点击"+"按钮添加\n\n### 2. 通过推荐引导弹窗添加 [2]\n- 系统会自动弹出推荐引导弹窗\n- 直接选择感兴趣的股票添加",
-  "model": "deepseek-v3",
+  "model": "deepseek-v3.2",
   "token_usage": {
     "prompt_tokens": 856,
     "completion_tokens": 245,
@@ -192,23 +191,16 @@ data: [DONE]
 {
   "models": [
     {
-      "name": "deepseek-v3",
+      "name": "deepseek-v3.2",
       "context_length": 128000,
-      "description": "DeepSeek V3 - 0324最新版本，稳定可靠",
+      "description": "DeepSeek V3.2 - 685B参数，【文本推荐】，工具使用和代理任务方面性能显著提高",
       "default_temperature": 0.7,
       "default_max_tokens": 4096
     },
     {
-      "name": "deepseek-r1",
+      "name": "deepseek-v3.1",
       "context_length": 128000,
-      "description": "DeepSeek R1 - 支持 Function Calling，128K超长上下文",
-      "default_temperature": 0.7,
-      "default_max_tokens": 4096
-    },
-    {
-      "name": "kimi-k2-instruct",
-      "context_length": 128000,
-      "description": "Kimi K2 Instruct - 1TB参数，即插即用",
+      "description": "DeepSeek V3.1 - 671B参数，【文本推荐】，支持思考与非思考模式",
       "default_temperature": 0.7,
       "default_max_tokens": 4096
     }
@@ -255,7 +247,7 @@ data: [DONE]
       "request_id": "550e8400-e29b-41d4-a716-446655440000",
       "question": "如何在自选股中添加股票？",
       "answer_preview": "根据参考资料，在自选股中添加股票主要有以下两种方式：\n\n### 1. 通过搜索功能添加 [1]\n- 点击顶部导航栏的搜索栏\n- 输入股票名称或代码进行搜索...",
-      "model": "deepseek-v3",
+      "model": "deepseek-v3.2",
       "status": "completed",
       "created_at": "2025-12-26T10:30:00Z"
     }
@@ -282,7 +274,7 @@ data: [DONE]
   "request_id": "550e8400-e29b-41d4-a716-446655440000",
   "question": "如何在自选股中添加股票？",
   "answer": "根据参考资料，在自选股中添加股票主要有以下两种方式...",
-  "model": "deepseek-v3",
+  "model": "deepseek-v3.2",
   "temperature": 0.7,
   "max_tokens": 4096,
   "context_sources": [
@@ -361,7 +353,7 @@ data: [DONE]
 
 ```json
 {
-  "detail": "Model 'unknown-model' not found. Available models: ['deepseek-v3', 'deepseek-r1', 'kimi-k2-instruct']"
+  "detail": "Model 'unknown-model' not found. Available models: ['deepseek-v3.2', 'deepseek-v3.1']"
 }
 ```
 
@@ -500,7 +492,7 @@ class GenerationClient:
     def generate(
         self,
         question: str,
-        model: str = "deepseek-v3",
+        model: str = "deepseek-v3.2",
         temperature: float = 0.7,
         max_tokens: int = 4096,
         context: Optional[List[ContextItem]] = None
@@ -524,7 +516,7 @@ class GenerationClient:
         self,
         question: str,
         on_chunk: Callable[[Dict], None],
-        model: str = "deepseek-v3",
+        model: str = "deepseek-v3.2",
         temperature: float = 0.7,
         max_tokens: int = 4096,
         context: Optional[List[ContextItem]] = None

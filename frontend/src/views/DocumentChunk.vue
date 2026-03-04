@@ -20,11 +20,11 @@
                 block
                 theme="primary"
                 size="large"
-                :disabled="!canStartChunking"
+                :disabled="!canStartChunking || isProcessing"
                 :loading="isProcessing"
                 @click="handleStartChunking"
               >
-                {{ isProcessing ? '处理中...' : '开始分块' }}
+                {{ isProcessing ? '分块处理中...' : '开始分块' }}
               </t-button>
             </t-card>
           </t-space>

@@ -44,6 +44,7 @@ class HybridSearchRequest(BaseModel):
     search_mode: SearchMode = Field(default=SearchMode.AUTO, description="检索模式")
     reranker_top_n: int = Field(default=20, ge=10, le=100, description="Reranker 候选集大小")
     reranker_top_k: Optional[int] = Field(default=None, ge=1, description="Reranker 最大返回数（默认使用 top_k）")
+    enable_query_enhancement: bool = Field(default=True, description="是否启用查询增强（Query Rewrite + Multi-query）")
     page: int = Field(default=1, ge=1, description="页码")
     page_size: int = Field(default=10, ge=1, le=100, description="每页数量")
 
@@ -85,11 +86,24 @@ class HybridSearchResultItem(BaseModel):
 
 class SearchTiming(BaseModel):
     """检索各阶段耗时明细"""
+    query_enhancement_ms: int = Field(default=0, description="查询增强耗时（Query Rewrite + Multi-query）")
     embedding_ms: int = Field(default=0, description="查询向量化耗时")
     bm25_ms: int = Field(default=0, description="BM25 稀疏向量生成耗时")
     search_ms: int = Field(default=0, description="向量检索耗时（含 RRF）")
     reranker_ms: int = Field(default=0, description="Reranker 精排耗时")
     total_ms: int = Field(default=0, description="总耗时")
+
+
+class QueryEnhancementInfo(BaseModel):
+    """查询增强信息（用于调试和前端展示）"""
+    enabled: bool = Field(default=False, description="是否启用了查询增强")
+    original_query: str = Field(default="", description="原始查询")
+    rewritten_query: str = Field(default="", description="改写后的主查询")
+    is_complex: bool = Field(default=False, description="是否为复杂查询（触发 Multi-query）")
+    sub_queries: List[str] = Field(default_factory=list, description="多查询变体列表")
+    all_queries: List[str] = Field(default_factory=list, description="所有实际执行的查询")
+    enhancement_time_ms: int = Field(default=0, description="查询增强耗时（毫秒）")
+    error: Optional[str] = Field(default=None, description="查询增强错误信息")
 
 
 class HybridSearchResponseData(BaseModel):
@@ -103,6 +117,7 @@ class HybridSearchResponseData(BaseModel):
     total_count: int = Field(..., description="结果总数")
     execution_time_ms: int = Field(..., description="总执行耗时(毫秒)")
     timing: Optional[SearchTiming] = Field(default=None, description="各阶段耗时明细")
+    query_enhancement: Optional[QueryEnhancementInfo] = Field(default=None, description="查询增强信息")
 
 
 class HybridSearchResponse(BaseModel):

@@ -328,6 +328,7 @@ class Vector(BaseModel):
     processing_time_ms: Optional[float] = Field(None, ge=0, description="Processing time")
     source_text: Optional[str] = Field(None, description="Original source text for this chunk")
     chunk_type: Optional[str] = Field("text", description="Chunk type: text, table, image, code")
+    chunk_metadata: Optional[dict] = Field(None, description="Structured chunk metadata from chunker (heading_path, section_title, etc.)")
     
     @field_validator('dimension')
     @classmethod

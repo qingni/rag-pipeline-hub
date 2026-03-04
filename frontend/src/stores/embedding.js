@@ -364,6 +364,23 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     }
   }
 
+  async function clearAllEmbeddingResults() {
+    try {
+      error.value = null
+      const response = await embeddingService.clearAllResults()
+      
+      // 清空本地状态
+      embeddingHistory.value = []
+      clearResults()
+      
+      return response
+    } catch (err) {
+      const errorMessage = err.message || '清空失败'
+      error.value = errorMessage
+      throw err
+    }
+  }
+
   return {
     // State
     selectedDocumentId,
@@ -394,6 +411,7 @@ export const useEmbeddingStore = defineStore('embedding', () => {
     fetchEmbeddingHistory,  // 新增
     fetchEmbeddingResultById,  // 新增
     deleteEmbeddingResult,  // 新增
+    clearAllEmbeddingResults,  // 新增：清空所有向量化记录
     startEmbedding,
     clearResults,
     resetSelection,

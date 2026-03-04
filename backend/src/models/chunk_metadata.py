@@ -38,6 +38,10 @@ class TextChunkMetadata(BaseChunkMetadata):
     paragraph_index: Optional[int] = None
     is_title: bool = False
     language: Optional[str] = None
+    section_title: Optional[str] = None  # 所属章节标题（如 ## 二、交易内容展示区）
+    context_before: Optional[str] = None  # 前文上下文（短 chunk 精排兜底）
+    context_after: Optional[str] = None  # 后文上下文（短 chunk 精排兜底）
+    merged_headings: Optional[List[str]] = None  # 被合并的标题列表（短 chunk 合并记录）
 
 
 @dataclass

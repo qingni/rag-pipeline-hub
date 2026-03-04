@@ -531,13 +531,27 @@ class VectorIndexService:
                         vectors.append(item["vector"])
                         # doc_id 提升为顶级字段（用于 Partition Key）
                         doc_ids.append(embedding_result.document_id or "unknown")
+                        # 从 chunk_metadata 中提取结构化信息（heading_path, section_title 等）
+                        # 这些信息来自 chunker，对检索时的上下文拼接（如 Reranker 的 [章节: xxx] 前缀）至关重要
+                        chunk_meta = item.get("chunk_metadata") or {}
+                        heading_path = chunk_meta.get("heading_path", [])
+                        section_title = chunk_meta.get("section_title", "") or chunk_meta.get("heading_text", "")
+                        # 提取 table/code/image chunk 的上下文信息，用于 Reranker 理解非文本 chunk 的语境
+                        context_before = chunk_meta.get("context_before", "")
+                        context_after = chunk_meta.get("context_after", "")
                         metadata_list.append({
                             "index": item.get("index", len(vectors) - 1),
                             "text_hash": item.get("text_hash"),
                             "text_length": item.get("text_length", 0),
                             "source_text": item.get("source_text", "")[:500],  # 限制长度
                             "document_id": embedding_result.document_id,
-                            "embedding_result_id": embedding_result.result_id
+                            "embedding_result_id": embedding_result.result_id,
+                            "chunk_type": item.get("chunk_type", "text"),
+                            "chunk_index": item.get("index", 0),
+                            "heading_path": heading_path,
+                            "section_title": section_title,
+                            "context_before": context_before,
+                            "context_after": context_after,
                         })
             
             if len(vectors) == 0:
@@ -1020,6 +1034,11 @@ class VectorIndexService:
         """
         删除索引
         
+        「逻辑与物理分层」安全删除：
+        - 只删除该索引记录对应文档在物理 Collection 中的向量（通过 doc_id 过滤）
+        - 删除后如果物理 Collection 为空，则自动 drop Collection 释放资源
+        - 不会误删同一 Collection 中其他文档的向量
+        
         Args:
             index_id: 索引 ID
         """
@@ -1031,10 +1050,37 @@ class VectorIndexService:
                 operation_type=OperationType.DELETE,
                 index_id=index_id
             ):
-                # 从提供者中删除索引
+                # 从 Milvus 中按 doc_id 精准删除该文档的向量
                 try:
                     provider = self._get_provider_for_index(vector_index)
-                    provider.delete_index(vector_index.provider_index_id)
+                    doc_id = self._get_doc_id_for_index(vector_index)
+                    
+                    if doc_id and vector_index.provider_index_id:
+                        # 精准删除：只删除该文档的向量
+                        provider.delete_by_doc_id(
+                            vector_index.provider_index_id,
+                            doc_id
+                        )
+                        # 检查 Collection 是否为空，为空则 drop
+                        provider.drop_collection_if_empty(vector_index.provider_index_id)
+                    elif vector_index.provider_index_id:
+                        # 兜底：如果无法确定 doc_id，检查是否是唯一使用该 Collection 的索引
+                        other_indexes = self.db.query(VectorIndex).filter(
+                            VectorIndex.provider_index_id == vector_index.provider_index_id,
+                            VectorIndex.id != index_id,
+                            VectorIndex.status == IndexStatus.READY
+                        ).count()
+                        
+                        if other_indexes == 0:
+                            # 该 Collection 没有其他索引引用，安全 drop
+                            provider.delete_index(vector_index.provider_index_id)
+                            logger.info(f"No other indexes reference this Collection, dropped it.")
+                        else:
+                            logger.warning(
+                                f"Cannot determine doc_id for index {index_id}, "
+                                f"and {other_indexes} other indexes share the same Collection. "
+                                f"Skipping Milvus deletion to prevent data loss."
+                            )
                 except Exception as e:
                     logger.warning(f"Failed to delete from provider: {str(e)}")
                 
@@ -1132,6 +1178,36 @@ class VectorIndexService:
         """获取索引对应的提供者"""
         provider_name = vector_index.index_type.value.lower()
         return self.registry.get_provider(provider_name)
+
+    def _get_doc_id_for_index(self, vector_index: VectorIndex) -> Optional[str]:
+        """
+        从索引记录中获取对应的文档 ID (doc_id)
+        
+        doc_id 是 Milvus Collection 中的 Partition Key 字段，
+        用于在共享 Collection 中区分不同文档的向量。
+        
+        获取优先级：
+        1. 从关联的 EmbeddingResult 中获取 document_id
+        2. 如果不存在，返回 None
+        
+        Args:
+            vector_index: VectorIndex 对象
+            
+        Returns:
+            doc_id 字符串，如果无法确定返回 None
+        """
+        # 优先从关联的 EmbeddingResult 获取 document_id
+        if vector_index.embedding_result_id:
+            try:
+                embedding_result = self.db.query(EmbeddingResult).filter(
+                    EmbeddingResult.result_id == vector_index.embedding_result_id
+                ).first()
+                if embedding_result and embedding_result.document_id:
+                    return embedding_result.document_id
+            except Exception as e:
+                logger.warning(f"Failed to get doc_id from embedding result: {e}")
+        
+        return None
 
     def _create_initial_statistics(self, index_id: int) -> None:
         """创建初始统计记录"""
@@ -1526,6 +1602,11 @@ class VectorIndexService:
         """
         删除索引历史记录
         
+        「逻辑与物理分层」安全删除：
+        - 只删除该索引记录对应文档在物理 Collection 中的向量（通过 doc_id 过滤）
+        - 删除后如果物理 Collection 为空，则自动 drop Collection 释放资源
+        - 不会误删同一 Collection 中其他文档的向量
+        
         Args:
             history_id: 历史记录 ID（即索引 ID）
             
@@ -1541,11 +1622,45 @@ class VectorIndexService:
             if not vector_index:
                 raise IndexNotFoundError(f"Index history {history_id} not found")
             
-            # 如果索引状态是 READY，需要先删除实际索引
+            # 如果索引状态是 READY，需要按 doc_id 精准删除 Milvus 中该文档的向量
             if vector_index.status == IndexStatus.READY and vector_index.provider_index_id:
                 try:
                     provider = self._get_provider_for_index(vector_index)
-                    provider.delete_index(vector_index.provider_index_id)
+                    doc_id = self._get_doc_id_for_index(vector_index)
+                    
+                    if doc_id:
+                        # 精准删除：只删除该文档的向量
+                        provider.delete_by_doc_id(
+                            vector_index.provider_index_id,
+                            doc_id
+                        )
+                        # 检查 Collection 是否为空，为空则 drop
+                        provider.drop_collection_if_empty(vector_index.provider_index_id)
+                        logger.info(
+                            f"Safely deleted doc vectors: collection='{vector_index.provider_index_id}', "
+                            f"doc_id='{doc_id}'"
+                        )
+                    else:
+                        # 兜底：无法确定 doc_id 时，检查是否是唯一使用该 Collection 的索引
+                        other_indexes = self.db.query(VectorIndex).filter(
+                            VectorIndex.provider_index_id == vector_index.provider_index_id,
+                            VectorIndex.id != history_id,
+                            VectorIndex.status == IndexStatus.READY
+                        ).count()
+                        
+                        if other_indexes == 0:
+                            provider.delete_index(vector_index.provider_index_id)
+                            logger.info(
+                                f"No doc_id available but no other indexes share this Collection, "
+                                f"dropped Collection '{vector_index.provider_index_id}'"
+                            )
+                        else:
+                            logger.warning(
+                                f"Cannot determine doc_id for history {history_id}, "
+                                f"and {other_indexes} other indexes share Collection "
+                                f"'{vector_index.provider_index_id}'. "
+                                f"Skipping Milvus deletion to prevent data loss."
+                            )
                 except Exception as e:
                     logger.warning(f"Failed to delete provider index: {str(e)}")
             
@@ -1584,7 +1699,7 @@ class VectorIndexService:
         清空所有索引历史记录
         
         删除所有索引记录，同时清理：
-        - Milvus 中的实际索引（如果存在）
+        - Milvus 中的物理 Collection（按 provider_index_id 去重后 drop）
         - 相关的统计记录
         - 相关的查询历史
         
@@ -1596,14 +1711,22 @@ class VectorIndexService:
             all_indexes = self.db.query(VectorIndex).all()
             deleted_count = len(all_indexes)
             
-            # 逐个清理 Milvus 中的实际索引
+            # 按物理 Collection 名称去重后再 drop
+            # 因为多个索引记录可能共享同一个物理 Collection
+            collections_to_drop = set()
             for vector_index in all_indexes:
                 if vector_index.status == IndexStatus.READY and vector_index.provider_index_id:
-                    try:
-                        provider = self._get_provider_for_index(vector_index)
-                        provider.delete_index(vector_index.provider_index_id)
-                    except Exception as e:
-                        logger.warning(f"Failed to delete provider index {vector_index.provider_index_id}: {str(e)}")
+                    collections_to_drop.add(
+                        (vector_index.index_type.value.lower(), vector_index.provider_index_id)
+                    )
+            
+            for provider_name, provider_index_id in collections_to_drop:
+                try:
+                    provider = self.registry.get_provider(provider_name)
+                    if provider:
+                        provider.delete_index(provider_index_id)
+                except Exception as e:
+                    logger.warning(f"Failed to drop Collection {provider_index_id}: {str(e)}")
             
             # 批量删除所有统计记录
             self.db.query(IndexStatistics).delete()
@@ -1616,11 +1739,15 @@ class VectorIndexService:
             
             self.db.commit()
             
-            logger.info(f"Cleared all index history, deleted {deleted_count} records")
+            logger.info(
+                f"Cleared all index history: {deleted_count} records, "
+                f"{len(collections_to_drop)} physical collections dropped"
+            )
             
             return {
                 "deleted_count": deleted_count,
-                "message": f"已清空所有索引历史记录，共删除 {deleted_count} 条",
+                "collections_dropped": len(collections_to_drop),
+                "message": f"已清空所有索引历史记录，共删除 {deleted_count} 条记录，{len(collections_to_drop)} 个物理 Collection",
                 "timestamp": datetime.now().isoformat()
             }
             

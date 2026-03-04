@@ -20,7 +20,7 @@
 
 1. 在搜索页面完成向量检索
 2. 点击"生成回答"按钮
-3. 选择模型（默认 deepseek-v3）
+3. 选择模型（默认 deepseek-v3.2）
 4. 等待流式输出完成
 5. 查看生成的回答和引用来源
 
@@ -30,9 +30,8 @@
    - **温度 (Temperature)**: 0.0-2.0，越高越有创意
    - **最大长度 (Max Tokens)**: 1-8192，控制回答长度
 2. 选择不同模型对比效果：
-   - `deepseek-v3`: 稳定可靠，适合通用场景
-   - `deepseek-r1`: 支持 Function Calling
-   - `kimi-k2-instruct`: 1TB 参数，代理体验好
+   - `deepseek-v3.2`: 685B参数，【文本推荐】，工具使用和代理任务方面性能显著提高
+   - `deepseek-v3.1`: 671B参数，【文本推荐】，支持思考与非思考模式
 
 ### 场景 3: 查看生成历史
 
@@ -50,7 +49,7 @@ curl -X POST http://localhost:8000/api/generation/stream \
   -H "Content-Type: application/json" \
   -d '{
     "question": "什么是 RAG？",
-    "model": "deepseek-v3",
+    "model": "deepseek-v3.2",
     "temperature": 0.7,
     "context": [
       {
@@ -69,7 +68,7 @@ curl -X POST http://localhost:8000/api/generation/generate \
   -H "Content-Type: application/json" \
   -d '{
     "question": "什么是 RAG？",
-    "model": "deepseek-v3",
+    "model": "deepseek-v3.2",
     "stream": false,
     "context": [...]
   }'
@@ -98,7 +97,7 @@ const eventSource = new EventSource('/api/generation/stream', {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     question: '什么是 RAG？',
-    model: 'deepseek-v3',
+    model: 'deepseek-v3.2',
     context: searchResults
   })
 })
@@ -128,7 +127,7 @@ async function generateStream(question, context) {
   const response = await fetch('/api/generation/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, context, model: 'deepseek-v3' })
+    body: JSON.stringify({ question, context, model: 'deepseek-v3.2' })
   })
 
   const reader = response.body.getReader()

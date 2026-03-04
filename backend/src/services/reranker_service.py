@@ -10,7 +10,17 @@ from typing import List, Dict, Any, Optional
 
 from openai import OpenAI
 
-logger = logging.getLogger("reranker_service")
+from src.config import settings
+from src.utils.logger import setup_vector_index_logger
+
+logger = setup_vector_index_logger(
+    name="reranker_service",
+    log_level="DEBUG",
+    log_dir="./logs"
+)
+
+# 模块加载标记：如果在服务启动日志中看到这行，说明 reranker_service.py 被正确加载
+logger.info("[诊断] reranker_service.py 模块已加载 (版本: v2_全量打分_不截取)")
 
 # 支持的 Reranker 模型列表
 SUPPORTED_RERANKER_MODELS = [
@@ -135,6 +145,12 @@ class RerankerService:
         Returns:
             按 reranker_score 降序排序的 Top-K 结果
         """
+        # [诊断] 方法入口日志：确认运行的是哪个版本的 rerank 方法
+        logger.info(
+            f"[诊断] rerank 方法被调用: candidates={len(candidates)}, top_k={top_k}, "
+            f"版本=v2_全量打分_不截取"
+        )
+        
         if not self.available:
             logger.warning("Reranker 不可用，跳过精排")
             return candidates[:top_k]
@@ -159,14 +175,41 @@ class RerankerService:
                     doc_text = metadata.get("source_text", "") or metadata.get("text", "") or ""
                 documents.append(doc_text)
             
+            # ====== Task Instruction 前缀处理 ======
+            # qwen3-reranker-4b 是 Instruction-tuned Reranker，需要 task instruction 前缀
+            # 才能正确理解检索任务意图。参考 Qwen3-Reranker 官方 HuggingFace Model Card：
+            # 格式: "Instruct: {task_description}\nQuery: {actual_query}"
+            # 不加 instruction 时模型退化为通用文本相似度匹配，排序准确度显著下降。
+            task_instruction = getattr(settings, 'RERANKER_TASK_INSTRUCTION', '')
+            if task_instruction:
+                query_with_instruction = f"Instruct: {task_instruction}\nQuery: {query}"
+                logger.info(
+                    f"[Task Instruction] 已为 query 添加 instruction 前缀: "
+                    f"Instruct: {task_instruction[:80]}..."
+                )
+            else:
+                query_with_instruction = query
+                logger.info("[Task Instruction] 未配置 RERANKER_TASK_INSTRUCTION，使用裸 query")
+            
             # 调用远程 Reranker API
+            # 注意：top_n 设为 len(documents)，让 API 返回所有候选的分数，
+            # 而非仅返回 top_k 条。这样外层的三层防御体系（动态阈值过滤、
+            # 文档来源多样性控制等）才能在完整的分数分布上做出正确决策。
+            # 最终的 top_k 截取由外层调用方在防御过滤后统一执行。
+            # [诊断] 确认 API 调用参数
+            api_top_n = len(documents)
+            logger.info(
+                f"[诊断] Reranker API 调用参数: top_n={api_top_n} (应等于候选数={len(documents)}), "
+                f"model={self.model_name}, query_has_instruction={bool(task_instruction)}"
+            )
+            
             response = self._client.post(
                 path="/rerank",
                 body={
                     "model": self.model_name,
-                    "query": query,
+                    "query": query_with_instruction,
                     "documents": documents,
-                    "top_n": min(top_k, len(documents)),
+                    "top_n": api_top_n,
                     "return_documents": False
                 },
                 cast_to=Dict[str, Any]
@@ -201,11 +244,20 @@ class RerankerService:
             
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info(
-                f"Reranker 精排完成: {len(candidates)} 条候选 → Top-{top_k}, "
+                f"Reranker 精排完成: {len(candidates)} 条候选已全部打分并排序, "
                 f"模型={self.model_name}, 耗时 {elapsed_ms:.1f}ms"
             )
             
-            return sorted_results[:top_k]
+            # [诊断] 确认返回数量
+            logger.info(
+                f"[诊断] rerank 返回 {len(sorted_results)} 条结果 (应等于候选数={len(candidates)}, "
+                f"不截取 top_k={top_k})"
+            )
+            
+            # 返回所有已排序结果（不在此处截取 top_k），
+            # 让外层三层防御体系（动态阈值过滤、多样性控制等）在完整结果集上执行，
+            # 最终的 top_k 截取由外层调用方统一处理。
+            return sorted_results
             
         except Exception as e:
             logger.error(f"Reranker API 调用失败: {e}")

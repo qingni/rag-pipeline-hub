@@ -111,8 +111,18 @@ class ChunkingParameterValidator:
             if fmt not in valid_formats:
                 raise ValueError(f"Invalid heading format: {fmt}. Must be one of {valid_formats}")
         
+        # 短 chunk 合并阈值验证（借鉴 Unstructured.io combine_text_under_n_chars）
+        min_chunk_content_size = params.get('min_chunk_content_size', 100)
+        if not isinstance(min_chunk_content_size, int):
+            raise ValueError("min_chunk_content_size must be an integer")
+        if min_chunk_content_size < 0:
+            raise ValueError("min_chunk_content_size must be non-negative (0 to disable merging)")
+        if min_chunk_content_size > 500:
+            raise ValueError("min_chunk_content_size cannot exceed 500")
+        
         return {
-            'heading_formats': heading_formats
+            'heading_formats': heading_formats,
+            'min_chunk_content_size': min_chunk_content_size
         }
     
     @staticmethod

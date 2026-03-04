@@ -142,7 +142,7 @@ class GenerationStatus(str, Enum):
 class GenerationRequest(BaseModel):
     """生成请求"""
     question: str = Field(..., min_length=1, max_length=10000, description="用户问题")
-    model: str = Field(default="deepseek-v3", description="模型名称")
+    model: str = Field(default="deepseek-v3.2", description="模型名称")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")
     max_tokens: int = Field(default=4096, ge=1, le=8192, description="最大输出长度")
     context: List[ContextItem] = Field(default=[], description="检索上下文")
@@ -213,24 +213,17 @@ class GenerationHistoryDetail(BaseModel):
 
 ```python
 GENERATION_MODELS = {
-    "deepseek-v3": {
-        "name": "deepseek-v3",
+    "deepseek-v3.2": {
+        "name": "deepseek-v3.2",
         "context_length": 128000,
-        "description": "DeepSeek V3 - 0324最新版本，稳定可靠",
+        "description": "DeepSeek V3.2 - 685B参数，【文本推荐】，工具使用和代理任务方面性能显著提高",
         "default_temperature": 0.7,
         "default_max_tokens": 4096,
     },
-    "deepseek-r1": {
-        "name": "deepseek-r1",
+    "deepseek-v3.1": {
+        "name": "deepseek-v3.1",
         "context_length": 128000,
-        "description": "DeepSeek R1 - 支持 Function Calling，128K超长上下文",
-        "default_temperature": 0.7,
-        "default_max_tokens": 4096,
-    },
-    "kimi-k2-instruct": {
-        "name": "kimi-k2-instruct",
-        "context_length": 128000,
-        "description": "Kimi K2 Instruct - 1TB参数，即插即用",
+        "description": "DeepSeek V3.1 - 671B参数，【文本推荐】，支持思考与非思考模式",
         "default_temperature": 0.7,
         "default_max_tokens": 4096,
     },

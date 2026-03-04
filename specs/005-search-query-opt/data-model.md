@@ -24,6 +24,9 @@
 | **search_mode** | enum | ❌ | "auto" | auto/hybrid/dense_only | 🆕 检索模式 |
 | **reranker_top_n** | int | ❌ | 20 | 10 ≤ val ≤ 100 | 🆕 Reranker 候选集大小 |
 | **reranker_top_k** | int | ❌ | null | 1 ≤ val ≤ top_n | 🆕 Reranker 最大返回数（null 时使用 top_k） |
+| **enable_query_enhancement** | bool | ❌ | true | - | 🆕 是否启用查询增强（Query Rewrite + Multi-query）[Added: 2026-03-04] |
+| **page** | int | ❌ | 1 | 1 ≤ val | 🆕 分页页码 [Added: 2026-03-04] |
+| **page_size** | int | ❌ | 10 | 1 ≤ val ≤ 100 | 🆕 每页数量 [Added: 2026-03-04] |
 
 **search_mode 枚举**:
 - `auto`: 系统默认值。自动检测 Collection 是否含稀疏向量，有则混合检索，无则纯稠密。等价于「乐观尝试混合检索 + 自动降级」，用户无需手动选择，仅供 API 调用方使用
@@ -68,11 +71,13 @@
 | **reranker_available** | bool | ✅ | 🆕 Reranker 是否可用 |
 | **rrf_k** | int | ❌ | 🆕 使用的 RRF k 值 |
 | **timing** | SearchTiming | ❌ | 🆕 各阶段耗时明细 |
+| **query_enhancement** | QueryEnhancementInfo | ❌ | 🆕 查询增强信息（改写查询、变体查询、耗时等）[Added: 2026-03-04] |
 
 ### 1.4 SearchTiming（检索耗时明细）🆕
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| query_enhancement_ms | int | 🆕 查询增强耗时（Query Rewrite + Multi-query）[Added: 2026-03-04] |
 | embedding_ms | int | 查询向量化耗时 |
 | bm25_ms | int | BM25 稀疏向量生成耗时 |
 | search_ms | int | 向量检索耗时（含 RRF） |
@@ -119,7 +124,24 @@
 | dimension | int | 向量维度 |
 | metric_type | string | 度量类型 |
 | has_sparse | bool | 是否含稀疏向量字段 |
+| **document_count** | int | 🆕 文档数量（该 Collection 下的索引记录数）[Added: 2026-03-04] |
+| **embedding_model** | string | 🆕 知识库绑定的嵌入模型名称（如 qwen3-embedding-8b）[Added: 2026-03-04] |
 | created_at | datetime | 创建时间 |
+
+### 1.7 QueryEnhancementInfo（查询增强信息）🆕 [Added: 2026-03-04]
+
+表示查询增强的结果信息，用于调试和前端展示。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| enabled | bool | 是否启用了查询增强 |
+| original_query | string | 原始查询 |
+| rewritten_query | string | 改写后的主查询 |
+| is_complex | bool | 是否为复杂查询（触发 Multi-query） |
+| sub_queries | string[] | 多查询变体列表 |
+| all_queries | string[] | 所有实际执行的查询（rewritten_query + sub_queries） |
+| enhancement_time_ms | int | 查询增强耗时（毫秒） |
+| error | string | 查询增强错误信息（如有） |
 
 ---
 
@@ -131,6 +153,7 @@ erDiagram
     SearchQuery ||--|| SearchResponseData : "封装为"
     SearchResponseData ||--|{ SearchResult : "包含"
     SearchResponseData ||--o| SearchTiming : "包含"
+    SearchResponseData ||--o| QueryEnhancementInfo : "包含"
     SearchQuery ||--o{ CollectionInfo : "指定目标"
     SearchResult }|--|| CollectionInfo : "来源"
     SearchHistory ||--|| SearchQuery : "记录"
@@ -142,6 +165,17 @@ erDiagram
         float threshold
         enum search_mode
         int reranker_top_n
+        bool enable_query_enhancement
+        int page
+        int page_size
+    }
+    
+    QueryEnhancementInfo {
+        bool enabled
+        string original_query
+        string rewritten_query
+        bool is_complex
+        list sub_queries
     }
     
     SearchResult {
@@ -196,11 +230,21 @@ flowchart TD
     D --> G[各 Collection 独立 RRF 粗排]
     G --> H[合并候选集 ≤ 5×20=100]
     
-    F --> I{Reranker 可用?}
-    H --> I
+    C --> QE[查询增强: Query Rewrite + Multi-query]
+    D --> QE
+    QE --> F[RRF 粗排 / 纯稠密]
+    QE --> G[各 Collection 独立 RRF 粗排]
+    G --> H[合并候选集 ≤ 5×20=100]
+    
+    F --> DEF1[第 1 层: 每文档候选配额控制]
+    H --> DEF1
+    DEF1 --> DEF15[第 1.5 层: 近重复内容去重]
+    DEF15 --> I{Reranker 可用?}
     I -->|是| J[统一 Reranker 精排]
     I -->|否| K[按 rrf_score / similarity_score 排序]
-    J --> L[返回 Top-K 结果]
+    J --> DEF2[第 2 层: 动态阈值过滤]
+    DEF2 --> DEF3[第 3 层: 文档来源多样性控制]
+    DEF3 --> L[返回 Top-K 结果]
     K --> L
 ```
 
@@ -216,5 +260,7 @@ flowchart TD
 | SearchQuery | threshold | 0-1 | ERR_VALIDATION |
 | SearchQuery | reranker_top_n | 10-100 | ERR_VALIDATION |
 | SearchQuery | search_mode | auto/hybrid/dense_only | ERR_VALIDATION |
+| SearchQuery | page | ≥ 1 | ERR_VALIDATION |
+| SearchQuery | page_size | 1-100 | ERR_VALIDATION |
 | Collection | exists | Collection 存在且可用 | INDEX_NOT_FOUND |
 | RRF | k | > 0 (后端配置) | ERR_VALIDATION |

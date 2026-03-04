@@ -509,6 +509,48 @@ async def get_processing_stats(
 
 
 @router.delete(
+    "/clear-all",
+    status_code=status.HTTP_200_OK,
+)
+async def clear_all_embedding_results(
+    db: Session = Depends(get_db),
+):
+    """
+    清空所有向量化结果记录。
+    
+    删除所有向量化记录，同时清理关联的JSON文件。
+    
+    Returns:
+        清空结果，包含删除的记录数
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    db_query = EmbeddingResultDB(db)
+    deleted_count, json_paths = db_query.clear_all_results()
+    
+    # 清理关联的JSON文件
+    cleaned_files = 0
+    for json_file_path in json_paths:
+        try:
+            json_path = Path("results") / json_file_path
+            if json_path.exists():
+                json_path.unlink()
+                cleaned_files += 1
+        except Exception as e:
+            logger.warning(f"Failed to delete JSON file {json_file_path}: {e}")
+    
+    logger.info(f"Cleared all embedding results: {deleted_count} records, {cleaned_files} files")
+    
+    return {
+        "success": True,
+        "message": f"已清空所有向量化记录",
+        "deleted_count": deleted_count,
+        "cleaned_files": cleaned_files
+    }
+
+
+@router.delete(
     "/{result_id}",
     status_code=status.HTTP_200_OK,
     responses={

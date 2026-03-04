@@ -132,6 +132,23 @@ export async function deleteResult(resultId) {
 }
 
 /**
+ * 清空所有向量化结果记录
+ * @returns {Promise<Object>} - 清空结果，包含deleted_count
+ */
+export async function clearAllResults() {
+  const response = await fetch(`${API_BASE}/embedding/results/clear-all`, {
+    method: 'DELETE',
+  })
+  
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || 'Failed to clear all results')
+  }
+  
+  return response.json()
+}
+
+/**
  * Compare embedding results
  * @param {Array<string>} resultIds - Result IDs to compare
  * @returns {Promise<Object>} - Comparison data
@@ -368,6 +385,7 @@ export default {
   getDocumentResults,
   activateResult,
   deleteResult,
+  clearAllResults,
   compareResults,
   getStatistics,
   exportToJson,

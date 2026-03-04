@@ -173,6 +173,24 @@
 - **FR-HYB-006**: 当稀疏向量为空或不可用时，系统必须自动降级到纯稠密向量检索模式（跳过 RRF 融合），直接将稠密检索 Top-N 结果送入 Reranker 精排，确保检索服务不中断
 - **FR-HYB-007**: 当 Reranker 服务不可用时，系统必须跳过精排步骤，直接返回 RRF 粗排结果（或纯稠密检索结果），并在响应中标注 reranker_available=false
 - **FR-HYB-008**: 系统必须提供 Reranker 健康检查接口（GET /reranker/health）
+- **FR-HYB-009**: Reranker 精排时，系统必须支持为查询文本添加 Task Instruction 前缀，格式为 `Instruct: {task_description}\nQuery: {actual_query}`。通过 `RERANKER_TASK_INSTRUCTION` 配置项设置（默认针对产品功能文档检索场景的英文 instruction），设为空字符串则不添加前缀。参考 Qwen3-Reranker 官方 HuggingFace Model Card [Added: 2026-03-04]
+- **FR-HYB-010**: Reranker API 调用时，`top_n` 参数设为候选集全量大小（而非 top_k），返回所有候选的分数，供三层防御体系在完整分数分布上做出正确决策。最终的 top_k 截取由外层在防御过滤后统一执行 [Added: 2026-03-04]
+- **FR-HYB-011**: 传给 Reranker 的候选文本必须添加文档来源前缀，格式为 `[文档: {doc_name}]\n{原始文本}`，帮助 Reranker 理解文档来源上下文以提升排序准确性 [Added: 2026-03-04]
+
+#### 查询增强（Query Enhancement）[Added: 2026-03-04]
+
+- **FR-QE-001**: 系统必须支持查询增强功能（Query Enhancement），通过一次 LLM 调用同时完成查询改写（Query Rewrite）和多查询生成（Multi-query）。查询改写补全用户问题的上下文使语义更清晰；多查询对复杂问题生成 2-3 个变体查询覆盖不同表述。参考 LangChain MultiQueryRetriever、LlamaIndex QueryTransformEngine、Cohere search_queries_only 设计
+- **FR-QE-002**: 查询增强通过 `QUERY_ENHANCEMENT_ENABLED` 全局开关控制（默认开启），使用 `QUERY_ENHANCEMENT_MODEL`（默认 qwen3.5-35b-a3b）进行 LLM 推理。相关配置项包括 `QUERY_ENHANCEMENT_TEMPERATURE`（默认 0.3）、`QUERY_ENHANCEMENT_MAX_TOKENS`（默认 512）、`QUERY_ENHANCEMENT_TIMEOUT`（默认 30s）
+- **FR-QE-003**: 当查询增强判定问题为复杂查询（is_complex=true）时，系统使用多查询策略：对改写后的查询和所有变体查询分别执行向量检索，合并去重后统一送入 Reranker 精排
+- **FR-QE-004**: 当 LLM 调用失败时，查询增强必须降级为使用原始查询文本，不影响后续检索流程
+
+#### 候选集噪声控制（三层防御体系）[Added: 2026-03-04]
+
+- **FR-DEF-001**: 系统必须实现三层防御体系对检索候选集进行噪声控制，提升最终结果的精确率和多样性
+- **FR-DEF-002**: **第 1 层 — 每文档候选配额控制**（Reranker 前）：通过 `MAX_CHUNKS_PER_DOC`（默认 10）限制每个文档（index）最多贡献的候选数量，防止单文档的大量低质 chunk 垄断候选集。参考 Cohere max_chunks_per_doc 设计
+- **FR-DEF-003**: **第 1.5 层 — 近重复内容去重**（Reranker 前）：基于 N-gram Jaccard 相似度自动检测并去除跨文档间内容高度相似的 chunk（如导航栏、页脚、免责声明等共用组件）。通过 `NEAR_DUPLICATE_THRESHOLD`（默认 0.5）控制去重严格度，仅对跨文档 chunk 生效（cross_doc_only=True）。参考 Cohere Rerank 去重建议、Google 网页去重 SimHash、LangChain EnsembleRetriever unique_union
+- **FR-DEF-004**: **第 2 层 — Reranker 动态阈值过滤**（Reranker 后）：使用静态阈值 `RERANKER_SCORE_THRESHOLD`（默认 0.4）和动态阈值（Top1 分数 × `RERANKER_DYNAMIC_THRESHOLD_RATIO` 默认 0.6，上限 `RERANKER_DYNAMIC_THRESHOLD_MAX` 默认 0.5）过滤低质结果，保底至少保留 `RERANKER_MIN_RESULTS`（默认 2）条结果。参考 Dify/Cohere 阈值过滤、Google Vertex AI Search 动态阈值、Pinecone 最佳实践
+- **FR-DEF-005**: **第 3 层 — 文档来源多样性控制**（Reranker 后）：通过 `MAX_RESULTS_PER_DOC`（默认 2）限制每个文档在最终结果中最多占几条，促进结果来源多样性。设为 0 表示不限制
 
 #### 多 Collection 联合搜索
 
@@ -275,7 +293,7 @@
 - 搜索分析和统计报表
 - 搜索结果的导出功能
 - 多语言查询支持（当前仅支持中文和英文）
-- 查询改写与意图识别
+- ~~查询改写与意图识别~~ [Moved to In-Scope: 2026-03-04, 见 FR-QE-001~004]
 - 细粒度的权限控制和多租户隔离
 
 ## Change Log
@@ -288,3 +306,9 @@
 | 2026-02-27 | BUG_FIX [VIBE] | 统一 Top-K 参数描述：从"最终返回数/最终返回结果数量"修改为"最大返回数/最多返回结果数量"，明确 Top-K 为上限语义（at most K），实际返回数量取决于召回结果。前端 UI 标签、提示文字、后端 Schema description、API 契约、Spec 数据模型同步更新。 | FR-UI-006, FR-003, US4 |
 | 2026-02-27 | BEHAVIOR_CHANGE [VIBE] | **一个知识库对应一种 Embedding 模型**：重构 Collection 命名策略，不同嵌入模型自动对应不同逻辑 Collection。1）`vector_config.py` 新增 `get_default_collection_name_for_model()` 函数，按 `default_kb_{model_name}` 格式生成逻辑 Collection 名。2）`create_index_from_embedding()` 当 collection_name 为空时根据嵌入模型自动路由到对应知识库。3）`SearchService` 新增 `_get_embedding_service_for_model()` 和 `_resolve_embedding_model_for_collections()` 方法，搜索时自动使用知识库绑定的模型嵌入查询文本。4）`get_available_collections()` 返回新增 `embedding_model` 字段。5）前端 Collection 选择器展示绑定的嵌入模型信息。 | FR-UI-005, US6 |
 | 2026-02-27 | BEHAVIOR_CHANGE [VIBE] | **跨模型联合搜索**：多 Collection 联合搜索现在支持跨不同 Embedding 模型的 Collection。1）新增 `_group_collections_by_embedding_model()` 方法，按 Embedding 模型对 Collection 进行分组。2）新增 `_embed_query_per_model_group()` 方法，使用 `asyncio.gather()` 并行为每种模型嵌入查询文本。3）`_multi_collection_search()` 从接收单一 `query_vector` 改为接收 `collection_vectors: Dict[str, np.ndarray]`（collection_id → query_vector 映射），每个 Collection 使用各自绑定模型生成的查询向量进行检索。4）合并候选集后统一 Reranker 精排（Reranker 基于文本，天然支持跨模型）。5）`_resolve_embedding_model_for_collections()` 保持向后兼容，单 Collection 场景不受影响。参考业界实践：LlamaIndex MultiIndex 各 Index 独立 embed + 检索，LangChain EnsembleRetriever 各 retriever 独立运行后 RRF/Reranker 融合。 | US6, FR-HYB-004 |
+| 2026-03-04 | BEHAVIOR_CHANGE [VIBE] | **查询增强（Query Enhancement）**：新增 `QueryEnhancementService`，通过一次 LLM 调用（qwen3.5-35b-a3b）同时完成查询改写（Query Rewrite）和多查询生成（Multi-query）。1）查询改写补全用户问题上下文，使语义更清晰。2）多查询对复杂问题生成 2-3 个变体查询，覆盖不同表述。3）SearchService 集成查询增强流程：增强后的改写查询和变体查询分别执行向量检索，合并去重后统一 Reranker 精排。4）降级策略：LLM 失败时使用原始查询。5）新增配置项 `QUERY_ENHANCEMENT_ENABLED`、`QUERY_ENHANCEMENT_MODEL`、`QUERY_ENHANCEMENT_TEMPERATURE`、`QUERY_ENHANCEMENT_MAX_TOKENS`、`QUERY_ENHANCEMENT_TIMEOUT`。6）SearchTiming 新增 `query_enhancement_ms` 字段。此功能从 Out of Scope 移入。参考 LangChain MultiQueryRetriever、LlamaIndex QueryTransformEngine、Cohere search_queries_only。 | FR-QE-001~004, US2 |
+| 2026-03-04 | BEHAVIOR_CHANGE [VIBE] | **三层防御体系（候选集噪声控制）**：新增完整的候选集噪声控制机制，提升检索精确率和结果多样性。1）第 1 层：每文档候选配额控制（`MAX_CHUNKS_PER_DOC=10`，Reranker 前），参考 Cohere max_chunks_per_doc。2）第 1.5 层：近重复内容去重（`NEAR_DUPLICATE_THRESHOLD=0.5`，N-gram Jaccard 跨文档去重），参考 Google 网页去重 SimHash。3）第 2 层：Reranker 动态阈值过滤（静态阈值 0.4 + 动态阈值 Top1×0.6，保底 2 条），参考 Dify/Cohere/Google Vertex AI Search。4）第 3 层：文档来源多样性控制（`MAX_RESULTS_PER_DOC=2`，Reranker 后）。 | FR-DEF-001~005, US2 |
+| 2026-03-04 | BEHAVIOR_CHANGE [VIBE] | **Reranker Task Instruction**：为 qwen3-reranker-4b 添加 Task Instruction 前缀（`Instruct: {task}\nQuery: {query}` 格式），新增配置项 `RERANKER_TASK_INSTRUCTION`。Reranker API 调用 `top_n` 改为返回全量候选分数（供三层防御体系使用），最终截取由外层统一执行。参考 Qwen3-Reranker 官方 Model Card。 | FR-HYB-009~010, US2 |
+| 2026-03-04 | BEHAVIOR_CHANGE [VIBE] | **Reranker 候选文本上下文前缀**：传给 Reranker 的候选文本添加 `[文档: {doc_name}]` 前缀，帮助 Reranker 理解文档来源上下文。 | FR-HYB-011, US2 |
+| 2026-03-04 | BUG_FIX [VIBE] | **修复 embedding_storage chunk_metadata 遗漏**：`save_batch_result()` 序列化 vectors 到 JSON 文件时遗漏了 `chunk_metadata` 字段，导致 heading_path 等元数据在 chunker → embedding JSON → Milvus 的数据链路中断裂。新增 `"chunk_metadata": getattr(v, 'chunk_metadata', None)` 字段。 | FR-HYB-011, US2 |
+| 2026-03-04 | DATA_STRUCTURE [VIBE] | **Spec 数据模型与 API 契约同步**：将代码中已实现的数据结构变更同步到 spec 文件。1）`HybridSearchRequest` 新增 `enable_query_enhancement`(bool, 默认 true)、`page`(int, 默认 1)、`page_size`(int, 默认 10) 字段。2）`HybridSearchResponseData` 新增 `query_enhancement`(QueryEnhancementInfo) 字段，返回查询增强的改写查询、变体查询、耗时等信息。3）`SearchTiming` 新增 `query_enhancement_ms` 字段。4）`CollectionInfo` 新增 `document_count`(int) 和 `embedding_model`(string) 字段。5）新增 `QueryEnhancementInfo` 实体定义（enabled、original_query、rewritten_query、is_complex、sub_queries、all_queries、enhancement_time_ms、error）。6）`RerankerHealthResponse.data` schema 从旧的本地模型字段（use_fp16、flag_embedding_installed、model_loaded）更新为远程 API 字段（api_base_url、api_connected、supported_models）。同步更新 data-model.md 和 contracts/search-api.yaml。 | FR-QE-001~004, FR-UI-005, US2, US4 |

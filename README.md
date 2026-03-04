@@ -148,7 +148,7 @@ rag-framework-spec/
 
 基于检索上下文的 LLM 问答：
 
-- **模型支持**: DeepSeek-V3、DeepSeek-R1、Kimi-K2-Instruct
+- **模型支持**: DeepSeek-V3.2、DeepSeek-V3.1
 - **流式输出**: 支持 SSE 流式响应
 - **引用标注**: 自动标注回答的来源引用
 - **历史记录**: 保存生成历史，支持查询和管理
