@@ -59,6 +59,7 @@ Thumbs.db
 # CodeBuddy - 忽略除 commands 外的所有内容
 .codebuddy/*
 !.codebuddy/commands/
+CODEBUDDY.md
 
 # Cursor - 忽略除 commands 和 rules 外的所有内容
 .cursor/*
