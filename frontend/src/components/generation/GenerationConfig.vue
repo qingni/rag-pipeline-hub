@@ -5,33 +5,33 @@
       模型配置
     </h4>
     
-    <!-- 向量索引选择 -->
+    <!-- 知识库选择 -->
     <div class="config-item">
       <label class="config-label">
-        <span>知识库索引</span>
-        <t-tag v-if="selectedIndexIds.length > 0" size="small" theme="primary">
-          {{ selectedIndexIds.length }} 个
+        <span>知识库</span>
+        <t-tag v-if="selectedCollectionIds.length > 0" size="small" theme="primary">
+          {{ selectedCollectionIds.length }} 个
         </t-tag>
       </label>
       <t-select
-        v-model="selectedIndexIds"
-        :disabled="disabled || isLoadingIndexes"
-        :loading="isLoadingIndexes"
-        placeholder="选择知识库索引（可多选）"
+        v-model="selectedCollectionIds"
+        :disabled="disabled || isLoadingCollections"
+        :loading="isLoadingCollections"
+        placeholder="选择知识库（可多选）"
         multiple
         clearable
-        :popup-props="{ overlayClassName: 'generation-index-select-popup' }"
+        :popup-props="{ overlayClassName: 'generation-collection-select-popup' }"
       >
         <t-option
-          v-for="index in availableIndexes"
-          :key="index.id"
-          :value="index.id"
-          :label="index.name"
+          v-for="collection in availableCollections"
+          :key="collection.id"
+          :value="collection.id"
+          :label="collection.name"
         >
-          <div class="index-option">
-            <div class="index-name">{{ index.name }}</div>
-            <div class="index-desc">
-              {{ index.vector_count || 0 }} 向量 · {{ index.dimension }}维
+          <div class="collection-option">
+            <div class="collection-name">{{ collection.name }}</div>
+            <div class="collection-desc">
+              {{ collection.document_count || 0 }} 文档 · {{ collection.vector_count || 0 }} 向量
             </div>
           </div>
         </t-option>
@@ -42,7 +42,7 @@
     </div>
     
     <!-- 检索数量 -->
-    <div class="config-item" v-if="selectedIndexIds.length > 0">
+    <div class="config-item" v-if="selectedCollectionIds.length > 0">
       <label class="config-label">
         检索数量 (Top-K)
         <span class="label-value">{{ topKValue }}</span>
@@ -154,16 +154,15 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  // 新增：索引相关
-  indexIds: {
+  collectionIds: {
     type: Array,
     default: () => []
   },
-  availableIndexes: {
+  availableCollections: {
     type: Array,
     default: () => []
   },
-  isLoadingIndexes: {
+  isLoadingCollections: {
     type: Boolean,
     default: false
   },
@@ -177,7 +176,7 @@ const emit = defineEmits([
   'update:model', 
   'update:temperature', 
   'update:maxTokens',
-  'update:indexIds',
+  'update:collectionIds',
   'update:topK'
 ])
 
@@ -196,9 +195,9 @@ const maxTokensValue = computed({
   set: (value) => emit('update:maxTokens', value)
 })
 
-const selectedIndexIds = computed({
-  get: () => props.indexIds,
-  set: (value) => emit('update:indexIds', value)
+const selectedCollectionIds = computed({
+  get: () => props.collectionIds,
+  set: (value) => emit('update:collectionIds', value)
 })
 
 const topKValue = computed({
@@ -334,31 +333,31 @@ function formatNumber(num) {
   line-height: 1.4;
 }
 
-/* 索引选择弹出层样式 */
-.generation-index-select-popup .t-select-option {
+/* 知识库选择弹出层样式 */
+.generation-collection-select-popup .t-select-option {
   padding: 10px 12px !important;
   height: auto !important;
   min-height: auto !important;
 }
 
-.generation-index-select-popup .t-select-option__content {
+.generation-collection-select-popup .t-select-option__content {
   white-space: normal;
   line-height: 1.5;
 }
 
-.generation-index-select-popup .index-option {
+.generation-collection-select-popup .collection-option {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.generation-index-select-popup .index-name {
+.generation-collection-select-popup .collection-name {
   font-weight: 500;
   font-size: 14px;
   color: var(--td-text-color-primary);
 }
 
-.generation-index-select-popup .index-desc {
+.generation-collection-select-popup .collection-desc {
   font-size: 12px;
   color: var(--td-text-color-placeholder);
   line-height: 1.4;

@@ -5,7 +5,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as generationApi from '../services/generationApi'
-import { getAvailableIndexes, executeSearch } from '../services/searchApi'
+import { getAvailableCollections, executeHybridSearch } from '../services/searchApi'
 
 export const useGenerationStore = defineStore('generation', () => {
   // ============== State ==============
@@ -27,10 +27,10 @@ export const useGenerationStore = defineStore('generation', () => {
   const temperature = ref(0.7)
   const maxTokens = ref(4096)
   
-  // 索引配置（新增）
-  const availableIndexes = ref([])
-  const isLoadingIndexes = ref(false)
-  const selectedIndexIds = ref([])
+  // 知识库 Collection 配置
+  const availableCollections = ref([])
+  const isLoadingCollections = ref(false)
+  const selectedCollectionIds = ref([])
   const topK = ref(5)
   
   // 检索状态（新增）
@@ -62,7 +62,7 @@ export const useGenerationStore = defineStore('generation', () => {
     availableModels.value.find(m => m.name === selectedModel.value)
   )
   
-  const hasSelectedIndexes = computed(() => selectedIndexIds.value.length > 0)
+  const hasSelectedCollections = computed(() => selectedCollectionIds.value.length > 0)
   
   // ============== Actions ==============
   
@@ -84,19 +84,19 @@ export const useGenerationStore = defineStore('generation', () => {
   }
   
   /**
-   * 加载可用索引列表
+   * 加载可用 Collection（逻辑知识库）列表
    */
-  async function loadAvailableIndexes() {
-    isLoadingIndexes.value = true
+  async function loadAvailableCollections() {
+    isLoadingCollections.value = true
     try {
-      const response = await getAvailableIndexes()
+      const response = await getAvailableCollections()
       if (response.success) {
-        availableIndexes.value = response.data || []
+        availableCollections.value = response.data || []
       }
     } catch (error) {
-      console.error('Failed to load indexes:', error)
+      console.error('Failed to load collections:', error)
     } finally {
-      isLoadingIndexes.value = false
+      isLoadingCollections.value = false
     }
   }
   
@@ -106,7 +106,7 @@ export const useGenerationStore = defineStore('generation', () => {
    * @returns {Promise<Array>} 检索结果
    */
   async function retrieveContext(query) {
-    if (selectedIndexIds.value.length === 0) {
+    if (selectedCollectionIds.value.length === 0) {
       context.value = []
       sources.value = []
       return []
@@ -117,13 +117,12 @@ export const useGenerationStore = defineStore('generation', () => {
     try {
       const params = {
         query_text: query,
-        index_ids: selectedIndexIds.value,
+        collection_ids: selectedCollectionIds.value,
         top_k: topK.value,
         threshold: 0.3,
-        metric_type: 'cosine'
       }
       
-      const response = await executeSearch(params)
+      const response = await executeHybridSearch(params)
       
       if (response.success && response.data?.results) {
         // 转换为 context 格式
@@ -192,8 +191,7 @@ export const useGenerationStore = defineStore('generation', () => {
     processingTime.value = null
     currentRequestId.value = null
     
-    // 如果选择了索引，先执行检索
-    if (selectedIndexIds.value.length > 0) {
+    if (selectedCollectionIds.value.length > 0) {
       await retrieveContext(question)
     } else {
       context.value = []
@@ -253,8 +251,7 @@ export const useGenerationStore = defineStore('generation', () => {
     processingTime.value = null
     
     try {
-      // 如果选择了索引，先执行检索
-      if (selectedIndexIds.value.length > 0) {
+      if (selectedCollectionIds.value.length > 0) {
         await retrieveContext(question)
       } else {
         context.value = []
@@ -403,10 +400,9 @@ export const useGenerationStore = defineStore('generation', () => {
     historyPage,
     historyPageSize,
     historyLoading,
-    // 新增：索引相关
-    availableIndexes,
-    isLoadingIndexes,
-    selectedIndexIds,
+    availableCollections,
+    isLoadingCollections,
+    selectedCollectionIds,
     topK,
     
     // Getters
@@ -414,11 +410,11 @@ export const useGenerationStore = defineStore('generation', () => {
     canGenerate,
     historyTotalPages,
     currentModelInfo,
-    hasSelectedIndexes,
+    hasSelectedCollections,
     
     // Actions
     loadModels,
-    loadAvailableIndexes,
+    loadAvailableCollections,
     retrieveContext,
     setContext,
     clearContext,

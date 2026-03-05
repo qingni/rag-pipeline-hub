@@ -50,9 +50,16 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个智能问答助手。请基于以下参�
 ## 回答要求
 
 1. 基于参考资料给出准确、详细的回答
-2. 如果引用了某段资料，请在回答中标注来源编号，如 [1]、[2]
-3. 如果参考资料不足以回答问题，请明确说明
-4. 回答应该条理清晰，易于理解"""
+2. 在引用参考资料时，必须在相关内容后使用 [1]、[2] 等编号标注来源
+3. 在回答的末尾，必须附上参考来源列表，格式如下：
+
+**参考来源:**
+[1] 文档名1
+[2] 文档名2
+
+4. 如果参考资料不足以回答问题，请明确说明
+5. 回答应该条理清晰，易于理解
+6. 即使只引用了一个来源，也要在末尾列出"""
 
 SYSTEM_PROMPT_NO_CONTEXT = """你是一个智能问答助手。请根据你的知识回答用户的问题。
 
@@ -158,6 +165,50 @@ class GenerationService:
         
         return system_prompt, question
     
+    def _truncate_context_by_token_budget(
+        self,
+        context: List[ContextItem],
+        model: str,
+        question: str,
+        max_tokens: int,
+    ) -> List[ContextItem]:
+        """Truncate context to fit within the model's token budget.
+
+        Keeps items in order (assumed sorted by relevance/reranker_score),
+        greedily adding until the budget is exhausted.
+        """
+        if not context:
+            return context
+
+        model_info = GENERATION_MODELS.get(model)
+        if not model_info:
+            return context
+
+        max_context_tokens = model_info["context_length"]
+
+        system_prompt_tokens = 500
+        question_tokens = self.estimate_tokens(question)
+        reserved_output = max_tokens
+
+        budget = max_context_tokens - system_prompt_tokens - question_tokens - reserved_output
+        budget = int(budget * 0.9)
+
+        if budget <= 0:
+            return []
+
+        selected: List[ContextItem] = []
+        used_tokens = 0
+
+        for item in context:
+            item_tokens = self.estimate_tokens(item.content)
+            if used_tokens + item_tokens <= budget:
+                selected.append(item)
+                used_tokens += item_tokens
+            else:
+                break
+
+        return selected
+
     def _extract_sources(self, context: List[ContextItem]) -> List[SourceReference]:
         """Extract source references from context items."""
         return [
@@ -203,10 +254,16 @@ class GenerationService:
         request_id = str(uuid.uuid4())
         start_time = time.time()
         
-        # Build prompts
+        truncated_context = self._truncate_context_by_token_budget(
+            request.context,
+            request.model,
+            request.question,
+            request.max_tokens,
+        )
+        
         system_prompt, user_prompt = self._build_prompt(
             request.question,
-            request.context
+            truncated_context
         )
         
         # Initialize client
@@ -242,7 +299,7 @@ class GenerationService:
                 model=request.model,
                 token_usage=token_usage,
                 processing_time_ms=processing_time_ms,
-                sources=self._extract_sources(request.context),
+                sources=self._extract_sources(truncated_context),
             )
         except Exception as e:
             raise GenerationError(f"Generation failed: {str(e)}") from e
@@ -268,10 +325,16 @@ class GenerationService:
         total_content = ""
         
         try:
-            # Build prompts
+            truncated_context = self._truncate_context_by_token_budget(
+                request.context,
+                request.model,
+                request.question,
+                request.max_tokens,
+            )
+            
             system_prompt, user_prompt = self._build_prompt(
                 request.question,
-                request.context
+                truncated_context
             )
             
             # Initialize streaming client
@@ -325,7 +388,7 @@ class GenerationService:
                     "total_tokens": estimated_prompt_tokens + estimated_completion_tokens,
                 },
                 "processing_time_ms": processing_time_ms,
-                "sources": [s.model_dump() for s in self._extract_sources(request.context)],
+                "sources": [s.model_dump() for s in self._extract_sources(truncated_context)],
             }
             
         except GenerationCancelledError:

@@ -38,11 +38,11 @@
           v-model:model="selectedModel"
           v-model:temperature="temperature"
           v-model:maxTokens="maxTokens"
-          v-model:indexIds="selectedIndexIds"
+          v-model:collectionIds="selectedCollectionIds"
           v-model:topK="topK"
           :models="availableModels"
-          :available-indexes="availableIndexes"
-          :is-loading-indexes="isLoadingIndexes"
+          :available-collections="availableCollections"
+          :is-loading-collections="isLoadingCollections"
           :disabled="isGenerating || isRetrieving"
         />
         
@@ -151,10 +151,9 @@ const {
   historyPage,
   historyPageSize,
   historyLoading,
-  // 新增：索引相关
-  availableIndexes,
-  isLoadingIndexes,
-  selectedIndexIds,
+  availableCollections,
+  isLoadingCollections,
+  selectedCollectionIds,
   topK,
 } = storeToRefs(store)
 
@@ -165,7 +164,7 @@ const activeTab = ref('generate')
 // Load models on mount
 onMounted(() => {
   store.loadModels()
-  store.loadAvailableIndexes()
+  store.loadAvailableCollections()
 })
 
 // Load history when switching to history tab
