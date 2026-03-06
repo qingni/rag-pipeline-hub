@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     QUERY_ENHANCEMENT_MAX_TOKENS: int = 512          # 最大输出 token 数（JSON 输出无需太大）
     QUERY_ENHANCEMENT_TIMEOUT: int = 30              # 请求超时时间（秒）
     
+    # Contextual Retrieval 配置 (Anthropic-style chunk context generation)
+    CONTEXTUAL_RETRIEVAL_ENABLED: bool = True          # 是否启用（全局开关）
+    CONTEXTUAL_RETRIEVAL_MODEL: str = "qwen3.5-35b-a3b"  # LLM 模型（轻量 MoE，与 query enhancement 共用）
+    CONTEXTUAL_RETRIEVAL_TEMPERATURE: float = 0.0       # 温度（上下文描述需要确定性）
+    CONTEXTUAL_RETRIEVAL_MAX_TOKENS: int = 128           # 最大输出 token（1-2 句话足够）
+    CONTEXTUAL_RETRIEVAL_TIMEOUT: int = 30               # 单次请求超时（秒）
+    CONTEXTUAL_RETRIEVAL_MAX_WORKERS: int = 5            # 并发线程数（同一文档内并发处理 chunk）
+
     # Embedding API Configuration
     EMBEDDING_API_KEY: Optional[str] = None
     EMBEDDING_API_BASE_URL: str = ""  # 必须通过 .env 配置

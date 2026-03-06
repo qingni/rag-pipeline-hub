@@ -1,5 +1,10 @@
 ---
 description: Execute the implementation plan by processing and executing all tasks defined in tasks.md
+handoffs:
+  - label: Code Review
+    agent: code-review
+    prompt: Review all changes made during this implementation
+    send: true
 ---
 
 ## User Input

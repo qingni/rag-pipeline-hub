@@ -9,6 +9,7 @@ import time
 import uuid
 import asyncio
 import hashlib
+import re
 import numpy as np
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -1133,8 +1134,9 @@ model=getattr(settings, 'QUERY_ENHANCEMENT_MODEL', 'qwen3.5-35b-a3b'),
             #   - heading_path 完整路径中的关键词（如"功能"）会干扰 cross-encoder 打分，
             #     导致无关 chunk 因路径关键词匹配而分数异常升高
             #   - section_title fallback 同理，即使只有单层标题也会引入噪声
-            # 参考 LlamaIndex MetadataMode.NONE（Reranker 阶段不拼接 metadata）、
-            # Cohere 官方建议（Reranker 输入保持纯净文本，元数据用于后处理过滤）
+            # 注意：自然语言格式（如"以下内容来自《xxx》："）经测试会加剧关键词污染，
+            # cross-encoder 会将文档名中的关键词当作正文内容参与语义匹配，
+            # 方括号格式更中性，不会干扰打分。
             doc_name = metadata.get("document_name", "")
             if not doc_name and metadata.get("document_id"):
                 doc_name = self._get_document_name(metadata.get("document_id")) or ""

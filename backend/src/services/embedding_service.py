@@ -1364,19 +1364,16 @@ class EmbeddingService:
         embedding_logger.logger.info("[DEBUG] Using text-only embedding path")
         # 文本模型：使用普通的批量嵌入
         embedding_inputs = []
-        chunk_types_list = []  # 收集每个chunk的类型
-        chunk_metadata_list = []  # 收集每个chunk的结构化metadata（heading_path, section_title等）
+        chunk_types_list = []
+        chunk_metadata_list = []
         for chunk in chunks:
             text_content, chunk_type, _, _ = self._prepare_chunk_for_embedding(
                 chunk, is_multimodal=False
             )
-            # 文本模型：所有块都使用文本内容
             embedding_inputs.append(text_content)
             chunk_types_list.append(chunk_type or "text")
-            # 收集 chunk 的结构化 metadata（来自 chunker 的 heading_path、section_title 等）
             raw_metadata = chunk.chunk_metadata if hasattr(chunk, 'chunk_metadata') else None
             if isinstance(raw_metadata, dict):
-                # 只保留对检索有价值的结构化字段，过滤掉位置等冗余信息
                 chunk_metadata_list.append({
                     k: v for k, v in raw_metadata.items()
                     if k in ('heading_path', 'heading_text', 'section_title', 'parent_heading',
@@ -1387,11 +1384,99 @@ class EmbeddingService:
             else:
                 chunk_metadata_list.append(None)
         
+        # === Contextual Retrieval: 为每个 chunk 生成文档级上下文 ===
+        from ..config import settings
+        if getattr(settings, 'CONTEXTUAL_RETRIEVAL_ENABLED', False):
+            embedding_inputs = self._apply_contextual_retrieval(
+                chunking_result, embedding_inputs, db_session
+            )
+        
         return self.embed_documents(
             embedding_inputs, request_id=request_id,
             chunk_types=chunk_types_list,
             chunk_metadata_list=chunk_metadata_list
         )
+
+    def _apply_contextual_retrieval(
+        self,
+        chunking_result,
+        embedding_inputs: List[str],
+        db_session,
+    ) -> List[str]:
+        """
+        Contextual Retrieval: 加载完整文档，为每个 chunk 生成上下文描述并拼接。
+
+        生成的上下文会被 prepend 到 chunk 文本前面，同时作用于
+        embedding 向量和 BM25 稀疏向量（因为 source_text 取自 embedding 输入）。
+        """
+        from ..config import settings
+        from .contextual_retrieval_service import ContextualRetrievalService
+
+        try:
+            # 1. 加载完整文档原文
+            from .chunking_service import ChunkingService
+            chunking_service = ChunkingService()
+            full_doc_text, _, _ = chunking_service.load_source_document(
+                chunking_result.document_id, db_session
+            )
+
+            if not full_doc_text or not full_doc_text.strip():
+                embedding_logger.logger.warning(
+                    f"[ContextualRetrieval] Empty document text for "
+                    f"document_id={chunking_result.document_id}, skipping"
+                )
+                return embedding_inputs
+
+            # 2. 过滤出纯文本 chunk 的内容（跳过图片块等）
+            text_chunk_contents = [
+                text for text in embedding_inputs if text and text.strip()
+            ]
+
+            if not text_chunk_contents:
+                return embedding_inputs
+
+            embedding_logger.logger.info(
+                f"[ContextualRetrieval] Starting: document={chunking_result.document_name}, "
+                f"doc_length={len(full_doc_text)}, chunks={len(text_chunk_contents)}"
+            )
+
+            # 3. 调用 LLM 为每个 chunk 生成上下文
+            cr_service = ContextualRetrievalService(
+                model=getattr(settings, "CONTEXTUAL_RETRIEVAL_MODEL", "qwen3.5-35b-a3b"),
+                temperature=getattr(settings, "CONTEXTUAL_RETRIEVAL_TEMPERATURE", 0.0),
+                max_tokens=getattr(settings, "CONTEXTUAL_RETRIEVAL_MAX_TOKENS", 128),
+                request_timeout=getattr(settings, "CONTEXTUAL_RETRIEVAL_TIMEOUT", 30),
+                max_workers=getattr(settings, "CONTEXTUAL_RETRIEVAL_MAX_WORKERS", 5),
+            )
+            contexts = cr_service.generate_chunk_contexts(full_doc_text, text_chunk_contents)
+
+            # 4. 将上下文 prepend 到 embedding 输入
+            enriched_inputs = []
+            context_idx = 0
+            for original_text in embedding_inputs:
+                if original_text and original_text.strip() and context_idx < len(contexts):
+                    enriched = ContextualRetrievalService.prepend_context(
+                        contexts[context_idx], original_text
+                    )
+                    enriched_inputs.append(enriched)
+                    context_idx += 1
+                else:
+                    enriched_inputs.append(original_text)
+
+            success_count = sum(1 for c in contexts if c)
+            embedding_logger.logger.info(
+                f"[ContextualRetrieval] Completed: {success_count}/{len(contexts)} "
+                f"chunks enriched for document={chunking_result.document_name}"
+            )
+
+            return enriched_inputs
+
+        except Exception as e:
+            embedding_logger.logger.error(
+                f"[ContextualRetrieval] Failed for document={chunking_result.document_name}: {e}. "
+                f"Falling back to original chunks."
+            )
+            return embedding_inputs
 
     def embed_document_latest_chunks(
         self,
@@ -1475,6 +1560,13 @@ class EmbeddingService:
                 })
             else:
                 chunk_metadata_list.append(None)
+
+        # === Contextual Retrieval: 为每个 chunk 生成文档级上下文 ===
+        from ..config import settings
+        if getattr(settings, 'CONTEXTUAL_RETRIEVAL_ENABLED', False):
+            embedding_inputs = self._apply_contextual_retrieval(
+                chunking_result, embedding_inputs, db_session
+            )
         
         return self.embed_documents(
             embedding_inputs, request_id=request_id,
