@@ -301,6 +301,44 @@ model=getattr(settings, 'QUERY_ENHANCEMENT_MODEL', 'qwen3.5-35b-a3b'),
             raise QueryTooLongError(f"查询文本超过最大长度限制 ({MAX_QUERY_LENGTH} 字符)")
         
         return query_text
+
+    def _is_single_topic_query(self, query_text: str) -> bool:
+        """
+        判断是否为单主题查询（用于放宽文档多样性限制）。
+
+        设计目标：
+        - 单主题查询：如“资讯页有哪些功能”，应优先保留同一主题文档的多个高分片段
+        - 多主题查询：如“资讯和交易的区别”，仍保留来源多样性约束
+        """
+        if not query_text:
+            return False
+
+        normalized = re.sub(r"\s+", "", query_text.lower())
+        if not normalized:
+            return False
+
+        max_length = getattr(settings, "SINGLE_TOPIC_QUERY_MAX_LENGTH", 40)
+        if len(normalized) > max_length:
+            return False
+
+        # 明确的多意图信号词（比较/对比/并列问法）
+        multi_intent_markers = (
+            "分别", "对比", "比较", "区别", "差异", "各自", "分别说明",
+            "以及", "同时", "或者", "还是", "并且", "vs", "versus",
+            "、", ";", "；", "\n",
+        )
+        if any(marker in normalized for marker in multi_intent_markers):
+            return False
+
+        # 识别“主题A + 连接词 + 主题B”结构（避免把“功能模块和特性”误判为多主题）
+        topic_pattern = r"(资讯|新闻|交易|行情|自选|基金|社区|选股|详情|个人)"
+        if re.search(
+            rf"{topic_pattern}.{{0,4}}(和|与|及|跟|/).{{0,4}}{topic_pattern}",
+            normalized,
+        ):
+            return False
+
+        return True
     
     def _get_target_indexes(self, index_ids: List[str]) -> List[VectorIndex]:
         """获取目标索引列表"""
@@ -1592,9 +1630,24 @@ model=getattr(settings, 'QUERY_ENHANCEMENT_MODEL', 'qwen3.5-35b-a3b'),
                     # 方案 B：动态阈值上限 cap，防止 Top1 分数波动导致阈值过高误杀相关结果
                     # 参考 Pinecone score-based filtering 实践：阈值不应随 Top1 无限增长
                     dynamic_threshold_max = getattr(settings, 'RERANKER_DYNAMIC_THRESHOLD_MAX', 0.5)
+                    if self._is_single_topic_query(query_text):
+                        single_topic_dynamic_threshold_max = getattr(
+                            settings,
+                            'RERANKER_DYNAMIC_THRESHOLD_MAX_SINGLE_TOPIC',
+                            dynamic_threshold_max
+                        )
+                        if (
+                            single_topic_dynamic_threshold_max > 0
+                            and single_topic_dynamic_threshold_max != dynamic_threshold_max
+                        ):
+                            logger.info(
+                                f"第 2 层防御 - 检测到单主题查询，动态阈值上限放宽: "
+                                f"{dynamic_threshold_max} → {single_topic_dynamic_threshold_max}"
+                            )
+                            dynamic_threshold_max = single_topic_dynamic_threshold_max
                     # 方案 C：保底召回数，无论阈值多严格至少保留 N 条结果
                     # 参考 Dify/LangChain 实践：防止极端情况下召回集为空
-                    min_results = getattr(settings, 'RERANKER_MIN_RESULTS', 3)
+                    min_results = getattr(settings, 'RERANKER_MIN_RESULTS', 5)
                     if dynamic_ratio > 0 and ranked:
                         top1_score = ranked[0].get("reranker_score", 0)
                         dynamic_threshold = top1_score * dynamic_ratio
@@ -1639,6 +1692,27 @@ model=getattr(settings, 'QUERY_ENHANCEMENT_MODEL', 'qwen3.5-35b-a3b'),
                 # 第 3 层防御：文档来源多样性/聚焦控制（Reranker 后）
                 # 限制每个文档来源在最终结果中最多占 max_results_per_doc 个位置
                 max_results_per_doc = getattr(settings, 'MAX_RESULTS_PER_DOC', 0)
+                if ranked and max_results_per_doc > 0:
+                    if self._is_single_topic_query(query_text):
+                        single_topic_limit = getattr(
+                            settings,
+                            'MAX_RESULTS_PER_DOC_SINGLE_TOPIC',
+                            max_results_per_doc
+                        )
+                        if single_topic_limit <= 0:
+                            logger.info(
+                                "第 3 层防御 - 检测到单主题查询，跳过文档来源多样性控制"
+                            )
+                            max_results_per_doc = 0
+                        else:
+                            adjusted_limit = max(max_results_per_doc, single_topic_limit)
+                            if adjusted_limit != max_results_per_doc:
+                                logger.info(
+                                    f"第 3 层防御 - 检测到单主题查询，放宽文档来源上限: "
+                                    f"{max_results_per_doc} → {adjusted_limit}"
+                                )
+                            max_results_per_doc = adjusted_limit
+
                 if max_results_per_doc > 0 and ranked:
                     doc_count = {}
                     diverse_ranked = []
@@ -1995,13 +2069,38 @@ model=getattr(settings, 'QUERY_ENHANCEMENT_MODEL', 'qwen3.5-35b-a3b'),
             f"[诊断] 多Collection搜索 - 进入三层防御体系: "
             f"candidates={len(all_candidates)}, reranker_top_k={reranker_top_k}"
         )
-        
+
+        # P0 优化：多 Collection 合并后，先按 RRF 粗排分数截断候选规模，再送入 Reranker
+        # 避免把大量低相关噪声（70+）全部送入 cross-encoder，导致主题偏移。
+        multi_collection_reranker_top_n = getattr(settings, 'RERANKER_MULTI_COLLECTION_TOP_N', 40)
+        if multi_collection_reranker_top_n > 0:
+            effective_reranker_top_n = min(
+                len(all_candidates),
+                max(reranker_top_k, multi_collection_reranker_top_n)
+            )
+        else:
+            # 配置为 0 时表示不限制
+            effective_reranker_top_n = len(all_candidates)
+
+        candidates_for_rerank = all_candidates
+        if effective_reranker_top_n < len(all_candidates):
+            candidates_for_rerank = sorted(
+                all_candidates,
+                key=lambda x: x.get("score", 0),
+                reverse=True
+            )
+            logger.info(
+                f"P0 优化 - 多Collection Reranker 候选截断: "
+                f"{len(all_candidates)} → {effective_reranker_top_n} "
+                f"(按 RRF_score 降序, cap={multi_collection_reranker_top_n})"
+            )
+
         # 统一 Reranker 精排
         ranked, reranker_available, reranker_ms = await self._rerank_candidates(
             query_text=query_text,
-            candidates=all_candidates,
+            candidates=candidates_for_rerank,
             top_k=reranker_top_k,
-            reranker_top_n=len(all_candidates)  # 多 Collection 合并后全部送入 Reranker
+            reranker_top_n=effective_reranker_top_n
         )
         
         # [诊断] Reranker 返回后的结果数量
@@ -2018,8 +2117,23 @@ model=getattr(settings, 'QUERY_ENHANCEMENT_MODEL', 'qwen3.5-35b-a3b'),
             dynamic_ratio = getattr(settings, 'RERANKER_DYNAMIC_THRESHOLD_RATIO', 0.0)
             # 方案 B：动态阈值上限 cap，防止 Top1 分数波动导致阈值过高误杀相关结果
             dynamic_threshold_max = getattr(settings, 'RERANKER_DYNAMIC_THRESHOLD_MAX', 0.5)
+            if self._is_single_topic_query(query_text):
+                single_topic_dynamic_threshold_max = getattr(
+                    settings,
+                    'RERANKER_DYNAMIC_THRESHOLD_MAX_SINGLE_TOPIC',
+                    dynamic_threshold_max
+                )
+                if (
+                    single_topic_dynamic_threshold_max > 0
+                    and single_topic_dynamic_threshold_max != dynamic_threshold_max
+                ):
+                    logger.info(
+                        f"第 2 层防御 - 检测到单主题查询 (多Collection)，动态阈值上限放宽: "
+                        f"{dynamic_threshold_max} → {single_topic_dynamic_threshold_max}"
+                    )
+                    dynamic_threshold_max = single_topic_dynamic_threshold_max
             # 方案 C：保底召回数，无论阈值多严格至少保留 N 条结果
-            min_results = getattr(settings, 'RERANKER_MIN_RESULTS', 3)
+            min_results = getattr(settings, 'RERANKER_MIN_RESULTS', 5)
             if dynamic_ratio > 0 and ranked:
                 top1_score = ranked[0].get("reranker_score", 0)
                 dynamic_threshold = top1_score * dynamic_ratio
@@ -2065,6 +2179,27 @@ model=getattr(settings, 'QUERY_ENHANCEMENT_MODEL', 'qwen3.5-35b-a3b'),
         # 防止单个文档垄断所有结果名额。
         # 参考 Cohere 官方建议和 Google Vertex AI Search 的 boost/bury 策略。
         max_results_per_doc = getattr(settings, 'MAX_RESULTS_PER_DOC', 0)
+        if ranked and max_results_per_doc > 0:
+            if self._is_single_topic_query(query_text):
+                single_topic_limit = getattr(
+                    settings,
+                    'MAX_RESULTS_PER_DOC_SINGLE_TOPIC',
+                    max_results_per_doc
+                )
+                if single_topic_limit <= 0:
+                    logger.info(
+                        "第 3 层防御 - 检测到单主题查询 (多Collection)，跳过文档来源多样性控制"
+                    )
+                    max_results_per_doc = 0
+                else:
+                    adjusted_limit = max(max_results_per_doc, single_topic_limit)
+                    if adjusted_limit != max_results_per_doc:
+                        logger.info(
+                            f"第 3 层防御 - 检测到单主题查询 (多Collection)，放宽文档来源上限: "
+                            f"{max_results_per_doc} → {adjusted_limit}"
+                        )
+                    max_results_per_doc = adjusted_limit
+
         if max_results_per_doc > 0 and ranked:
             doc_count = {}  # document_name → 已占用名额数
             diverse_ranked = []

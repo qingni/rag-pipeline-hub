@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     RERANKER_API_BASE_URL: str = ""  # 如 http://your-reranker-server.example.com/api/llmproxy
     RERANKER_TIMEOUT: int = 30
     RERANKER_TOP_N: int = 20
+    # 多 Collection 合并后送入 Reranker 的候选上限（按 RRF_score 截断）
+    # 设为 0 表示不限制（不建议，容易引入噪声）
+    RERANKER_MULTI_COLLECTION_TOP_N: int = 40
     # qwen3-reranker 任务指令前缀（参考 Qwen3-Reranker 官方 HuggingFace Model Card）
     # 该 instruction 会拼接到 query 前面，帮助 Reranker 理解检索任务意图
     # 格式: "Instruct: {task_description}\nQuery: {actual_query}"
@@ -44,7 +47,8 @@ class Settings(BaseSettings):
     RERANKER_SCORE_THRESHOLD: float = 0.4  # Reranker 精排后绝对阈值，低于此分数的结果将被过滤（参考 Dify/Cohere 实践）
     RERANKER_DYNAMIC_THRESHOLD_RATIO: float = 0.6  # 动态阈值比例：实际阈值 = max(静态阈值, Top1分数 × 该比例)，参考 Google Vertex AI Search 实践
     RERANKER_DYNAMIC_THRESHOLD_MAX: float = 0.5  # 动态阈值上限：无论 Top1 分数多高，动态阈值不超过此上限，防止 Top1 波动导致误杀（参考 Pinecone 实践）
-    RERANKER_MIN_RESULTS: int = 2  # 保底召回数：阈值过滤后至少保留的结果数，防止极端情况下全部被过滤（参考 Dify/LangChain 保底策略）
+    RERANKER_DYNAMIC_THRESHOLD_MAX_SINGLE_TOPIC: float = 0.45  # 单主题查询动态阈值上限（更宽松，减少误杀）
+    RERANKER_MIN_RESULTS: int = 5  # 保底召回数：阈值过滤后至少保留的结果数，防止极端情况下全部被过滤（参考 Dify/LangChain 保底策略）
     
     # 三层防御体系：候选集噪声控制配置
     # 第 1 层：每文档候选配额控制（Reranker 前），限制每个文档（index）最多贡献的候选数量
@@ -58,6 +62,11 @@ class Settings(BaseSettings):
     # 第 3 层：文档来源多样性控制（Reranker 后），限制每个文档在最终结果中最多占几条
     # 设为 0 表示不限制。适用于需要结果来源多样化的场景
     MAX_RESULTS_PER_DOC: int = 2
+    # 单主题查询时放宽每文档上限（避免误杀同主题高分结果）
+    # 设为 0 表示单主题查询时关闭第 3 层多样性控制
+    MAX_RESULTS_PER_DOC_SINGLE_TOPIC: int = 3
+    # 单主题查询判定的最大长度（字符）
+    SINGLE_TOPIC_QUERY_MAX_LENGTH: int = 40
     
     # 查询增强配置 (Query Enhancement)
     QUERY_ENHANCEMENT_ENABLED: bool = True         # 是否启用查询增强（全局开关）
