@@ -19,7 +19,7 @@
 - Python 3.11
 - FastAPI
 - SQLAlchemy
-- SQLite / PostgreSQL
+- SQLite
 - LangChain
 - OpenAI-compatible LLM / Embedding API
 - Milvus
@@ -31,7 +31,7 @@
 - Vue Router
 - TDesign
 - Tailwind CSS
-- `markdown-it` + `DOMPurify`
+- markdown-it + DOMPurify
 
 ## 典型链路
 

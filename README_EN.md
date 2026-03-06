@@ -20,7 +20,7 @@ An end-to-end RAG framework for real-world workflows, covering document ingestio
 - Python 3.11
 - FastAPI
 - SQLAlchemy
-- SQLite / PostgreSQL
+- SQLite
 - LangChain
 - OpenAI-compatible LLM and embedding APIs
 - Milvus
@@ -32,7 +32,7 @@ An end-to-end RAG framework for real-world workflows, covering document ingestio
 - Vue Router
 - TDesign
 - Tailwind CSS
-- `markdown-it` + `DOMPurify`
+- markdown-it + DOMPurify
 
 ## Pipeline Overview
 
