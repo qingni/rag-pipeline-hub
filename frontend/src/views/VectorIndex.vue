@@ -413,7 +413,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next';
 import { 
-  Database as DatabaseIcon,
+  Server as DatabaseIcon,
   FileText as FileTextIcon,
   Server as ServerIcon,
   Cpu as CpuIcon,

@@ -1,6 +1,7 @@
 <template>
   <div class="flex flex-1">
     <ControlPanel title="搜索配置">
+      <template #icon><SearchCheck :size="20" class="text-emerald-500" /></template>
       <SearchConfig
         :config="searchStore.config"
         :available-indexes="searchStore.availableIndexes"
@@ -15,6 +16,7 @@
     </ControlPanel>
     
     <ContentArea title="搜索查询">
+      <template #icon><SearchCheck :size="24" class="text-emerald-500" /></template>
       <!-- 搜索输入框 -->
       <SearchInput
         v-model="searchStore.queryText"
@@ -63,6 +65,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { SearchCheck } from 'lucide-vue-next'
 import ControlPanel from '../components/layout/ControlPanel.vue'
 import ContentArea from '../components/layout/ContentArea.vue'
 import SearchInput from '../components/Search/SearchInput.vue'

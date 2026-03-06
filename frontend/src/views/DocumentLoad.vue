@@ -258,7 +258,7 @@ import { useProcessingStore } from '../stores/processing'
 import { useDocumentStore } from '../stores/document'
 import healthService from '../services/healthService'
 import { 
-  FileText as FileTextIcon,
+  FileUp as FileTextIcon,
   Play as PlayIcon,
   Download as DownloadIcon,
   CheckCircle as CheckCircleIcon,

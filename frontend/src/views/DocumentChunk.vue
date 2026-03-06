@@ -5,6 +5,12 @@
       <t-aside width="380px" class="left-panel">
         <div class="panel-content">
           <t-space direction="vertical" size="medium" style="width: 100%">
+            <!-- Panel Header -->
+            <div class="panel-header">
+              <SplitSquareHorizontal :size="22" class="panel-icon" />
+              <h2 class="panel-title">文档分块</h2>
+            </div>
+
             <!-- Document Selection -->
             <DocumentSelector />
 
@@ -116,6 +122,7 @@
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { SplitSquareHorizontal } from 'lucide-vue-next'
 import { useChunkingStore } from '@/stores/chunkingStore'
 import { MessagePlugin } from 'tdesign-vue-next'
 import DocumentSelector from '@/components/chunking/DocumentSelector.vue'
@@ -288,6 +295,25 @@ onUnmounted(() => {
 .chunking-view {
   height: 100vh;
   background-color: var(--td-bg-color-page);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.panel-icon {
+  color: #8B5CF6;
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
 }
 
 .left-panel {

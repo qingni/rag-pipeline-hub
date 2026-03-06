@@ -4,7 +4,7 @@
       <!-- 左侧控制面板 -->
       <t-aside width="380px" class="control-panel">
         <div class="panel-header">
-          <Hash :size="24" class="panel-icon" />
+          <Binary :size="24" class="panel-icon" />
           <h2 class="panel-title">文档向量化</h2>
         </div>
         
@@ -137,7 +137,7 @@
 <script setup>
 import { onMounted, ref, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { Hash, Zap, AlertCircle } from 'lucide-vue-next'
+import { Binary, Zap, AlertCircle } from 'lucide-vue-next'
 import { useEmbeddingStore } from '@/stores/embedding'
 import { useModelRecommendStore } from '@/stores/modelRecommendStore'
 import DocumentSelector from '@/components/embedding/DocumentSelector.vue'

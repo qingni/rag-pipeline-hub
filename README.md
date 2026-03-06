@@ -4,11 +4,13 @@
 
 一个面向真实业务流程的端到端 RAG 框架，覆盖文档加载、分块、向量化、索引管理、混合检索和答案生成全链路。项目包含 FastAPI 后端、Vue 3 前端，以及按模块拆分的 `documents/` 与 `specs/` 文档体系，适合做产品原型、内部知识库、RAG 技术验证与二次开发。
 
+![首页截图](docs/images/homepage.png)
+
 ## 项目亮点
 
-- 支持 `PDF / DOCX / XLSX / PPTX / HTML / CSV / TXT / Markdown / JSON / XML` 等多类文档解析，默认以 `Docling Serve` 为高质量主解析器，并提供降级加载策略
-- 支持固定大小、递归、语义、按标题等分块方式，并提供参数推荐与结果预览
-- 支持 `bge-m3`、`qwen3-embedding-8b` 等 Embedding 模型，包含批量向量化、进度跟踪、缓存与结果管理能力
+- 支持 `PDF / DOCX / DOC / XLSX / XLS / PPTX / PPT / HTML / CSV / TXT / Markdown / JSON / XML / RST / LOG` 等 20+ 种文档格式解析，默认以 `Docling Serve` 为高质量主解析器，并提供降级加载策略
+- 支持按字数、按段落、语义、按标题、混合、父子文档等分块方式；内置**智能推荐引擎**，根据文档特征（标题结构、代码占比、格式、长度等）自动推荐最优分块策略与参数，附带置信度与推荐理由，支持一键应用
+- 支持 `bge-m3`、`qwen3-embedding-8b`、`qwen3-vl-embedding-8b`（多模态）等 Embedding 模型；内置**模型智能推荐**，基于文档语言、领域、多模态特征进行分层决策，自动推荐最匹配的模型，支持批量推荐与异常文档检测
 - 支持向量索引创建、Collection 管理、向量写入、检索、统计、恢复与推荐能力
 - 支持混合检索链路：稠密召回 + 稀疏召回 + `RRF` 粗排 + `Reranker` 精排，并具备查询增强能力
 - 支持文本生成的同步/流式输出、引用来源、历史记录、重试和 Markdown 安全渲染
@@ -38,8 +40,8 @@
 ```text
 上传文档
   -> 文档解析（Docling Serve + fallback）
-  -> 文档分块（固定/递归/语义/标题）
-  -> 向量化（Embedding + cache + progress）
+  -> 文档分块（字数/段落/语义/标题/混合/父子文档 + 智能推荐）
+  -> 向量化（Embedding + 模型智能推荐 + cache + progress）
   -> 向量索引 / Collection 管理
   -> 混合检索（dense + sparse + RRF + reranker）
   -> 文本生成（SSE / sources / history）
@@ -50,8 +52,8 @@
 | 模块 | 当前实现 |
 |------|----------|
 | 文档加载 | 文档上传、解析、异步任务、加载器推荐、结果查询 |
-| 文档分块 | 多策略分块、参数推荐、结果预览、父子块信息 |
-| 文档向量化 | 文档向量化、批量处理、缓存、进度流、历史记录、模型推荐 |
+| 文档分块 | 多策略分块、**智能策略与参数推荐**（基于文档特征分析）、结果预览、父子块信息 |
+| 文档向量化 | 文档向量化、**Embedding 模型智能推荐**（基于语言/领域/多模态分层决策）、批量处理、缓存、进度流、历史记录 |
 | 向量索引 | Index / Collection 管理、向量 CRUD、统计、持久化、恢复、推荐 |
 | 搜索查询 | 普通搜索、混合搜索、Collection 列表、Reranker 健康检查、历史管理 |
 | 文本生成 | 非流式生成、SSE 流式生成、取消生成、来源引用、历史记录、清空历史 |
@@ -137,7 +139,7 @@ colima start
 | 健康检查 | `GET /api/v1/health` |
 | 文档加载 | `POST /api/v1/processing/load` |
 | 文档分块 | `POST /api/v1/chunking/chunk` |
-| 文档向量化 | `POST /api/v1/embedding/embed_document` |
+| 文档向量化 | `POST /api/v1/embedding/from-document` |
 | 搜索查询 | `POST /api/v1/search/hybrid` |
 | 文本生成 | `POST /api/v1/generation/generate` |
 | 流式生成 | `POST /api/v1/generation/stream` |

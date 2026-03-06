@@ -4,12 +4,14 @@
 
 An end-to-end RAG framework for real-world workflows, covering document ingestion, chunking, embedding, index management, hybrid retrieval, and answer generation. The repository includes a FastAPI backend, a Vue 3 frontend, and a module-oriented documentation system under `documents/` and `specs/`.
 
+![Homepage](docs/images/homepage.png)
+
 ## Highlights
 
-- Multi-format document ingestion for `PDF / DOCX / XLSX / PPTX / HTML / CSV / TXT / Markdown / JSON / XML`
+- Supports 20+ document formats including `PDF / DOCX / DOC / XLSX / XLS / PPTX / PPT / HTML / CSV / TXT / Markdown / JSON / XML / RST / LOG`
 - `Docling Serve` as the primary high-quality parser with fallback loaders for resilience
-- Multiple chunking strategies including fixed-size, recursive, semantic, and heading-based chunking
-- Embedding workflows with batch processing, progress streaming, caching, and result management
+- Multiple chunking strategies including character-based, paragraph, semantic, heading-based, hybrid, and parent-child chunking; built-in **smart recommendation engine** that analyzes document features (heading structure, code ratio, format, length, etc.) to automatically suggest the best strategy and parameters with confidence scores and reasoning
+- Supports `bge-m3`, `qwen3-embedding-8b`, `qwen3-vl-embedding-8b` (multimodal) embedding models; built-in **model recommendation** that uses layered decision-making based on document language, domain, and multimodal features to suggest the most suitable model, with support for batch recommendation and outlier document detection
 - Vector index and Collection management with search, persistence, recovery, and recommendation APIs
 - Hybrid retrieval with dense recall, sparse recall, `RRF` ranking, `Reranker`, and query enhancement
 - Text generation with sync and streaming responses, source citations, history management, retry, and safe Markdown rendering
@@ -39,8 +41,8 @@ An end-to-end RAG framework for real-world workflows, covering document ingestio
 ```text
 Upload documents
   -> Parse documents (Docling Serve + fallback)
-  -> Chunk documents
-  -> Generate embeddings (cache + progress)
+  -> Chunk documents (character/paragraph/semantic/heading/hybrid/parent-child + smart recommendation)
+  -> Generate embeddings (smart model recommendation + cache + progress)
   -> Manage vector indexes / collections
   -> Run hybrid retrieval
   -> Generate answers (SSE / sources / history)
@@ -51,8 +53,8 @@ Upload documents
 | Module | Current capabilities |
 |--------|----------------------|
 | Document Loading | Upload, parsing, async tasks, loader recommendation, result querying |
-| Document Chunking | Multiple chunking strategies, parameter recommendation, previews, parent-child chunk metadata |
-| Vector Embedding | Document embedding, batch processing, caching, progress streaming, history, model recommendation |
+| Document Chunking | Multiple chunking strategies, **smart strategy & parameter recommendation** (based on document feature analysis), previews, parent-child chunk metadata |
+| Vector Embedding | Document embedding, **smart model recommendation** (layered decision-making on language/domain/multimodal features), batch processing, caching, progress streaming, history |
 | Vector Index | Index and Collection management, vector CRUD, statistics, persistence, recovery, recommendation |
 | Search | Standard search, hybrid search, Collection listing, Reranker health check, history management |
 | Generation | Non-streaming generation, SSE streaming, cancellation, source citation, history, clear-all history |
@@ -138,7 +140,7 @@ Common endpoints:
 | Health | `GET /api/v1/health` |
 | Document loading | `POST /api/v1/processing/load` |
 | Chunking | `POST /api/v1/chunking/chunk` |
-| Embedding | `POST /api/v1/embedding/embed_document` |
+| Embedding | `POST /api/v1/embedding/from-document` |
 | Search | `POST /api/v1/search/hybrid` |
 | Generation | `POST /api/v1/generation/generate` |
 | Streaming generation | `POST /api/v1/generation/stream` |

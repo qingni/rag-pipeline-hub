@@ -3,8 +3,8 @@
     <!-- 标题区域 -->
     <div class="sidebar-header">
       <h1 class="sidebar-title">
-        <FileText class="inline-block mr-2" :size="24" />
-        文档处理系统
+        <span class="title-rag">RAG</span>
+        <span class="title-rest">Pipeline Hub</span>
       </h1>
     </div>
     
@@ -42,8 +42,8 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { 
-  Home, FileText, Scissors, Hash, 
-  Database, Search, Sparkles, Info 
+  Home, FileUp, SplitSquareHorizontal, Binary, 
+  Server, SearchCheck, BotMessageSquare, Info 
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -53,12 +53,12 @@ const currentPath = computed(() => route.path)
 
 const navItems = [
   { path: '/', label: '首页', iconComponent: Home },
-  { path: '/documents/load', label: '文档加载', iconComponent: FileText },
-  { path: '/documents/chunk', label: '文档分块', iconComponent: Scissors },
-  { path: '/documents/embed', label: '文档向量化', iconComponent: Hash },
-  { path: '/index', label: '向量索引', iconComponent: Database },
-  { path: '/search', label: '搜索查询', iconComponent: Search },
-  { path: '/generation', label: '文本生成', iconComponent: Sparkles }
+  { path: '/documents/load', label: '文档加载', iconComponent: FileUp },
+  { path: '/documents/chunk', label: '文档分块', iconComponent: SplitSquareHorizontal },
+  { path: '/documents/embed', label: '文档向量化', iconComponent: Binary },
+  { path: '/index', label: '向量索引', iconComponent: Server },
+  { path: '/search', label: '搜索查询', iconComponent: SearchCheck },
+  { path: '/generation', label: '文本生成', iconComponent: BotMessageSquare }
 ]
 
 function handleNavigate(path) {
@@ -82,18 +82,38 @@ function handleNavigate(path) {
 }
 
 .sidebar-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #1f2937;
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  gap: 7px;
   margin: 0;
+  line-height: 1;
+}
+
+.title-rag {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #4F46E5, #7C3AED);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.title-rest {
+  font-size: 15px;
+  font-weight: 500;
+  color: #6B7280;
+  letter-spacing: 0.2px;
 }
 
 .sidebar-menu {
   flex: 1;
   padding: 12px 8px;
   overflow-y: auto;
+}
+
+.sidebar-menu :deep(.t-menu__item) {
+  gap: 8px;
 }
 
 .sidebar-footer {

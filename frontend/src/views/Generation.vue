@@ -2,7 +2,7 @@
   <div class="generation-page">
     <div class="page-header">
       <h2 class="page-title">
-        <Sparkles class="title-icon" :size="24" />
+        <BotMessageSquare class="title-icon" :size="24" />
         文本生成
       </h2>
       <p class="page-description">基于 RAG 检索结果和大语言模型生成智能回答</p>
@@ -121,7 +121,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { Sparkles, FileText, History } from 'lucide-vue-next'
+import { BotMessageSquare, FileText, History } from 'lucide-vue-next'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useGenerationStore } from '../stores/generationStore'
 import { storeToRefs } from 'pinia'
