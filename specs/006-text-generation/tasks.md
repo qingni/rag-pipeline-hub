@@ -72,6 +72,19 @@
 
 ---
 
+## Phase 4: 当前实现同步补充
+
+**Purpose**: 同步近期已落地但尚未记录到 tasks 的能力补充
+
+- [X] T022 [P] 在 `backend/src/api/generation.py` 中补齐 `DELETE /history/clear`，支持全部历史软删除
+- [X] T023 [P] 在 `frontend/src/components/generation/GenerationResult.vue` 中增加失败后的重试交互入口
+- [X] T024 [P] 在 `frontend/src/views/Generation.vue` 中接入重试处理及历史刷新/删除/清空成功失败提示
+- [X] T025 [P] 在 `frontend/src/components/generation/GenerationResult.vue` 中实现 Markdown 富文本渲染与引用高亮
+- [X] T026 [P] 在 `frontend/package.json` 中引入 `markdown-it`、`dompurify` 以支持安全渲染
+- [X] T027 [P] 在 `frontend/src/stores/generationStore.js` 中补充清空历史后的页码状态重置
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

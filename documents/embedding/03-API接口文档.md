@@ -58,7 +58,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /embedding/embed` |
+| 路径 | `POST /api/v1/embedding/embed` |
 | 描述 | 将单个文本转换为向量 |
 
 ### 2.2 请求参数
@@ -129,7 +129,7 @@ print(result['data']['embedding'])
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /embedding/embed_batch` |
+| 路径 | `POST /api/v1/embedding/embed_batch` |
 | 描述 | 批量将多个文本转换为向量 |
 
 ### 3.2 请求参数
@@ -201,7 +201,7 @@ print(result['data']['embedding'])
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /embedding/embed_chunking_result` |
+| 路径 | `POST /api/v1/embedding/embed_chunking_result` |
 | 描述 | 对分块结果进行向量化 |
 
 ### 4.2 请求参数
@@ -251,7 +251,7 @@ print(result['data']['embedding'])
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /embedding/embed_document` |
+| 路径 | `POST /api/v1/embedding/embed_document` |
 | 描述 | 对文档的最新分块结果进行向量化 |
 
 ### 5.2 请求参数
@@ -297,7 +297,7 @@ print(result['data']['embedding'])
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /embedding/models` |
+| 路径 | `GET /api/v1/embedding/models` |
 | 描述 | 获取所有可用的Embedding模型 |
 
 ### 6.2 响应示例
@@ -351,7 +351,7 @@ print(result['data']['embedding'])
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /embedding/history` |
+| 路径 | `GET /api/v1/embedding/history` |
 | 描述 | 获取向量化任务历史记录 |
 
 ### 7.2 请求参数
@@ -393,7 +393,7 @@ print(result['data']['embedding'])
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /embedding/history/{id}` |
+| 路径 | `GET /api/v1/embedding/history/{id}` |
 | 描述 | 获取单个向量化任务详情 |
 
 ### 7.5 响应示例

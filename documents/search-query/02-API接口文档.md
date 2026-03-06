@@ -1,7 +1,7 @@
 # API接口文档 - 检索查询模块
 
 **生成日期**: 2026-02-26  
-**最后更新**: 2026-03-04  
+**最后更新**: 2026-03-06  
 **项目**: RAG Framework - 检索查询模块  
 **API版本**: v2  
 
@@ -34,14 +34,14 @@
 
 | 方法 | 路径 | 描述 | 分类 |
 |------|------|------|------|
-| POST | /search | 语义搜索 | Search |
-| POST | /search/hybrid | 混合检索（含查询增强 + 三层防御）| Search |
-| GET | /search/collections | 可用 Collection 列表 | Collection |
-| GET | /search/reranker/health | Reranker 健康检查 | Reranker |
-| GET | /search/indexes | 可用索引列表 | Index |
-| GET | /search/history | 搜索历史列表 | History |
-| DELETE | /search/history/{id} | 删除单条历史 | History |
-| DELETE | /search/history | 清空搜索历史 | History |
+| POST | /api/v1/search | 语义搜索 | Search |
+| POST | /api/v1/search/hybrid | 混合检索（含查询增强 + 三层防御）| Search |
+| GET | /api/v1/search/collections | 可用 Collection 列表 | Collection |
+| GET | /api/v1/search/reranker/health | Reranker 健康检查 | Reranker |
+| GET | /api/v1/search/indexes | 可用索引列表 | Index |
+| GET | /api/v1/search/history | 搜索历史列表 | History |
+| DELETE | /api/v1/search/history/{id} | 删除单条历史 | History |
+| DELETE | /api/v1/search/history | 清空搜索历史 | History |
 
 ---
 
@@ -51,7 +51,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /search` |
+| 路径 | `POST /api/v1/search` |
 | 描述 | 将查询文本转换为向量并在指定索引中检索相似文档 |
 
 #### 请求参数
@@ -111,7 +111,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /search/hybrid` |
+| 路径 | `POST /api/v1/search/hybrid` |
 | 描述 | 🆕 查询增强 → 稠密+稀疏双路召回 → RRF 粗排 → 三层防御 → Reranker 精排 |
 
 #### 请求参数
@@ -185,26 +185,12 @@
       "reranker_ms": 45,
       "total_ms": 2280
     },
-    "query_enhancement": {
-      "enabled": true,
-      "original_query": "RAG 系统的核心架构",
-      "rewritten_query": "RAG检索增强生成系统的核心技术架构设计和组件构成",
-      "is_complex": true,
-      "sub_queries": [
-        "RAG系统由哪些核心组件构成",
-        "检索增强生成系统的架构层次划分"
-      ],
-      "all_queries": [
-        "RAG检索增强生成系统的核心技术架构设计和组件构成",
-        "RAG系统由哪些核心组件构成",
-        "检索增强生成系统的架构层次划分"
-      ],
-      "enhancement_time_ms": 2100,
-      "error": null
-    }
+    "query_enhancement": null
   }
 }
 ```
+
+> 说明：后端服务内部确实会执行 Query Enhancement，但当前 `api/search.py` 对外响应并未显式组装 `query_enhancement` 字段，因此前端应以 `results`、`search_mode`、`timing`、`reranker_available` 等实际返回字段为准。
 
 ### 3.2 检索模式说明
 
@@ -224,6 +210,36 @@
 | 稀疏向量 | Collection 无 sparse_embedding 字段 | 自动切换到 dense_only 模式 |
 | Reranker | Reranker 服务不可用 | 跳过精排，直接返回 RRF 粗排结果 |
 
+### 3.4 文本生成页接入方式
+
+当前文本生成页将混合检索接口作为“生成前自动召回”能力使用，典型流程如下：
+
+1. 先调用 `GET /api/v1/search/collections` 获取可选知识库列表。
+2. 用户选择一个或多个 Collection 后，调用 `POST /api/v1/search/hybrid`。
+3. 前端将返回结果映射为生成接口所需的 `context` 数组。
+4. 再调用 `/api/v1/generation/generate` 或 `/api/v1/generation/stream` 发起回答生成。
+
+文本生成页的典型请求示例：
+
+```json
+{
+  "query_text": "请总结这份知识库里关于 RAG 架构的设计要点",
+  "collection_ids": ["技术文档知识库"],
+  "top_k": 5,
+  "threshold": 0.3
+}
+```
+
+文本生成页的典型字段映射如下：
+
+| 检索结果字段 | 生成上下文字段 | 说明 |
+|------|------|------|
+| `text_content` | `content` | 作为 LLM 参考片段正文 |
+| `source_document` | `source_file` | 作为来源文件名展示 |
+| `similarity_score` | `similarity` | 用于引用来源排序和展示 |
+| `chunk_id` | `chunk_id` | 保留片段标识 |
+| `metadata` | `metadata` | 透传额外元数据 |
+
 ---
 
 ## 4. Collection 管理
@@ -232,7 +248,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /search/collections` |
+| 路径 | `GET /api/v1/search/collections` |
 | 描述 | 获取所有可用 Collection 的信息（含稀疏向量标识、文档数、绑定模型）|
 
 #### 响应示例
@@ -250,7 +266,6 @@
       "metric_type": "cosine",
       "has_sparse": true,
       "document_count": 12,
-      "embedding_model": "qwen3-embedding-8b",
       "created_at": "2026-02-26T10:00:00"
     }
   ]
@@ -267,8 +282,11 @@
 | metric_type | string | 度量类型 |
 | has_sparse | bool | 是否含稀疏向量字段 |
 | document_count | int | 🆕 文档数量 |
-| embedding_model | string | 🆕 绑定的嵌入模型名称 |
 | created_at | datetime | 创建时间 |
+
+> 说明：Collection 与 Embedding 模型的绑定关系存在于服务内部，但当前 `/search/collections` 对外响应模型未暴露 `embedding_model` 字段。
+
+> 文本生成页在进入页面时会优先调用该接口，用于填充“知识库 Collection”下拉选项。
 
 ---
 
@@ -278,7 +296,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /search/reranker/health` |
+| 路径 | `GET /api/v1/search/reranker/health` |
 | 描述 | 检查 Reranker 精排服务是否可用 |
 
 #### 响应示例
@@ -312,7 +330,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /search/indexes` |
+| 路径 | `GET /api/v1/search/indexes` |
 | 描述 | 获取所有可用于搜索的向量索引 |
 
 #### 响应示例
@@ -338,7 +356,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /search/history` |
+| 路径 | `GET /api/v1/search/history` |
 | 描述 | 返回用户的搜索历史记录 |
 
 #### 请求参数（Query）
@@ -384,7 +402,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `DELETE /search/history/{history_id}` |
+| 路径 | `DELETE /api/v1/search/history/{history_id}` |
 | 描述 | 根据 ID 删除指定的搜索历史记录 |
 
 #### 响应示例
@@ -400,7 +418,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `DELETE /search/history` |
+| 路径 | `DELETE /api/v1/search/history` |
 | 描述 | 删除所有搜索历史记录 |
 
 #### 响应示例
@@ -434,10 +452,12 @@
 
 ```json
 {
-  "success": false,
-  "error": {
-    "code": "EMPTY_QUERY",
-    "message": "查询文本不能为空"
+  "detail": {
+    "success": false,
+    "error": {
+      "code": "EMPTY_QUERY",
+      "message": "查询文本不能为空"
+    }
   }
 }
 ```

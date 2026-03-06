@@ -39,19 +39,20 @@ model="deepseek-v3.2",
 
 ### 2. 流式输出技术方案
 
-**Decision**: FastAPI StreamingResponse + Server-Sent Events (SSE)
+**Decision**: 后端使用 FastAPI StreamingResponse 输出 SSE 格式，前端使用 `fetch + ReadableStream` 解析
 
 **Rationale**:
 - SSE 是单向流式通信的标准方案
-- 浏览器原生支持 EventSource API
 - FastAPI 原生支持 StreamingResponse
+- 当前生成接口需要通过 POST body 传递问题、模型、上下文，因此前端更适合用 `fetch` 读取流，而不是直接用 EventSource
 - 比 WebSocket 更简单，适合单向数据流场景
 
 **Alternatives Considered**:
 | 方案 | 优点 | 缺点 | 结论 |
 |------|------|------|------|
 | WebSocket | 双向通信 | 实现复杂，本场景不需要双向 | 不选用 |
-| SSE | 简单、标准、原生支持 | 仅支持单向 | ✅ 选用 |
+| SSE + fetch stream | 简单、标准、支持 POST body | 前端需要手动解析流 | ✅ 选用 |
+| EventSource | 原生 SSE 支持 | 不适合当前 POST + JSON body 场景 | 不选用 |
 | 轮询 | 兼容性最好 | 延迟高、资源浪费 | 不选用 |
 
 **Implementation Notes**:
@@ -71,16 +72,18 @@ async def generate_stream(request):
     )
 
 # 前端
-const eventSource = new EventSource('/api/generation/stream')
-eventSource.onmessage = (event) => {
-    const data = JSON.parse(event.data)
-    // 追加内容到显示区域
-}
+const response = await fetch('/api/v1/generation/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+})
+const reader = response.body.getReader()
+const decoder = new TextDecoder()
 ```
 
 ### 3. 模型配置与参数
 
-**Decision**: 支持三种模型，统一参数接口
+**Decision**: 支持两种模型，统一参数接口
 
 **Model Configurations**:
 
@@ -91,7 +94,7 @@ eventSource.onmessage = (event) => {
 
 **Common Parameters**:
 - `temperature`: 0.0 - 2.0，默认 0.7
-- `max_tokens`: 1 - 4096，默认 4096
+- `max_tokens`: 1 - 8192，默认 4096
 - `top_p`: 0.0 - 1.0，默认 1.0（可选）
 
 **Implementation Notes**:
@@ -156,14 +159,14 @@ GENERATION_MODELS = {
 
 ### 5. 错误处理与重试
 
-**Decision**: 参考 EmbeddingService 的重试机制
+**Decision**: LLM SDK 使用内置重试，前端提供显式“重试”入口
 
 **Error Types**:
 | 错误类型 | 处理方式 | 是否重试 |
 |---------|---------|---------|
-| RateLimitError | 指数退避重试 | ✅ 是 |
-| APITimeoutError | 重试 | ✅ 是 |
-| NetworkError | 重试 | ✅ 是 |
+| RateLimitError | SDK 内置重试 + UI 重试 | ✅ 是 |
+| APITimeoutError | SDK 内置重试 + UI 重试 | ✅ 是 |
+| NetworkError | SDK 内置重试 + UI 重试 | ✅ 是 |
 | AuthenticationError | 直接失败 | ❌ 否 |
 | InvalidRequestError | 直接失败 | ❌ 否 |
 
@@ -173,7 +176,25 @@ GENERATION_MODELS = {
 - 最大延迟：32秒
 - 退避因子：2
 
-### 6. 生成历史存储
+### 6. 生成结果渲染
+
+**Decision**: 使用 Markdown 渲染 + HTML 安全清洗
+
+**Rationale**:
+- 模型返回内容常包含标题、列表、代码块、表格等结构化文本
+- 纯文本展示会降低可读性
+- 渲染前做安全清洗可以避免不可信 HTML 注入
+
+**Implementation Notes**:
+```javascript
+import MarkdownIt from 'markdown-it'
+import DOMPurify from 'dompurify'
+
+const md = new MarkdownIt({ html: false, breaks: true })
+const safeHtml = DOMPurify.sanitize(md.render(answer))
+```
+
+### 7. 生成历史存储
 
 **Decision**: SQLite/PostgreSQL 数据库存储
 
@@ -197,7 +218,10 @@ langchain-openai>=0.1.0  # 已有，用于 ChatOpenAI
 
 ### 前端依赖
 
-无新增依赖，使用原生 EventSource API
+```txt
+markdown-it>=14.1.1  # Markdown 渲染
+dompurify>=3.3.2     # HTML 安全清洗
+```
 
 ## Security Considerations
 
@@ -205,6 +229,7 @@ langchain-openai>=0.1.0  # 已有，用于 ChatOpenAI
 2. **输入验证**: 对用户输入进行长度和内容验证
 3. **速率限制**: 限制单用户的请求频率
 4. **上下文长度检查**: 防止超出模型上下文限制
+5. **结果渲染清洗**: 对生成内容进行前端安全清洗，避免脚本注入
 
 ## Performance Considerations
 

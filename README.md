@@ -1,30 +1,60 @@
 # RAG Framework
 
-一个完整的检索增强生成（Retrieval-Augmented Generation）框架，实现从文档处理到智能问答的全流程 RAG 系统。
+[English README](README_EN.md)
 
-## 功能特性
+一个面向真实业务流程的端到端 RAG 框架，覆盖文档加载、分块、向量化、索引管理、混合检索和答案生成全链路。项目包含 FastAPI 后端、Vue 3 前端，以及按模块拆分的 `documents/` 与 `specs/` 文档体系，适合做产品原型、内部知识库、RAG 技术验证与二次开发。
 
-| 模块 | 功能 | 状态 |
-|------|------|------|
-| 文档处理 | PDF、DOCX、XLSX、PPTX、HTML、CSV 等 20+ 格式文档上传与加载（Docling 集成） | ✅ |
-| 文档分块 | 固定大小、语义分块、递归分块、按标题分块 | ✅ |
-| 向量嵌入 | bge-m3、qwen3-embedding-8b 等向量化 | ✅ |
-| 向量索引 | Milvus、FAISS 向量存储与索引 | ✅ |
-| 语义搜索 | 向量相似度搜索、混合搜索 | ✅ |
-| 文本生成 | 基于检索上下文的 LLM 智能问答 | ✅ |
+## 项目亮点
+
+- 支持 `PDF / DOCX / XLSX / PPTX / HTML / CSV / TXT / Markdown / JSON / XML` 等多类文档解析，默认以 `Docling Serve` 为高质量主解析器，并提供降级加载策略
+- 支持固定大小、递归、语义、按标题等分块方式，并提供参数推荐与结果预览
+- 支持 `bge-m3`、`qwen3-embedding-8b` 等 Embedding 模型，包含批量向量化、进度跟踪、缓存与结果管理能力
+- 支持向量索引创建、Collection 管理、向量写入、检索、统计、恢复与推荐能力
+- 支持混合检索链路：稠密召回 + 稀疏召回 + `RRF` 粗排 + `Reranker` 精排，并具备查询增强能力
+- 支持文本生成的同步/流式输出、引用来源、历史记录、重试和 Markdown 安全渲染
 
 ## 技术栈
 
 **后端**
-- Python 3.11 + FastAPI
-- SQLAlchemy + SQLite/PostgreSQL
-- LangChain + OpenAI-compatible API
-- Milvus / FAISS
+- Python 3.11
+- FastAPI
+- SQLAlchemy
+- SQLite / PostgreSQL
+- LangChain
+- OpenAI-compatible LLM / Embedding API
+- Milvus
 
 **前端**
-- Vue 3 + Vite
-- TDesign + TailwindCSS
-- Pinia + Vue Router
+- Vue 3
+- Vite
+- Pinia
+- Vue Router
+- TDesign
+- Tailwind CSS
+- `markdown-it` + `DOMPurify`
+
+## 典型链路
+
+```text
+上传文档
+  -> 文档解析（Docling Serve + fallback）
+  -> 文档分块（固定/递归/语义/标题）
+  -> 向量化（Embedding + cache + progress）
+  -> 向量索引 / Collection 管理
+  -> 混合检索（dense + sparse + RRF + reranker）
+  -> 文本生成（SSE / sources / history）
+```
+
+## 功能模块
+
+| 模块 | 当前实现 |
+|------|----------|
+| 文档加载 | 文档上传、解析、异步任务、加载器推荐、结果查询 |
+| 文档分块 | 多策略分块、参数推荐、结果预览、父子块信息 |
+| 文档向量化 | 文档向量化、批量处理、缓存、进度流、历史记录、模型推荐 |
+| 向量索引 | Index / Collection 管理、向量 CRUD、统计、持久化、恢复、推荐 |
+| 搜索查询 | 普通搜索、混合搜索、Collection 列表、Reranker 健康检查、历史管理 |
+| 文本生成 | 非流式生成、SSE 流式生成、取消生成、来源引用、历史记录、清空历史 |
 
 ## 快速开始
 
@@ -32,9 +62,10 @@
 
 - Python 3.11+
 - Node.js 18+
-- Docker（用于 Milvus）
+- Docker 或 Colima（用于 Milvus）
+- 可用的 OpenAI-compatible LLM / Embedding 服务
 
-### 1. 克隆项目
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/qingni/rag-framework-spec.git
@@ -44,178 +75,152 @@ cd rag-framework-spec
 ### 2. 配置环境变量
 
 ```bash
-# 后端
 cp backend/.env.example backend/.env
-# 编辑 backend/.env，配置 OPENAI_API_KEY 等
-
-# 前端
 cp frontend/.env.example frontend/.env
 ```
 
-### 3. 启动 Milvus（向量数据库）
+按需补充 `backend/.env` 中的模型、数据库、Milvus、Docling 和 API Key 配置。
+
+### 3. 启动 Milvus
+
+如果你使用 Colima，请先执行：
 
 ```bash
-./start_milvus.sh
+colima start
 ```
 
-### 4. 启动后端
+然后启动 Milvus：
 
 ```bash
-./start_backend.sh
+./scripts/start_milvus.sh
 ```
 
-后端 API: http://localhost:8000  
-API 文档: http://localhost:8000/docs
+### 4. 启动可选的 Docling Serve
 
-### 5. 启动前端
+如果你希望启用高质量文档解析链路，可单独启动 Docling 服务：
 
 ```bash
-./start_frontend.sh
+./scripts/start_docling.sh
 ```
 
-前端界面: http://localhost:5173
+### 5. 启动后端
 
-## 项目结构
-
-```
-rag-framework-spec/
-├── backend/                 # FastAPI 后端
-│   ├── src/
-│   │   ├── api/            # API 路由
-│   │   ├── models/         # 数据模型
-│   │   ├── services/       # 业务逻辑
-│   │   ├── schemas/        # Pydantic 模式
-│   │   └── providers/      # 外部服务适配器
-│   ├── results/            # 处理结果 JSON
-│   └── requirements.txt
-├── frontend/               # Vue 3 前端
-│   ├── src/
-│   │   ├── views/          # 页面视图
-│   │   ├── components/     # UI 组件
-│   │   ├── stores/         # Pinia 状态管理
-│   │   └── services/       # API 服务
-│   └── package.json
-├── documents/              # 功能说明文档
-├── specs/                  # 功能规范
-├── migrations/             # 数据库迁移
-└── uploads/                # 上传文件存储
+```bash
+./scripts/start_backend.sh
 ```
 
-## 核心模块
+后端默认地址：
+- API: `http://localhost:8000`
+- Swagger: `http://localhost:8000/docs`
+- Health: `http://localhost:8000/api/v1/health`
 
-### 1. 文档处理 (Document Processing)
+### 6. 启动前端
 
-支持多种文档格式的上传和加载，采用 Docling 作为主解析器并支持自动降级策略：
+```bash
+./scripts/start_frontend.sh
+```
 
-- **主解析器**: Docling（支持 PDF、DOCX、XLSX、PPTX 等复杂文档）
-- **降级策略**: 自动降级到专用加载器（PyMuPDF、python-docx、openpyxl 等）
-- **支持格式**: PDF、DOCX、DOC、XLSX、XLS、PPTX、HTML、CSV、JSON、XML、TXT、MD 等 15+ 种格式
-- **输出格式**: 统一的 StandardDocumentResult 结构（含全文、分页、元数据、表格）
-
-### 2. 文档分块 (Document Chunking)
-
-将文档切分为适合向量化的文本块：
-
-- **分块策略**: 固定大小、语义分块、递归分块、按标题分块
-- **参数配置**: chunk_size、chunk_overlap
-- **元数据保留**: 来源文件、位置信息
-
-### 3. 向量嵌入 (Vector Embedding)
-
-将文本块转换为向量表示：
-
-- **模型支持**: bge-m3、qwen3-embedding-8b、qwen3-vl-embedding-8b
-- **批量处理**: 支持大规模文档的批量向量化
-- **维度**: 1024-4096 维（根据模型不同）
-
-### 4. 向量索引 (Vector Index)
-
-高效的向量存储与检索：
-
-- **Milvus**: 分布式向量数据库，支持大规模数据
-- **FAISS**: 本地向量索引，适合开发测试
-- **索引类型**: IVF_FLAT、HNSW 等
-
-### 5. 语义搜索 (Semantic Search)
-
-基于向量相似度的智能搜索：
-
-- **搜索类型**: 向量搜索、混合搜索
-- **相似度算法**: 余弦相似度、欧氏距离、内积
-- **结果排序**: Top-K 检索、相似度阈值过滤
-
-### 6. 文本生成 (Text Generation)
-
-基于检索上下文的 LLM 问答：
-
-- **模型支持**: DeepSeek-V3.2、DeepSeek-V3.1
-- **流式输出**: 支持 SSE 流式响应
-- **引用标注**: 自动标注回答的来源引用
-- **历史记录**: 保存生成历史，支持查询和管理
+前端默认地址：
+- Web UI: `http://localhost:5173`
 
 ## API 概览
 
-| 端点 | 方法 | 描述 |
-|------|------|------|
-| `/api/documents` | POST | 上传文档 |
-| `/api/documents/{id}/load` | POST | 加载文档 |
-| `/api/documents/{id}/chunk` | POST | 分块文档 |
-| `/api/embeddings/embed` | POST | 向量化文本块 |
-| `/api/vector-index/index` | POST | 创建向量索引 |
-| `/api/search` | POST | 语义搜索 |
-| `/api/generation/generate` | POST | 文本生成 |
-| `/api/generation/generate/stream` | POST | 流式文本生成 |
+项目当前的接口前缀以以下两组为主：
 
-完整 API 文档请访问: http://localhost:8000/docs
+- 通用业务接口：`/api/v1/*`
+- 向量索引接口：`/api/vector-index/*`
 
-## 文档
+常用接口示例：
 
-详细的功能说明文档位于 `documents/` 目录：
+| 模块 | 接口 |
+|------|------|
+| 健康检查 | `GET /api/v1/health` |
+| 文档加载 | `POST /api/v1/processing/load` |
+| 文档分块 | `POST /api/v1/chunking/chunk` |
+| 文档向量化 | `POST /api/v1/embedding/embed_document` |
+| 搜索查询 | `POST /api/v1/search/hybrid` |
+| 文本生成 | `POST /api/v1/generation/generate` |
+| 流式生成 | `POST /api/v1/generation/stream` |
+| 向量索引创建 | `POST /api/vector-index/indexes` |
+
+完整接口说明请查看 `http://localhost:8000/docs` 或 `documents/` 下各模块 API 文档。
+
+## 前端页面
+
+当前前端已实现的主要页面入口：
+
+- `/documents/load`：文档加载
+- `/documents/chunk`：文档分块
+- `/documents/embed`：文档向量化
+- `/index`：向量索引管理
+- `/search`：搜索查询
+- `/generation`：文本生成
+
+## 项目结构
+
+```text
+rag-framework-spec/
+├── backend/                 # FastAPI 后端
+│   ├── src/
+│   │   ├── api/             # 路由层
+│   │   ├── services/        # 核心业务逻辑
+│   │   ├── providers/       # 外部能力适配（LLM、Docling 等）
+│   │   ├── models/          # ORM 模型
+│   │   ├── schemas/         # Pydantic Schema
+│   │   └── config/          # 配置与 settings
+│   ├── results/             # 加载、分块、向量化等结果文件
+│   └── tests/               # 后端测试
+├── frontend/                # Vue 3 前端
+│   ├── src/
+│   │   ├── views/           # 页面视图
+│   │   ├── components/      # 业务组件
+│   │   ├── stores/          # Pinia store
+│   │   └── services/        # API 封装
+│   └── package.json
+├── documents/               # 面向实现的模块文档
+├── specs/                   # 功能规格与演进记录
+├── scripts/                 # 启停脚本
+├── docker/                  # Milvus 等部署文件
+├── migrations/              # 数据库迁移
+└── uploads/                 # 上传文件目录
+```
+
+## 文档导航
 
 - [文档加载](documents/load/README.md)
 - [文档分块](documents/chunk/README.md)
-- [向量嵌入](documents/embedding/README.md)
+- [文档向量化](documents/embedding/README.md)
 - [向量索引](documents/vector-index/README.md)
-- [语义搜索](documents/search/README.md)
+- [搜索查询概述](documents/search-query/01-%E6%A3%80%E7%B4%A2%E6%9F%A5%E8%AF%A2%E5%8A%9F%E8%83%BD%E6%A6%82%E8%BF%B0.md)
 - [文本生成](documents/generation/README.md)
 
-## 版本历史
+如果你更关注规格设计和实现演进，可以继续查看 `specs/` 目录。
 
-| 版本 | 功能 | 日期 |
-|------|------|------|
-| v0.7.0 | 文档处理优化 - Docling 集成与多格式支持 | 2026-01 |
-| v0.6.0 | 文本生成 (Text Generation) | 2024-12 |
-| v0.5.0 | 语义搜索 (Search Query) | 2024-12 |
-| v0.4.0 | 向量索引 (Vector Index) | 2024-12 |
-| v0.3.0 | 向量嵌入 (Vector Embedding) | 2024-12 |
-| v0.2.0 | 文档分块 (Document Chunking) | 2024-12 |
-| v0.1.0 | 文档处理 (Document Processing) | 2024-12 |
+## 开发与验证
 
-## 开发
-
-### 运行测试
+后端测试：
 
 ```bash
-# 后端测试
 cd backend
 pytest
+```
 
-# 前端构建
+前端构建：
+
+```bash
 cd frontend
 npm run build
 ```
 
-### 停止服务
+停止本地服务：
 
 ```bash
-# 停止 Milvus
-./stop_milvus.sh
-
-# 释放端口
-lsof -ti:8000 | xargs kill -9  # 后端
-lsof -ti:5173 | xargs kill -9  # 前端
+./scripts/stop_backend.sh
+./scripts/stop_frontend.sh
+./scripts/stop_milvus.sh
+./scripts/stop_docling.sh
 ```
 
-## 许可证
+## License
 
 [Apache License 2.0](LICENSE)

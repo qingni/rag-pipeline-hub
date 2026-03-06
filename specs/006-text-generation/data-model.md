@@ -30,13 +30,13 @@
                               │
                               ▼
                     ┌─────────────────┐
-                    │  ContextSource  │ (JSON Array)
+                    │   ContextItem   │ (JSON Array)
                     ├─────────────────┤
-                    │  index          │
                     │  content        │
                     │  source_file    │
                     │  similarity     │
                     │  chunk_id       │
+                    │  metadata       │
                     └─────────────────┘
 ```
 
@@ -69,31 +69,33 @@
 - `idx_generation_history_request_id` on `request_id`
 - `idx_generation_history_created_at` on `created_at`
 - `idx_generation_history_status` on `status`
+- `idx_generation_history_is_deleted` on `is_deleted`
 
-### 2. ContextSource (JSON Structure)
+### 2. ContextItem (JSON Structure)
 
 上下文来源信息，存储在 GenerationHistory.context_sources 字段中。
 
 | Field | Type | Description |
 |-------|------|-------------|
-| index | Integer | 引用编号（1, 2, 3...） |
 | content | String | 文档片段内容 |
 | source_file | String | 来源文件名 |
 | similarity | Float | 相似度分数 |
 | chunk_id | String | 关联的 Chunk ID |
+| metadata | Object | 额外元数据（可选） |
 
 **Example**:
 ```json
 [
   {
-    "index": 1,
     "content": "RAG（检索增强生成）是一种结合检索和生成的技术...",
     "source_file": "rag-introduction.pdf",
     "similarity": 0.92,
-    "chunk_id": "chunk_abc123"
+    "chunk_id": "chunk_abc123",
+    "metadata": {
+      "collection_id": "kb_demo"
+    }
   },
   {
-    "index": 2,
     "content": "向量检索通过计算向量相似度来找到相关文档...",
     "source_file": "vector-search.md",
     "similarity": 0.87,
@@ -151,9 +153,10 @@ class GenerationRequest(BaseModel):
 class ContextItem(BaseModel):
     """上下文项"""
     content: str = Field(..., description="文档内容")
-    source_file: str = Field(..., description="来源文件")
-    similarity: float = Field(..., description="相似度")
+    source_file: str = Field(default="未知来源", description="来源文件")
+    similarity: float = Field(default=0.0, description="相似度")
     chunk_id: Optional[str] = Field(None, description="Chunk ID")
+    metadata: Optional[dict] = Field(None, description="额外元数据")
 ```
 
 ### Response Schemas
@@ -176,9 +179,14 @@ class SourceReference(BaseModel):
 
 class StreamChunk(BaseModel):
     """流式输出块"""
+    request_id: Optional[str] = Field(None, description="请求ID（首块返回）")
     content: str = Field(..., description="内容片段")
     done: bool = Field(default=False, description="是否完成")
     token_usage: Optional[TokenUsage] = Field(None, description="Token统计（仅最后一块）")
+    processing_time_ms: Optional[float] = Field(None, description="总耗时（仅最后一块）")
+    sources: Optional[List[SourceReference]] = Field(None, description="引用来源（仅最后一块）")
+    error: Optional[str] = Field(None, description="错误信息")
+    cancelled: Optional[bool] = Field(None, description="是否已取消")
 
 class GenerationHistoryItem(BaseModel):
     """历史记录项"""
@@ -195,11 +203,11 @@ class GenerationHistoryDetail(BaseModel):
     id: int
     request_id: str
     question: str
-    answer: str
+    answer: Optional[str]
     model: str
     temperature: float
     max_tokens: int
-    context_sources: List[ContextSource]
+    context_sources: List[ContextItem]
     token_usage: Optional[TokenUsage]
     processing_time_ms: Optional[float]
     status: GenerationStatus
@@ -266,7 +274,7 @@ CREATE INDEX idx_generation_history_is_deleted ON generation_history(is_deleted)
 2. **model**: 必须是支持的模型之一
 3. **temperature**: 0.0-2.0 范围
 4. **max_tokens**: 1-8192 范围
-5. **context**: 每项必须包含 content 和 source_file
+5. **context**: 每项必须包含 `content`，`source_file` 缺省时默认填充为“未知来源”
 
 ## State Transitions
 
@@ -291,4 +299,4 @@ CREATE INDEX idx_generation_history_is_deleted ON generation_history(is_deleted)
 - 最大保留 100 条历史记录
 - 超出时自动删除最旧的记录（基于 created_at）
 - 软删除的记录不计入限制
-- 定期清理任务：每小时检查一次
+- 清理触发时机：每次成功保存生成历史后执行检查

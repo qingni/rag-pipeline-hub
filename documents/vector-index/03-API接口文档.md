@@ -1,9 +1,9 @@
 # API接口文档 - 向量索引模块
 
 **生成日期**: 2025-12-26  
-**最后更新**: 2026-02-26  
+**最后更新**: 2026-03-06  
 **项目**: RAG Framework - 向量索引模块  
-**API版本**: v2  
+**API版本**: custom (`/api/vector-index`)  
 
 ---
 
@@ -25,7 +25,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 基础URL | `http://localhost:8000/api/v1` |
+| 基础URL | `http://localhost:8000/api/vector-index` |
 | 协议 | HTTP/HTTPS |
 | 数据格式 | JSON |
 
@@ -34,36 +34,36 @@
 | 方法 | 路径 | 描述 | 分类 |
 |------|------|------|------|
 | **索引管理** | | | |
-| POST | /vector-index/indexes | 创建索引 | Index Management |
-| POST | /vector-index/indexes/from-embedding | 从向量化结果创建索引 | Index Management |
-| GET | /vector-index/indexes | 列出所有索引 | Index Management |
-| GET | /vector-index/indexes/{id} | 获取索引详情 | Index Management |
-| DELETE | /vector-index/indexes/{id} | 删除索引 | Index Management |
-| GET | /vector-index/indexes/find-matching | 查找匹配索引 | Index Management |
-| POST | /vector-index/indexes/{id}/persist | 持久化索引 | Index Management |
-| POST | /vector-index/indexes/{id}/recover | 恢复索引 | Index Management |
-| GET | /vector-index/indexes/{id}/statistics | 获取统计信息 | Index Management |
-| GET | /vector-index/indexes/{id}/query-history | 获取查询历史 | Index Management |
+| POST | /api/vector-index/indexes | 创建索引 | Index Management |
+| POST | /api/vector-index/indexes/from-embedding | 从向量化结果创建索引 | Index Management |
+| GET | /api/vector-index/indexes | 列出所有索引 | Index Management |
+| GET | /api/vector-index/indexes/{id} | 获取索引详情 | Index Management |
+| DELETE | /api/vector-index/indexes/{id} | 删除索引 | Index Management |
+| GET | /api/vector-index/indexes/find-matching | 查找匹配索引 | Index Management |
+| POST | /api/vector-index/indexes/{id}/persist | 持久化索引 | Index Management |
+| POST | /api/vector-index/indexes/{id}/recover | 恢复索引 | Index Management |
+| GET | /api/vector-index/indexes/{id}/statistics | 获取统计信息 | Index Management |
+| GET | /api/vector-index/indexes/{id}/query-history | 获取查询历史 | Index Management |
 | **Collection 管理** | | | |
-| GET | /vector-index/collections | 获取 Collection 列表 | Collection |
+| GET | /api/vector-index/collections | 获取 Collection 列表 | Collection |
 | **向量操作** | | | |
-| POST | /vector-index/indexes/{id}/vectors | 添加向量 | Vector Operations |
-| PUT | /vector-index/indexes/{id}/vectors | 更新向量 | Vector Operations |
-| DELETE | /vector-index/indexes/{id}/vectors | 删除向量 | Vector Operations |
+| POST | /api/vector-index/indexes/{id}/vectors | 添加向量 | Vector Operations |
+| PUT | /api/vector-index/indexes/{id}/vectors | 更新向量 | Vector Operations |
+| DELETE | /api/vector-index/indexes/{id}/vectors | 删除向量 | Vector Operations |
 | **检索** | | | |
 | - | - | 检索相关接口已移至 [检索查询模块 API 文档](../search-query/02-API接口文档.md) | Search |
 | **历史管理** | | | |
-| GET | /vector-index/indexes/history | 获取索引历史 | History |
-| DELETE | /vector-index/history/{id} | 删除历史记录 | History |
-| DELETE | /vector-index/history/clear-all | 清空所有历史 | History |
+| GET | /api/vector-index/indexes/history | 获取索引历史 | History |
+| DELETE | /api/vector-index/history/{id} | 删除历史记录 | History |
+| DELETE | /api/vector-index/history/clear-all | 清空所有历史 | History |
 | **向量化任务** | | | |
-| GET | /vector-index/embedding-tasks | 获取向量化任务列表 | Embedding |
+| GET | /api/vector-index/embedding-tasks | 获取向量化任务列表 | Embedding |
 | **智能推荐** | | | |
-| POST | /vector-index/recommend | 智能推荐索引配置 | Recommendation |
-| POST | /vector-index/recommend/log | 记录推荐采纳行为 | Recommendation |
-| GET | /vector-index/recommend/stats | 获取推荐统计 | Recommendation |
+| POST | /api/vector-index/recommend | 智能推荐索引配置 | Recommendation |
+| POST | /api/vector-index/recommend/log | 记录推荐采纳行为 | Recommendation |
+| GET | /api/vector-index/recommend/stats | 获取推荐统计 | Recommendation |
 | **健康检查** | | | |
-| GET | /vector-index/health | 系统健康检查 | System |
+| GET | /api/vector-index/health | 系统健康检查 | System |
 
 ---
 
@@ -73,7 +73,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /vector-index/indexes/from-embedding` |
+| 路径 | `POST /api/vector-index/indexes/from-embedding` |
 | 描述 | 从已完成的向量化结果创建向量索引，支持追加到已有 Collection |
 
 #### 请求参数
@@ -82,7 +82,7 @@
 {
   "embedding_result_id": "emb_123456",
   "name": "idx_技术文档_20260226",
-  "collection_name": "default_collection",
+  "collection_name": "knowledge_base_a",
   "provider": "MILVUS",
   "index_type": "HNSW",
   "metric_type": "cosine",
@@ -99,7 +99,7 @@
 |------|------|------|------|
 | embedding_result_id | string | 是 | 向量化结果ID |
 | name | string | 否 | 索引名称，默认自动生成 |
-| collection_name | string | 否 | 目标 Collection，默认 default_collection |
+| collection_name | string | 否 | 目标 Collection 名称；可选，不传时由后端按当前逻辑处理 |
 | provider | string | 否 | 向量数据库（默认 MILVUS） |
 | index_type | string | 否 | 索引算法（FLAT/IVF_FLAT/IVF_SQ8/IVF_PQ/HNSW），默认 FLAT |
 | metric_type | string | 否 | 度量类型（cosine/euclidean/dot_product），默认 cosine |
@@ -119,7 +119,7 @@
   "dimension": 1024,
   "metric_type": "cosine",
   "status": "READY",
-  "collection_name": "default_collection",
+  "collection_name": "knowledge_base_a",
   "embedding_result_id": "emb_123456",
   "source_document_name": "技术文档.pdf",
   "source_model": "bge-m3",
@@ -135,7 +135,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `POST /vector-index/create` |
+| 路径 | `POST /api/vector-index/indexes` |
 | 描述 | 创建一个空的向量索引 |
 
 #### 请求参数
@@ -143,10 +143,11 @@
 ```json
 {
   "index_name": "自定义索引",
-  "provider": "faiss",
-  "algorithm": "FLAT",
+  "index_type": "MILVUS",
+  "algorithm_type": "FLAT",
   "metric_type": "cosine",
-  "dimension": 1024
+  "dimension": 1024,
+  "namespace": "default"
 }
 ```
 
@@ -154,19 +155,18 @@
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {
-    "id": "idx_abc123",
-    "index_name": "自定义索引",
-    "provider": "faiss",
-    "algorithm": "FLAT",
-    "metric_type": "cosine",
-    "dimension": 1024,
-    "vector_count": 0,
-    "status": "ready",
-    "created_at": "2025-12-26T10:30:00Z"
-  }
+  "id": 12,
+  "uuid": "a1b2c3d4-...",
+  "index_name": "自定义索引",
+  "index_type": "MILVUS",
+  "algorithm_type": "FLAT",
+  "dimension": 1024,
+  "metric_type": "cosine",
+  "status": "READY",
+  "vector_count": 0,
+  "namespace": "default",
+  "created_at": "2026-03-06T10:30:00Z",
+  "updated_at": "2026-03-06T10:30:00Z"
 }
 ```
 
@@ -178,7 +178,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /vector-index/indexes` |
+| 路径 | `GET /api/vector-index/indexes` |
 | 描述 | 获取所有向量索引列表 |
 
 #### 请求参数
@@ -193,64 +193,48 @@
 #### 响应示例
 
 ```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "items": [
-      {
-        "id": "idx_789012",
-        "index_name": "技术文档索引",
-        "document_name": "技术文档.pdf",
-        "provider": "milvus",
-        "algorithm": "HNSW",
-        "metric_type": "cosine",
-        "dimension": 1024,
-        "vector_count": 50,
-        "status": "ready",
-        "created_at": "2025-12-26T10:30:00Z"
-      }
-    ],
-    "total": 5,
-    "page": 1,
-    "page_size": 20
+[
+  {
+    "id": 1,
+    "uuid": "a1b2c3d4-...",
+    "index_name": "技术文档索引",
+    "index_type": "MILVUS",
+    "algorithm_type": "HNSW",
+    "metric_type": "cosine",
+    "dimension": 1024,
+    "vector_count": 50,
+    "status": "READY",
+    "created_at": "2026-03-06T10:30:00Z",
+    "updated_at": "2026-03-06T10:30:15Z"
   }
-}
+]
 ```
 
 ### 3.2 获取索引详情
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /vector-index/indexes/{id}` |
+| 路径 | `GET /api/vector-index/indexes/{id}` |
 | 描述 | 获取单个索引的详细信息 |
 
 #### 响应示例
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {
-    "id": "idx_789012",
-    "index_name": "技术文档索引",
-    "embedding_result_id": "emb_123456",
-    "document_id": "doc_abc123",
-    "document_name": "技术文档.pdf",
-    "provider": "milvus",
-    "algorithm": "HNSW",
-    "algorithm_params": {
-      "M": 16,
-      "efConstruction": 256
-    },
-    "metric_type": "cosine",
-    "dimension": 1024,
-    "vector_count": 50,
-    "status": "ready",
-    "index_file": "results/vector_index/idx_789012.faiss",
-    "created_at": "2025-12-26T10:30:00Z",
-    "updated_at": "2025-12-26T10:30:15Z"
-  }
+  "id": 1,
+  "uuid": "a1b2c3d4-...",
+  "index_name": "技术文档索引",
+  "index_type": "MILVUS",
+  "algorithm_type": "HNSW",
+  "metric_type": "cosine",
+  "dimension": 1024,
+  "embedding_result_id": "emb_123456",
+  "source_document_name": "技术文档.pdf",
+  "source_model": "bge-m3",
+  "vector_count": 50,
+  "status": "READY",
+  "created_at": "2026-03-06T10:30:00Z",
+  "updated_at": "2026-03-06T10:30:15Z"
 }
 ```
 
@@ -258,27 +242,18 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `DELETE /vector-index/indexes/{id}` |
-| 描述 | 删除指定的向量索引 |
+| 路径 | `DELETE /api/vector-index/indexes/{id}` |
+| 描述 | 删除指定的向量索引，成功时返回 `204 No Content` |
 
 #### 响应示例
 
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "id": "idx_789012",
-    "deleted": true
-  }
-}
-```
+无响应体。
 
 ### 3.4 获取 Collection 列表（新增）
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /vector-index/collections` |
+| 路径 | `GET /api/vector-index/collections` |
 | 描述 | 获取所有 Collection 信息（Dify 方案按逻辑知识库聚合） |
 
 #### 响应示例
@@ -287,13 +262,13 @@
 {
   "collections": [
     {
-      "collection_name": "default_collection",
+      "collection_name": "knowledge_base_a",
       "is_default": true,
       "document_count": 5,
       "total_vectors": 250,
       "physical_collections": [
-        {"physical_name": "default_collection_dim1024", "dimension": 1024},
-        {"physical_name": "default_collection_dim2048", "dimension": 2048}
+        {"physical_name": "knowledge_base_a_dim1024", "dimension": 1024},
+        {"physical_name": "knowledge_base_a_dim2048", "dimension": 2048}
       ],
       "dimensions": [1024, 2048],
       "physical_count": 2
@@ -359,7 +334,7 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /vector-index/recommend/stats?days=30` |
+| 路径 | `GET /api/vector-index/recommend/stats?days=30` |
 | 描述 | 获取推荐采纳率统计（目标 ≥ 80%） |
 
 ---
@@ -370,114 +345,29 @@
 
 | 项目 | 说明 |
 |------|------|
-| 路径 | `GET /vector-index/{id}/statistics` |
+| 路径 | `GET /api/vector-index/indexes/{id}/statistics` |
 | 描述 | 获取索引的详细统计信息 |
 
 #### 响应示例
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {
-    "index_id": "idx_789012",
-    "vector_count": 50,
-    "dimension": 1024,
-    "index_size_bytes": 204800,
-    "index_size_human": "200 KB",
-    "avg_search_time_ms": 12.5,
-    "total_searches": 100,
-    "last_search_at": "2025-12-26T11:00:00Z",
-    "created_at": "2025-12-26T10:30:00Z"
-  }
+  "index_id": 1,
+  "index_name": "技术文档索引",
+  "vector_count": 50,
+  "dimension": 1024,
+  "index_type": "MILVUS",
+  "algorithm_type": "HNSW",
+  "metric_type": "cosine",
+  "total_queries": 100,
+  "avg_search_time_ms": 12.5,
+  "memory_usage_bytes": 204800,
+  "created_at": "2026-03-06T10:30:00Z",
+  "last_updated": "2026-03-06T11:00:00Z"
 }
 ```
 
-### 6.2 获取可用Provider
-
-| 项目 | 说明 |
-|------|------|
-| 路径 | `GET /vector-index/providers` |
-| 描述 | 获取系统支持的向量数据库列表 |
-
-#### 响应示例
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "providers": [
-      {
-        "name": "milvus",
-        "display_name": "Milvus",
-        "description": "分布式向量数据库，适合生产环境",
-        "available": true,
-        "supported_algorithms": ["FLAT", "HNSW", "IVF_FLAT", "IVF_PQ"]
-      },
-      {
-        "name": "faiss",
-        "display_name": "FAISS",
-        "description": "本地向量索引库，适合开发测试",
-        "available": true,
-        "supported_algorithms": ["FLAT", "HNSW", "IVF_FLAT", "IVF_PQ"]
-      }
-    ]
-  }
-}
-```
-
-### 6.3 获取可用算法
-
-| 项目 | 说明 |
-|------|------|
-| 路径 | `GET /vector-index/algorithms` |
-| 描述 | 获取系统支持的索引算法列表 |
-
-#### 响应示例
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "algorithms": [
-      {
-        "name": "FLAT",
-        "display_name": "FLAT (精确搜索)",
-        "description": "暴力搜索，精度100%",
-        "params": []
-      },
-      {
-        "name": "HNSW",
-        "display_name": "HNSW (图索引)",
-        "description": "层次可导航小世界图，高性能",
-        "params": [
-          {"name": "M", "type": "int", "default": 16, "description": "连接数"},
-          {"name": "efConstruction", "type": "int", "default": 256, "description": "构建搜索范围"}
-        ]
-      },
-      {
-        "name": "IVF_FLAT",
-        "display_name": "IVF_FLAT (倒排索引)",
-        "description": "倒排索引，平衡精度与速度",
-        "params": [
-          {"name": "nlist", "type": "int", "default": 100, "description": "聚类数量"}
-        ]
-      },
-      {
-        "name": "IVF_PQ",
-        "display_name": "IVF_PQ (乘积量化)",
-        "description": "向量压缩，节省内存",
-        "params": [
-          {"name": "nlist", "type": "int", "default": 100, "description": "聚类数量"},
-          {"name": "m", "type": "int", "default": 8, "description": "子向量数量"}
-        ]
-      }
-    ]
-  }
-}
-```
+> 说明：当前向量索引模块没有独立的 `/providers` 或 `/algorithms` 查询接口，前端可选数据库和算法由页面内置配置与推荐逻辑共同决定。
 
 ---
 

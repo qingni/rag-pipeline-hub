@@ -11,18 +11,18 @@
 
 1. 后端服务已启动 (`python -m uvicorn src.main:app --reload`)
 2. 前端服务已启动 (`npm run dev`)
-3. 已完成向量检索，有可用的检索结果
+3. 已完成文档加载、分块、向量化与索引构建（若需基于知识库生成）
 4. API Key 已配置（与 Embedding 服务相同）
 
 ## 快速体验
 
 ### 场景 1: 基础 RAG 问答
 
-1. 在搜索页面完成向量检索
-2. 点击"生成回答"按钮
-3. 选择模型（默认 deepseek-v3.2）
-4. 等待流式输出完成
-5. 查看生成的回答和引用来源
+1. 打开文本生成页面 `/generation`
+2. 选择一个或多个知识库 Collection（可选，不选则使用模型自身知识）
+3. 输入问题并选择模型（默认 `deepseek-v3.2`）
+4. 点击“生成回答”，等待流式输出完成
+5. 查看生成的回答、引用来源和 token/耗时信息
 
 ### 场景 2: 调整生成参数
 
@@ -39,13 +39,14 @@
 2. 查看过往的生成记录
 3. 点击记录查看完整详情
 4. 对比不同模型的生成效果
+5. 按需删除单条记录或清空全部历史
 
 ## API 快速入门
 
 ### 流式生成（推荐）
 
 ```bash
-curl -X POST http://localhost:8000/api/generation/stream \
+curl -X POST http://localhost:8000/api/v1/generation/stream \
   -H "Content-Type: application/json" \
   -d '{
     "question": "什么是 RAG？",
@@ -64,7 +65,7 @@ curl -X POST http://localhost:8000/api/generation/stream \
 ### 非流式生成
 
 ```bash
-curl -X POST http://localhost:8000/api/generation/generate \
+curl -X POST http://localhost:8000/api/v1/generation/generate \
   -H "Content-Type: application/json" \
   -d '{
     "question": "什么是 RAG？",
@@ -77,54 +78,28 @@ curl -X POST http://localhost:8000/api/generation/generate \
 ### 获取可用模型
 
 ```bash
-curl http://localhost:8000/api/generation/models
+curl http://localhost:8000/api/v1/generation/models
 ```
 
 ### 获取生成历史
 
 ```bash
-curl "http://localhost:8000/api/generation/history?page=1&page_size=20"
+curl "http://localhost:8000/api/v1/generation/history?page=1&page_size=20"
+```
+
+### 清空全部历史
+
+```bash
+curl -X DELETE http://localhost:8000/api/v1/generation/history/clear
 ```
 
 ## 前端集成示例
 
-### 流式输出处理
-
-```javascript
-// 使用 EventSource 处理 SSE
-const eventSource = new EventSource('/api/generation/stream', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    question: '什么是 RAG？',
-    model: 'deepseek-v3.2',
-    context: searchResults
-  })
-})
-
-let answer = ''
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data)
-  if (data.done) {
-    eventSource.close()
-    console.log('Token usage:', data.token_usage)
-  } else {
-    answer += data.content
-    // 更新 UI
-  }
-}
-
-eventSource.onerror = (error) => {
-  console.error('Generation error:', error)
-  eventSource.close()
-}
-```
-
-### 使用 fetch 处理流式响应
+### 流式输出处理（当前实现）
 
 ```javascript
 async function generateStream(question, context) {
-  const response = await fetch('/api/generation/stream', {
+  const response = await fetch('/api/v1/generation/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question, context, model: 'deepseek-v3.2' })
@@ -132,24 +107,52 @@ async function generateStream(question, context) {
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
+  let buffer = ''
+  let answer = ''
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    
-    const chunk = decoder.decode(value)
-    // 解析 SSE 格式
-    const lines = chunk.split('\n')
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
     for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = JSON.parse(line.slice(6))
-        if (!data.done) {
-          // 更新 UI
-          appendContent(data.content)
-        }
+      if (!line.startsWith('data: ')) continue
+
+      const payload = line.slice(6)
+      if (payload === '[DONE]') {
+        return answer
+      }
+
+      const data = JSON.parse(payload)
+      if (data.content) {
+        answer += data.content
+        // 更新 UI
+      }
+      if (data.done) {
+        console.log('Token usage:', data.token_usage)
+        console.log('Processing time:', data.processing_time_ms)
       }
     }
   }
+
+  return answer
+}
+```
+
+### 结果渲染建议
+
+```javascript
+import MarkdownIt from 'markdown-it'
+import DOMPurify from 'dompurify'
+
+const md = new MarkdownIt({ html: false, breaks: true })
+
+function renderAnswer(answer) {
+  const raw = md.render(answer)
+  return DOMPurify.sanitize(raw)
 }
 ```
 
@@ -175,11 +178,11 @@ A:
 
 A:
 ```javascript
-// 关闭 EventSource 连接
-eventSource.close()
+// 中止前端流式请求
+abortController.abort()
 
 // 或调用取消 API
-await fetch(`/api/generation/cancel/${requestId}`, { method: 'POST' })
+await fetch(`/api/v1/generation/cancel/${requestId}`, { method: 'POST' })
 ```
 
 ## 下一步

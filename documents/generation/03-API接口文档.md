@@ -2,6 +2,7 @@
 
 **生成日期**: 2025-12-26  
 **项目**: RAG Framework - 文本生成模块  
+**最后更新**: 2026-03-06  
 **API版本**: v1  
 
 ---
@@ -58,7 +59,8 @@
   "question": "如何在自选股中添加股票？",
   "model": "deepseek-v3.2",
   "temperature": 0.7,
-  "max_tokens": 4096,  "context": [
+  "max_tokens": 4096,
+  "context": [
     {
       "content": "在股票APP的自选页面中，添加股票到自选列表主要有以下两种方式...",
       "source_file": "技术文档.md",
@@ -76,7 +78,7 @@
 | temperature | float | 否 | 0.7 | 温度参数，0-2 |
 | max_tokens | int | 否 | 4096 | 最大输出长度，1-8192 |
 | context | array | 否 | [] | 检索上下文 |
-| stream | bool | 否 | true | 是否流式输出 |
+| stream | bool | 否 | false | 是否流式输出；调用 `/stream` 时通常传 `true` |
 
 #### Context Item 结构
 
@@ -124,7 +126,7 @@
 
 #### 响应格式
 
-响应为 SSE (Server-Sent Events) 格式：
+响应为 SSE (Server-Sent Events) 格式。当前实现采用“后端返回 SSE，前端使用 `fetch + ReadableStream` 逐行解析”的方式消费流，而不是浏览器 `EventSource`。
 
 ```
 data: {"request_id": "550e8400-e29b-41d4-a716-446655440000", "content": "", "done": false}
@@ -137,7 +139,7 @@ data: {"content": "资料", "done": false}
 
 ...
 
-data: {"content": "", "done": true, "token_usage": {"prompt_tokens": 856, "completion_tokens": 245, "total_tokens": 1101}, "processing_time_ms": 3245.67, "sources": [...]}
+data: {"content": "", "done": true, "token_usage": {"prompt_tokens": 856, "completion_tokens": 245, "total_tokens": 1101}, "processing_time_ms": 3245.67, "sources": [{"index": 1, "source_file": "技术文档.md", "similarity": 0.92}]}
 
 data: [DONE]
 ```
@@ -146,11 +148,51 @@ data: [DONE]
 
 | 事件类型 | 字段 | 说明 |
 |---------|------|------|
-| 开始 | request_id | 请求ID |
-| 内容 | content | 生成的内容片段 |
-| 完成 | done=true | 生成完成标志 |
-| 统计 | token_usage | Token使用统计 |
-| 结束 | [DONE] | 流结束标志 |
+| 开始 | `request_id` | 首个 chunk 通常携带请求 ID |
+| 内容 | `content` | 生成的内容片段 |
+| 完成 | `done=true` | 生成完成标志 |
+| 统计 | `token_usage` | Token 使用统计，仅最后一块返回 |
+| 耗时 | `processing_time_ms` | 处理耗时，仅最后一块返回 |
+| 来源 | `sources` | 引用来源，仅最后一块返回 |
+| 取消 | `cancelled=true` | 生成被取消时返回 |
+| 异常 | `error` | 生成异常时返回错误信息 |
+| 结束 | `[DONE]` | 流结束标志 |
+
+#### 前端接入建议
+
+```javascript
+const response = await fetch('/api/v1/generation/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    question: '请总结这份文档',
+    model: 'deepseek-v3.2',
+    stream: true,
+    context: []
+  })
+})
+
+const reader = response.body.getReader()
+const decoder = new TextDecoder()
+let buffer = ''
+
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+
+  buffer += decoder.decode(value, { stream: true })
+  const lines = buffer.split('\n')
+  buffer = lines.pop() || ''
+
+  for (const line of lines) {
+    if (!line.startsWith('data: ')) continue
+    const payload = line.slice(6)
+    if (payload === '[DONE]') return
+    const chunk = JSON.parse(payload)
+    // 处理 chunk.content / chunk.request_id / chunk.token_usage 等字段
+  }
+}
+```
 
 ### 2.3 取消生成
 
@@ -281,7 +323,10 @@ data: [DONE]
     {
       "content": "在股票APP的自选页面中...",
       "source_file": "技术文档.md",
-      "similarity": 0.92
+      "similarity": 0.92,
+      "metadata": {
+        "source": "技术文档.md"
+      }
     }
   ],
   "token_usage": {
@@ -468,6 +513,14 @@ export async function getHistoryList(params = {}) {
   if (!response.ok) throw new Error('获取历史列表失败')
   return response.json()
 }
+
+export async function clearHistory() {
+  const response = await fetch(`${API_BASE}/history/clear`, {
+    method: 'DELETE'
+  })
+  if (!response.ok) throw new Error('清空失败')
+  return response.json()
+}
 ```
 
 ### 6.2 Python
@@ -484,6 +537,8 @@ class ContextItem:
     content: str
     source_file: str = "未知来源"
     similarity: float = 0.0
+    chunk_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 class GenerationClient:
     def __init__(self, base_url: str = "http://localhost:8000/api/v1"):
