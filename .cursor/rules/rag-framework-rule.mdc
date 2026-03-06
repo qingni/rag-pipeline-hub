@@ -1,6 +1,0 @@
----
-description: RAG framework development guidelines - analyze with industry best practices before recommending solutions
-alwaysApply: true
----
-
-- 在推荐解决方案之前，需要先结合业内最佳实践进行分析，再给出推荐方案。

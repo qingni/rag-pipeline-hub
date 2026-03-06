@@ -61,10 +61,9 @@ Thumbs.db
 !.codebuddy/commands/
 CODEBUDDY.md
 
-# Cursor - 忽略除 commands 和 rules 外的所有内容
+# Cursor - 忽略除 commands 外的所有内容
 .cursor/*
 !.cursor/commands/
-!.cursor/rules/
 
 # 其他 AI 编辑器配置
 .windsurf/
