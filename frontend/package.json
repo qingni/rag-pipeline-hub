@@ -10,9 +10,11 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "axios": "^1.6.2",
+    "dompurify": "^3.3.2",
     "echarts": "^5.4.0",
     "element-plus": "^2.13.2",
     "lucide-vue-next": "^0.468.0",
+    "markdown-it": "^14.1.1",
     "marked": "^17.0.1",
     "pinia": "^2.1.7",
     "tdesign-icons-vue-next": "^0.3.6",

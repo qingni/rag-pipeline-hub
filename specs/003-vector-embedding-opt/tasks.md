@@ -255,6 +255,16 @@
 
 ---
 
+## Phase 14: Hotfix - Contextual Retrieval 批量 LLM 请求优化
+
+**Purpose**: 将 embedding 前 Contextual Retrieval 从逐 chunk LLM 调用切换为批量调用，降低请求数并保证 chunk 对齐。
+
+- [x] T070 [US2] 扩展 `backend/src/services/contextual_retrieval_service.py`：按 batch 请求 LLM，要求结构化返回 `chunk_id + context`，并按 `chunk_id` 回填
+- [x] T071 [US2] 扩展配置与接入：更新 `backend/src/config/__init__.py`、`backend/.env.example`、`backend/src/services/embedding_service.py`，新增并启用 `CONTEXTUAL_RETRIEVAL_BATCH_SIZE`（默认 10）
+- [x] T072 [US2] 同步规格文档：更新 `specs/003-vector-embedding-opt/spec.md` 与 `specs/003-vector-embedding-opt/plan.md`，补充 Contextual Retrieval 批量请求行为与约束
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

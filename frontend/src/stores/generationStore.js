@@ -374,6 +374,7 @@ export const useGenerationStore = defineStore('generation', () => {
       await generationApi.clearHistory()
       historyList.value = []
       historyTotal.value = 0
+      historyPage.value = 1
     } catch (error) {
       console.error('Failed to clear history:', error)
       throw error

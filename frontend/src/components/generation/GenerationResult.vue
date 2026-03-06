@@ -28,6 +28,17 @@
       <div v-else-if="error" class="error-state">
         <AlertCircle :size="20" />
         <span>{{ error }}</span>
+        <t-button
+          theme="primary"
+          variant="outline"
+          size="small"
+          @click="$emit('retry')"
+        >
+          <template #icon>
+            <RotateCw :size="14" />
+          </template>
+          重试
+        </t-button>
       </div>
       
       <!-- 空状态 -->
@@ -49,7 +60,29 @@
 
 <script setup>
 import { computed } from 'vue'
-import { MessageSquare, Clock, Hash, AlertCircle, Sparkles } from 'lucide-vue-next'
+import { MessageSquare, Clock, Hash, AlertCircle, Sparkles, RotateCw } from 'lucide-vue-next'
+import MarkdownIt from 'markdown-it'
+import DOMPurify from 'dompurify'
+
+defineEmits(['retry'])
+
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: false,
+  typographer: true,
+})
+
+const defaultLinkRender = md.renderer.rules.link_open ||
+  function (tokens, idx, options, _env, self) {
+    return self.renderToken(tokens, idx, options)
+  }
+
+md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
+  tokens[idx].attrSet('target', '_blank')
+  tokens[idx].attrSet('rel', 'noopener noreferrer')
+  return defaultLinkRender(tokens, idx, options, env, self)
+}
 
 const props = defineProps({
   content: {
@@ -74,29 +107,33 @@ const props = defineProps({
   }
 })
 
-// 简单的 Markdown 渲染和引用标记高亮
 const renderedContent = computed(() => {
   if (!props.content) return ''
-  
-  let html = props.content
-    // 转义 HTML
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    // 代码块
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
-    // 行内代码
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    // 粗体
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    // 斜体
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    // 引用标记高亮 [1], [2], etc.
-    .replace(/\[(\d+)\]/g, '<span class="source-ref">[$1]</span>')
-    // 换行
-    .replace(/\n/g, '<br>')
-  
-  return html
+
+  const raw = md.render(props.content)
+
+  const clean = DOMPurify.sanitize(raw, {
+    ALLOWED_TAGS: [
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'p', 'br', 'hr',
+      'ul', 'ol', 'li',
+      'blockquote',
+      'pre', 'code',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'strong', 'em', 'del', 's',
+      'a', 'img',
+      'span', 'div', 'sup', 'sub',
+    ],
+    ALLOWED_ATTR: [
+      'href', 'target', 'rel', 'src', 'alt', 'title',
+      'class', 'id',
+    ],
+  })
+
+  return clean.replace(
+    /(\S)\[(\d+)\]/g,
+    '$1<span class="source-ref">[$2]</span>'
+  )
 })
 
 function formatTime(ms) {
@@ -186,15 +223,72 @@ function formatTime(ms) {
 }
 
 .markdown-content {
-  line-height: 1.7;
+  line-height: 1.8;
   color: #374151;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4),
+.markdown-content :deep(h5),
+.markdown-content :deep(h6) {
+  color: #1f2937;
+  font-weight: 600;
+  margin: 20px 0 10px;
+  line-height: 1.4;
+}
+
+.markdown-content :deep(h1) { font-size: 1.5em; }
+.markdown-content :deep(h2) { font-size: 1.3em; }
+.markdown-content :deep(h3) { font-size: 1.15em; }
+.markdown-content :deep(h4) { font-size: 1.05em; }
+
+.markdown-content :deep(p) {
+  margin: 8px 0;
+}
+
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+
+.markdown-content :deep(li) {
+  margin: 4px 0;
+}
+
+.markdown-content :deep(li > ul),
+.markdown-content :deep(li > ol) {
+  margin: 2px 0;
+}
+
+.markdown-content :deep(blockquote) {
+  border-left: 4px solid #6366f1;
+  padding: 8px 16px;
+  margin: 12px 0;
+  background: #f9fafb;
+  color: #4b5563;
+  border-radius: 0 8px 8px 0;
+}
+
+.markdown-content :deep(blockquote p) {
+  margin: 4px 0;
+}
+
+.markdown-content :deep(hr) {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 16px 0;
 }
 
 .markdown-content :deep(code) {
   background: #f3f4f6;
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
   font-size: 0.9em;
 }
 
@@ -211,6 +305,59 @@ function formatTime(ms) {
   background: transparent;
   padding: 0;
   color: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.markdown-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  border: 1px solid #e5e7eb;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-content :deep(th) {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+}
+
+.markdown-content :deep(tr:hover td) {
+  background: #f9fafb;
+}
+
+.markdown-content :deep(a) {
+  color: #6366f1;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.markdown-content :deep(a:hover) {
+  border-bottom-color: #6366f1;
+}
+
+.markdown-content :deep(img) {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+
+.markdown-content :deep(strong) {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.markdown-content :deep(del),
+.markdown-content :deep(s) {
+  color: #9ca3af;
 }
 
 .markdown-content :deep(.source-ref) {

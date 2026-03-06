@@ -14,6 +14,7 @@
 4. **向量缓存机制** - LRU 缓存策略，支持跨文档复用
 5. **智能模型推荐** - 基于文档特征（语言、领域、多模态比例）自动推荐最佳嵌入模型
 6. **前端体验优化** - 进度可视化、推荐卡片、结果对比
+7. **Contextual Retrieval 请求优化** - embedding 前上下文增强改为 chunk 批量 LLM 请求（默认每批 10），降低请求量并保证 chunk 映射准确
 
 ## Technical Context
 
@@ -83,6 +84,7 @@ backend/
 │   │       └── cached_embedder.py         # 新增：缓存装饰器
 │   ├── services/
 │   │   ├── embedding_service.py           # 扩展：增量向量化、任务管理
+│   │   ├── contextual_retrieval_service.py # 扩展：chunk 批量上下文生成（chunk_id 映射回填）
 │   │   ├── embedding_cache_service.py     # 新增：缓存服务
 │   │   ├── embedding_progress_service.py  # 新增：进度跟踪服务
 │   │   ├── content_hash_service.py        # 新增：内容哈希服务
@@ -181,6 +183,12 @@ frontend/
 采用**推荐卡片 + 雷达图**方案：
 - 卡片展示 Top 3 推荐模型、推荐理由
 - 雷达图可视化各维度匹配度
+
+### 5. Contextual Retrieval 批量请求策略
+采用**chunk micro-batching + chunk_id 显式回填**方案：
+- 将多个 chunks 打包为一个 LLM 请求（默认 batch_size=10），减少请求总量
+- Prompt 中携带 `chunk_id`，响应解析后按 `chunk_id` 回填到原始顺序
+- 批量响应缺失项时按空 context 降级，保证 embedding 主流程不中断
 
 ## Complexity Tracking
 

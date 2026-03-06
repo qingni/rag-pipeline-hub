@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     CONTEXTUAL_RETRIEVAL_MAX_TOKENS: int = 128           # 最大输出 token（1-2 句话足够）
     CONTEXTUAL_RETRIEVAL_TIMEOUT: int = 30               # 单次请求超时（秒）
     CONTEXTUAL_RETRIEVAL_MAX_WORKERS: int = 5            # 并发线程数（同一文档内并发处理 chunk）
+    CONTEXTUAL_RETRIEVAL_BATCH_SIZE: int = 10            # 单次 LLM 请求处理的 chunk 数（避免 1 chunk 1 请求）
 
     # Embedding API Configuration
     EMBEDDING_API_KEY: Optional[str] = None

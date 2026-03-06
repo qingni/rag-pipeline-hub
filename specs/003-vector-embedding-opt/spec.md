@@ -20,6 +20,7 @@
 - Q: 模型推荐结果的展示方式？ → A: 推荐卡片：展示推荐模型、推荐理由、特征匹配度可视化（如雷达图/进度条展示各维度匹配情况）
 - Q: 嵌入模型能力特征数据来源？ → A: 静态配置 + 管理界面：预置默认配置，同时提供管理界面让用户调整模型能力评分
 - Q: 推荐算法的匹配策略？ → A: 加权评分算法：各维度（语言、领域、多模态）分别计算匹配度得分，按可配置权重加权求和，取最高分模型
+- Q: Contextual Retrieval 在 embedding 前的 LLM 调用策略？ → A: 改为 chunk 批量请求（默认每批 10 个），按 chunk_id 显式映射回填，避免逐 chunk 请求
 
 ## Background
 
@@ -46,6 +47,7 @@
 9. **推荐结果可视化**：通过推荐卡片展示模型推荐结果，包含推荐理由和特征匹配度可视化（雷达图/进度条）
 10. **模型能力配置管理**：预置主流模型的能力特征配置，同时提供管理界面让用户调整模型在各维度的能力评分
 11. **加权评分推荐算法**：基于加权评分算法进行模型推荐，各维度（语言匹配度、领域匹配度、多模态支持度）分别计算得分，按可配置权重加权求和，推荐综合得分最高的模型
+12. **Contextual Retrieval 请求优化**：embedding 前的 chunk 上下文生成改为按批请求 LLM（默认 batch_size=10），降低 LLM 请求数量并保持 chunk 对齐
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -80,6 +82,8 @@
 2. **Given** 向量化过程中某个批次请求失败（网络超时），**When** 检测到失败，**Then** 系统自动进行指数退避重试（最多 3 次），成功后继续处理
 3. **Given** 单个批次重试 3 次后仍然失败，**When** 重试耗尽，**Then** 系统记录失败分块信息，继续处理剩余分块，最终返回部分成功结果
 4. **Given** 用户配置了自定义并发数和批量大小，**When** 执行向量化，**Then** 系统按用户配置执行，并在超出合理范围时给出警告
+5. **Given** 启用了 Contextual Retrieval 且文档有 200 个 chunks，**When** 执行 embedding，**Then** 系统按批（默认 10）请求 LLM，调用次数约为 `ceil(200/10)=20`，而不是 200 次逐 chunk 请求
+6. **Given** 某批次 LLM 响应顺序与输入不同，**When** 系统解析结果，**Then** 通过 `chunk_id` 显式映射回填，确保上下文与原 chunk 一一对应
 
 ---
 
@@ -230,6 +234,7 @@
 - 当批量文档中所有文档特征差异都较大（无法提取共性）时，系统应提示用户分组处理或逐文档推荐
 - 当所有模型能力评分数据不可用时，系统应退回到默认模型选择，不提供推荐
 - 当推荐算法计算超时时，系统应返回基于简化规则的快速推荐结果
+- 当 Contextual Retrieval 的批量响应中缺失部分 `chunk_id` 或 JSON 解析失败时，系统应仅跳过缺失项并继续流程，不阻塞 embedding 主链路
 
 ## Requirements *(mandatory)*
 
@@ -304,6 +309,15 @@
 - **FR-044**: 推荐卡片必须展示 Top 3 推荐模型，用户可点击查看详细对比信息
 - **FR-045**: 系统必须支持用户忽略推荐结果，手动选择任意可用模型
 
+#### Contextual Retrieval（Embedding 前上下文增强）
+
+- **FR-046**: 系统必须支持在 embedding 前可选执行 Contextual Retrieval，为 chunk 生成文档级上下文并 prepend 到 chunk 文本
+- **FR-047**: Contextual Retrieval 的 LLM 调用必须支持 chunk 批量请求（非逐 chunk），默认 `batch_size=10`
+- **FR-048**: 批量请求必须携带并返回 `chunk_id`，系统必须基于 `chunk_id` 显式映射回填，不能依赖 LLM 返回顺序
+- **FR-049**: 当某批响应部分缺失或解析失败时，系统必须对该批缺失项降级为空 context 并继续 embedding 流程
+- **FR-050**: 系统必须支持配置 `CONTEXTUAL_RETRIEVAL_BATCH_SIZE`，默认值 10，最小值 1
+- **FR-051**: 系统必须保留 Contextual Retrieval 配置项：`ENABLED`、`MODEL`、`TEMPERATURE`、`MAX_TOKENS`、`TIMEOUT`、`MAX_WORKERS`、`BATCH_SIZE`
+
 ### Non-Functional Requirements
 
 - **NFR-001**: 批量向量化性能：100 个分块的向量化应在 30 秒内完成（5 并发，网络正常）
@@ -312,6 +326,7 @@
 - **NFR-004**: 内存使用：向量缓存内存占用不超过 500MB（10000 条 4096 维向量）
 - **NFR-005**: 增量检测性能：1000 个分块的变更检测应在 1 秒内完成
 - **NFR-006**: API 响应时间：向量化状态查询 API 应在 100ms 内返回
+- **NFR-007**: 在启用 Contextual Retrieval 且 `batch_size=10` 时，LLM 请求次数应满足 `requests <= ceil(chunks/10) + retry_overhead`
 
 ### Key Entities
 
@@ -531,6 +546,7 @@
 - 缓存存储使用本地内存或 Redis（可配置），本规格默认使用本地内存
 - API 限流由提供商控制，系统通过错误响应检测并自动调整
 - 内容哈希使用 SHA-256 算法，冲突概率可忽略
+- Contextual Retrieval 的 LLM 提供商支持 JSON 文本输出；若返回非结构化文本，系统通过容错解析并对缺失项降级
 
 ## Success Criteria *(mandatory)*
 
@@ -548,11 +564,15 @@
 - **SC-010**: 文档特征分析延迟 p95 < 2s（单文档）、p95 < 5s（10 个文档批量）
 - **SC-011**: 批量推荐的异常文档识别准确率达到 90% 以上（真正需要单独处理的文档被正确标注）
 - **SC-012**: 推荐卡片展示完整性 100%：包含推荐模型、理由、匹配度可视化
+- **SC-013**: 启用 Contextual Retrieval 且 `batch_size=10` 时，100 个 chunks 的上下文生成 LLM 请求次数不超过 10（不含重试）
+- **SC-014**: Contextual Retrieval 回填准确率 100%：生成成功的 context 必须与原始 `chunk_id` 一一对应，无错配
 
 ## Change Log
 
 | 日期 | 类型 | 变更内容 | 影响需求 |
 |------|------|----------|----------|
+| 2026-03-06 | BEHAVIOR_CHANGE | Contextual Retrieval 从逐 chunk LLM 请求改为按批请求（默认 batch_size=10），并基于 chunk_id 显式映射回填；新增 `CONTEXTUAL_RETRIEVAL_BATCH_SIZE` 配置 | FR-046~FR-051, NFR-007, SC-013~SC-014 |
 | 2026-02-05 | BUG_FIX | [VIBE] 修复文档向量化结果显示不完全的问题：前端 getLatestByDocument 调用正确的 API 端点获取完整向量数据 | 无 |
-| 2026-02-05 | DATA_STRUCTURE | [VIBE] 移除 EmbeddingResult JSON 输出中的 json_file_path 冗余字段 | 无 || 2026-02-03 | UX_IMPROVEMENT | 文档向量化模块选择文档后自动触发智能推荐，移除手动点击按钮 | US8 |
+| 2026-02-05 | DATA_STRUCTURE | [VIBE] 移除 EmbeddingResult JSON 输出中的 json_file_path 冗余字段 | 无 |
+| 2026-02-03 | UX_IMPROVEMENT | 文档向量化模块选择文档后自动触发智能推荐，移除手动点击按钮 | US8 |
 | 2026-02-02 | 初始版本 | 创建 003-vector-embedding-opt 功能规格文档 | - |

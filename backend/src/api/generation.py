@@ -274,6 +274,19 @@ async def get_history_detail(
     )
 
 
+@router.delete("/history/clear", response_model=SuccessResponse)
+async def clear_history(
+    db: Session = Depends(get_db),
+):
+    """Clear all history records (soft delete)."""
+    db.query(GenerationHistory).filter(
+        GenerationHistory.is_deleted == False
+    ).update({"is_deleted": True})
+    db.commit()
+    
+    return SuccessResponse(success=True, message="All history cleared")
+
+
 @router.delete("/history/{id}", response_model=SuccessResponse)
 async def delete_history(
     id: int,
@@ -292,16 +305,3 @@ async def delete_history(
     db.commit()
     
     return SuccessResponse(success=True, message="History deleted")
-
-
-@router.delete("/history/clear", response_model=SuccessResponse)
-async def clear_history(
-    db: Session = Depends(get_db),
-):
-    """Clear all history records (soft delete)."""
-    db.query(GenerationHistory).filter(
-        GenerationHistory.is_deleted == False
-    ).update({"is_deleted": True})
-    db.commit()
-    
-    return SuccessResponse(success=True, message="All history cleared")

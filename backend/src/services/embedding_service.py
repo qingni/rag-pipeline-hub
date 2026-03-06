@@ -1447,6 +1447,7 @@ class EmbeddingService:
                 max_tokens=getattr(settings, "CONTEXTUAL_RETRIEVAL_MAX_TOKENS", 128),
                 request_timeout=getattr(settings, "CONTEXTUAL_RETRIEVAL_TIMEOUT", 30),
                 max_workers=getattr(settings, "CONTEXTUAL_RETRIEVAL_MAX_WORKERS", 5),
+                batch_size=getattr(settings, "CONTEXTUAL_RETRIEVAL_BATCH_SIZE", 10),
             )
             contexts = cr_service.generate_chunk_contexts(full_doc_text, text_chunk_contents)
 

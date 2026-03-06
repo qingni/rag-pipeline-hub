@@ -91,6 +91,7 @@
           :error="generationError"
           :tokenUsage="tokenUsage"
           :processingTime="processingTime"
+          @retry="handleRetry"
         />
         
         <!-- 来源引用 -->
@@ -121,6 +122,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { Sparkles, FileText, History } from 'lucide-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useGenerationStore } from '../stores/generationStore'
 import { storeToRefs } from 'pinia'
 import GenerationInput from '../components/Generation/GenerationInput.vue'
@@ -184,21 +186,41 @@ function handleCancel() {
   store.cancelGeneration()
 }
 
+async function handleRetry() {
+  if (!question.value.trim()) return
+  await store.generateStream(question.value)
+}
+
 function clearContext() {
   store.clearContext()
 }
 
 // History handlers
-function handleHistoryRefresh() {
-  store.loadHistory()
+async function handleHistoryRefresh() {
+  try {
+    await store.loadHistory()
+    MessagePlugin.success('刷新成功')
+  } catch (error) {
+    MessagePlugin.error('刷新失败')
+  }
 }
 
 async function handleHistoryDelete(id) {
-  await store.deleteHistoryItem(id)
+  try {
+    await store.deleteHistoryItem(id)
+    MessagePlugin.success('删除成功')
+  } catch (error) {
+    MessagePlugin.error('删除失败')
+  }
 }
 
 async function handleHistoryClear() {
-  await store.clearAllHistory()
+  try {
+    await store.clearAllHistory()
+    MessagePlugin.success('已清空所有历史记录')
+  } catch (error) {
+    MessagePlugin.error('清空失败')
+  }
 }
 
 function handleHistoryPageChange(page) {
