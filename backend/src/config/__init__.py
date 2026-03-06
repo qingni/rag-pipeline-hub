@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # 该 instruction 会拼接到 query 前面，帮助 Reranker 理解检索任务意图
     # 格式: "Instruct: {task_description}\nQuery: {actual_query}"
     # 设为空字符串则不添加前缀（适配不需要 instruction 的 Reranker 模型）
-    RERANKER_TASK_INSTRUCTION: str = "Given a user query about product features, retrieve the most relevant document passages that directly describe the queried functionality, modules, or UI components."
+    RERANKER_TASK_INSTRUCTION: str = "根据用户查询的核心意图，检索在主题和语义上最相关的文档片段。优先考虑与查询主题直接相关的内容，而非仅在表面关键词上相似的段落。"
     
     # 混合检索配置
     RRF_K: int = 60                    # RRF 融合参数（前端不暴露，业内标准默认值）
