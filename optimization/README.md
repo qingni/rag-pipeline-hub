@@ -174,5 +174,5 @@ ls -lt optimization/*/document_load_summary_*.md | head -1
 ---
 
 **创建时间**: 2025-12-03  
-**维护团队**: RAG Framework 开发团队  
+**维护团队**: RAG Pipeline Hub 开发团队  
 **更新频率**: 随项目迭代更新

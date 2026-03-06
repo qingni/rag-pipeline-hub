@@ -6,7 +6,7 @@ info:
     Supports retrieval by result ID, document ID, and filtered list queries.
   version: 1.0.0
   contact:
-    name: RAG Framework Team
+    name: RAG Pipeline Hub Team
 
 servers:
   - url: http://localhost:8000

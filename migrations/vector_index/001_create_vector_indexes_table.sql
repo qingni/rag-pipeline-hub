@@ -2,7 +2,7 @@
 -- Migration: 001 - Create vector_indexes table
 -- ==============================================================================
 -- Description: Create the main vector_indexes table for storing index configuration
--- Author: RAG Framework Team
+-- Author: RAG Pipeline Hub Team
 -- Date: 2025-12-23
 -- ==============================================================================
 

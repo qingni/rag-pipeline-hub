@@ -1,4 +1,4 @@
-# RAG Framework
+# RAG Pipeline Hub
 
 [中文版 README](README.md)
 
@@ -69,8 +69,8 @@ Upload documents
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/qingni/rag-framework-spec.git
-cd rag-framework-spec
+git clone https://github.com/qingni/rag-pipeline-hub.git
+cd rag-pipeline-hub
 ```
 
 ### 2. Configure environment variables
@@ -160,7 +160,7 @@ The current frontend includes these main pages:
 ## Repository Structure
 
 ```text
-rag-framework-spec/
+rag-pipeline-hub/
 ├── backend/                 # FastAPI backend
 │   ├── src/
 │   │   ├── api/             # Route layer

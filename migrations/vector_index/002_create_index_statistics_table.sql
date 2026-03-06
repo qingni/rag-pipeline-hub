@@ -2,7 +2,7 @@
 -- Migration: 002 - Create index_statistics table
 -- ==============================================================================
 -- Description: Create the index_statistics table for storing performance metrics
--- Author: RAG Framework Team
+-- Author: RAG Pipeline Hub Team
 -- Date: 2025-12-23
 -- ==============================================================================
 

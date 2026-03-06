@@ -2,7 +2,7 @@
 -- Migration: 004 - Create query_history table
 -- ==============================================================================
 -- Description: Create query_history table for audit and analytics
--- Author: RAG Framework Team
+-- Author: RAG Pipeline Hub Team
 -- Date: 2025-12-23
 -- ==============================================================================
 

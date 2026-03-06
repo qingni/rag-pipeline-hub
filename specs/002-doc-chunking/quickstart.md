@@ -39,7 +39,7 @@ axios@1.6.2
 
 ### 1. Create Feature Branch
 ```bash
-cd /path/to/rag-framework-spec
+cd /path/to/rag-pipeline-hub
 git checkout 002-doc-chunking  # Already created
 ```
 

@@ -17,7 +17,7 @@ info:
     - 元数据存储: PostgreSQL 14+
   version: 1.0.0
   contact:
-    name: RAG Framework Team
+    name: RAG Pipeline Hub Team
     email: support@example.com
 
 servers:

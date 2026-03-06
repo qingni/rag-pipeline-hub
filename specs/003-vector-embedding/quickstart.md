@@ -34,7 +34,7 @@ This guide provides step-by-step instructions for developers to understand, buil
 ### 1.1 Clone Repository and Switch Branch
 
 ```bash
-cd /path/to/rag-framework-spec
+cd /path/to/rag-pipeline-hub
 git checkout 003-vector-embedding
 ```
 

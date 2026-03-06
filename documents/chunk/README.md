@@ -1,7 +1,7 @@
 # 文档分块功能完整分析文档
 
 **更新日期**: 2026-02-02  
-**项目**: RAG Framework - 文档分块模块  
+**项目**: RAG Pipeline Hub - 文档分块模块  
 **分支**: 002-doc-chunking  
 
 ---
@@ -150,7 +150,7 @@
 1. **克隆代码**
    ```bash
    git clone <repository-url>
-   cd rag-framework-spec
+   cd rag-pipeline-hub
    git checkout 002-doc-chunking
    ```
 

@@ -1,4 +1,4 @@
-# RAG Framework
+# RAG Pipeline Hub
 
 [English README](README_EN.md)
 
@@ -68,8 +68,8 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/qingni/rag-framework-spec.git
-cd rag-framework-spec
+git clone https://github.com/qingni/rag-pipeline-hub.git
+cd rag-pipeline-hub
 ```
 
 ### 2. 配置环境变量
@@ -159,7 +159,7 @@ colima start
 ## 项目结构
 
 ```text
-rag-framework-spec/
+rag-pipeline-hub/
 ├── backend/                 # FastAPI 后端
 │   ├── src/
 │   │   ├── api/             # 路由层

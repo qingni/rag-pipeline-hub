@@ -6,7 +6,7 @@ info:
     支持 20+ 种文档格式，提供统一的标准化输出结构。
   version: 2.0.0
   contact:
-    name: RAG Framework Team
+    name: RAG Pipeline Hub Team
 
 servers:
   - url: /api/v1

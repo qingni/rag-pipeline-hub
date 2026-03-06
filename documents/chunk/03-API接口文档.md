@@ -1,7 +1,7 @@
 # 文档分块 API 接口文档
 
 **更新日期**: 2026-02-02  
-**项目**: RAG Framework - 文档分块模块  
+**项目**: RAG Pipeline Hub - 文档分块模块  
 **基础路径**: `/api/chunking`
 
 ---

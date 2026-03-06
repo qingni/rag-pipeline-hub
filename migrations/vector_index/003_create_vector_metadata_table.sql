@@ -2,7 +2,7 @@
 -- Migration: 003 - Create vector_metadata table
 -- ==============================================================================
 -- Description: Create vector_metadata table for extended metadata storage
--- Author: RAG Framework Team
+-- Author: RAG Pipeline Hub Team
 -- Date: 2025-12-23
 -- ==============================================================================
 

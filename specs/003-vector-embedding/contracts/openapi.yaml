@@ -6,7 +6,7 @@ info:
     Supports single and batch processing with robust error handling.
   version: 1.0.0
   contact:
-    name: RAG Framework Team
+    name: RAG Pipeline Hub Team
 
 servers:
   - url: http://localhost:8000/api/v1

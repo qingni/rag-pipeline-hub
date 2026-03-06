@@ -15,7 +15,7 @@ info:
     - 智能推荐引擎
   version: 2.3.0
   contact:
-    name: RAG Framework Team
+    name: RAG Pipeline Hub Team
 
 servers:
   - url: /api/v1

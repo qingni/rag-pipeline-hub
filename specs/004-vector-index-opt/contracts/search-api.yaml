@@ -5,7 +5,7 @@ info:
     向量相似度检索 API，支持 TopK 查询、相似度阈值过滤和批量查询。
   version: 2.1.0
   contact:
-    name: RAG Framework Team
+    name: RAG Pipeline Hub Team
 
 servers:
   - url: /api/v1
