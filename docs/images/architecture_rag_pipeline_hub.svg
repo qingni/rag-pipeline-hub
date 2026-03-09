@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 780">
+  <title>RAG Pipeline Hub Architecture</title>
+  
+  <defs>
+    <!-- 箭头标记 - 小尺寸 -->
+    <marker id="arrow" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+      <polygon points="0 0, 6 2.5, 0 5" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+      <polygon points="0 0, 5 2, 0 4" fill="#8b5cf6"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+      <polygon points="0 0, 5 2, 0 4" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-indigo" markerWidth="5" markerHeight="4" refX="4" refY="2" orient="auto">
+      <polygon points="0 0, 5 2, 0 4" fill="#6366f1"/>
+    </marker>
+    
+    <!-- 阴影滤镜 -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#64748b" flood-opacity="0.15"/>
+    </filter>
+    
+    <!-- 模块背景渐变 -->
+    <linearGradient id="grad-core" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f5f3ff"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- 背景 -->
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  
+  <!-- ========================================== -->
+  <!-- 1. Client Layer (Top) -->
+  <!-- ========================================== -->
+  <g class="layer-client" transform="translate(0, 30)">
+    <text x="130" y="45" text-anchor="end" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1e40af">Client Layer</text>
+    
+    <!-- Container -->
+    <rect x="140" y="10" width="780" height="60" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+    
+    <!-- Content -->
+    <text x="530" y="45" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#1e3a8a">
+      Frontend Workbench (Vue 3 + Pinia + TDesign)
+    </text>
+  </g>
+  
+  <!-- Arrow Client -> API -->
+  <line x1="530" y1="100" x2="530" y2="130" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- ========================================== -->
+  <!-- 2. API Layer -->
+  <!-- ========================================== -->
+  <g class="layer-api" transform="translate(0, 130)">
+    <text x="130" y="35" text-anchor="end" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#0e7490">API Layer</text>
+    
+    <!-- Container -->
+    <rect x="140" y="0" width="780" height="50" rx="8" fill="#ecfeff" stroke="#0891b2" stroke-width="1.5"/>
+    
+    <!-- Content -->
+    <text x="530" y="30" text-anchor="middle" font-family="'SF Mono', monospace" font-size="14" font-weight="600" fill="#0e7490">
+      FastAPI API Gateway &amp; Orchestration
+    </text>
+  </g>
+
+  <!-- Arrow API -> Core -->
+  <line x1="530" y1="180" x2="530" y2="210" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- ========================================== -->
+  <!-- 3. Core Pipeline Layer (Middle) -->
+  <!-- ========================================== -->
+  <g class="layer-core" transform="translate(0, 210)">
+    <text x="130" y="100" text-anchor="end" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#5b21b6">Core Pipeline</text>
+    
+    <!-- Background Area -->
+    <rect x="140" y="0" width="780" height="200" rx="12" fill="#fbfaff" stroke="#8b5cf6" stroke-width="1" stroke-dasharray="8,4"/>
+    
+    <!-- Modules Group -->
+    <!-- Module 1: Document Loading -->
+    <g transform="translate(155, 20)">
+      <rect width="115" height="160" rx="6" fill="url(#grad-core)" stroke="#8b5cf6" stroke-width="1.5" filter="url(#shadow)"/>
+      <text x="57.5" y="25" text-anchor="middle" font-size="12" font-weight="700" fill="#4c1d95">Document<tspan x="57.5" dy="14">Loading</tspan></text>
+      <line x1="10" y1="48" x2="105" y2="48" stroke="#ddd6fe" stroke-width="1"/>
+      
+      <!-- Tags -->
+      <rect x="10" y="60" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="74" text-anchor="middle" font-size="9" fill="#5b21b6">20+ Formats</text>
+      
+      <rect x="10" y="85" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="99" text-anchor="middle" font-size="9" fill="#5b21b6">Docling+Fallback</text>
+      
+      <rect x="10" y="110" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="124" text-anchor="middle" font-size="9" fill="#5b21b6">Async Tasks</text>
+    </g>
+
+    <!-- Arrow 1->2 -->
+    <line x1="270" y1="100" x2="285" y2="100" stroke="#8b5cf6" stroke-width="1" marker-end="url(#arrow-blue)"/>
+
+    <!-- Module 2: Document Chunking -->
+    <g transform="translate(285, 20)">
+      <rect width="115" height="160" rx="6" fill="url(#grad-core)" stroke="#8b5cf6" stroke-width="1.5" filter="url(#shadow)"/>
+      <text x="57.5" y="25" text-anchor="middle" font-size="12" font-weight="700" fill="#4c1d95">Document<tspan x="57.5" dy="14">Chunking</tspan></text>
+      <line x1="10" y1="48" x2="105" y2="48" stroke="#ddd6fe" stroke-width="1"/>
+      
+      <rect x="10" y="60" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="74" text-anchor="middle" font-size="9" fill="#5b21b6">Multi Strategy</text>
+      
+      <rect x="10" y="85" width="95" height="35" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="102" text-anchor="middle" font-size="9" fill="#5b21b6">Smart</text>
+      <text x="57.5" y="114" text-anchor="middle" font-size="9" fill="#5b21b6">Recommendation</text>
+    </g>
+
+    <!-- Arrow 2->3 -->
+    <line x1="400" y1="100" x2="415" y2="100" stroke="#8b5cf6" stroke-width="1" marker-end="url(#arrow-blue)"/>
+
+    <!-- Module 3: Vectorization -->
+    <g transform="translate(415, 20)">
+      <rect width="115" height="160" rx="6" fill="url(#grad-core)" stroke="#8b5cf6" stroke-width="1.5" filter="url(#shadow)"/>
+      <text x="57.5" y="25" text-anchor="middle" font-size="12" font-weight="700" fill="#4c1d95">Vectorization</text>
+      <line x1="10" y1="48" x2="105" y2="48" stroke="#ddd6fe" stroke-width="1"/>
+      
+      <rect x="10" y="60" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="74" text-anchor="middle" font-size="9" fill="#5b21b6">bge-m3/qwen3</text>
+      
+      <rect x="10" y="85" width="95" height="35" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="102" text-anchor="middle" font-size="9" fill="#5b21b6">Model</text>
+      <text x="57.5" y="114" text-anchor="middle" font-size="9" fill="#5b21b6">Recommendation</text>
+    </g>
+
+    <!-- Arrow 3->4 -->
+    <line x1="530" y1="100" x2="545" y2="100" stroke="#8b5cf6" stroke-width="1" marker-end="url(#arrow-blue)"/>
+
+    <!-- Module 4: Vector Indexing -->
+    <g transform="translate(545, 20)">
+      <rect width="115" height="160" rx="6" fill="url(#grad-core)" stroke="#8b5cf6" stroke-width="1.5" filter="url(#shadow)"/>
+      <text x="57.5" y="25" text-anchor="middle" font-size="12" font-weight="700" fill="#4c1d95">Vector<tspan x="57.5" dy="14">Indexing</tspan></text>
+      <line x1="10" y1="48" x2="105" y2="48" stroke="#ddd6fe" stroke-width="1"/>
+      
+      <rect x="10" y="60" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="74" text-anchor="middle" font-size="9" fill="#5b21b6">Milvus</text>
+      
+      <rect x="10" y="85" width="95" height="35" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="102" text-anchor="middle" font-size="9" fill="#5b21b6">Collection</text>
+      <text x="57.5" y="114" text-anchor="middle" font-size="9" fill="#5b21b6">Management</text>
+    </g>
+
+    <!-- Arrow 4->5 -->
+    <line x1="660" y1="100" x2="675" y2="100" stroke="#8b5cf6" stroke-width="1" marker-end="url(#arrow-blue)"/>
+
+    <!-- Module 5: Search Query -->
+    <g transform="translate(675, 20)">
+      <rect width="115" height="160" rx="6" fill="url(#grad-core)" stroke="#8b5cf6" stroke-width="1.5" filter="url(#shadow)"/>
+      <text x="57.5" y="25" text-anchor="middle" font-size="12" font-weight="700" fill="#4c1d95">Search<tspan x="57.5" dy="14">Query</tspan></text>
+      <line x1="10" y1="48" x2="105" y2="48" stroke="#ddd6fe" stroke-width="1"/>
+      
+      <rect x="10" y="60" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="74" text-anchor="middle" font-size="9" fill="#5b21b6">Dense+Sparse</text>
+      
+      <rect x="10" y="85" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="99" text-anchor="middle" font-size="9" fill="#5b21b6">RRF</text>
+      
+      <rect x="10" y="110" width="95" height="20" rx="4" fill="#ede9fe"/>
+      <text x="57.5" y="124" text-anchor="middle" font-size="9" fill="#5b21b6">Reranker</text>
+    </g>
+
+    <!-- Arrow 5->6 -->
+    <line x1="790" y1="100" x2="805" y2="100" stroke="#8b5cf6" stroke-width="1" marker-end="url(#arrow-blue)"/>
+
+    <!-- Module 6: Text Generation -->
+    <g transform="translate(805, 20)">
+      <rect width="100" height="160" rx="6" fill="url(#grad-core)" stroke="#8b5cf6" stroke-width="1.5" filter="url(#shadow)"/>
+      <text x="50" y="25" text-anchor="middle" font-size="12" font-weight="700" fill="#4c1d95">Text<tspan x="50" dy="14">Generation</tspan></text>
+      <line x1="10" y1="48" x2="90" y2="48" stroke="#ddd6fe" stroke-width="1"/>
+      
+      <rect x="10" y="60" width="80" height="20" rx="4" fill="#ede9fe"/>
+      <text x="50" y="74" text-anchor="middle" font-size="9" fill="#5b21b6">Streaming</text>
+      
+      <rect x="10" y="85" width="80" height="35" rx="4" fill="#ede9fe"/>
+      <text x="50" y="102" text-anchor="middle" font-size="9" fill="#5b21b6">Source</text>
+      <text x="50" y="114" text-anchor="middle" font-size="9" fill="#5b21b6">Citation</text>
+    </g>
+  </g>
+
+  <!-- ========================================== -->
+  <!-- 4. External Services Layer -->
+  <!-- ========================================== -->
+  <g class="layer-external" transform="translate(0, 440)">
+    <text x="130" y="45" text-anchor="end" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#b45309">External Services</text>
+    
+    <!-- Container -->
+    <rect x="140" y="10" width="760" height="70" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6,3"/>
+    
+    <!-- Services - 调整间距避免右侧被遮挡 -->
+    <g transform="translate(160, 28)">
+      <rect x="0" y="0" width="130" height="34" rx="4" fill="#ffffff" stroke="#f59e0b" stroke-width="1"/>
+      <text x="65" y="22" text-anchor="middle" font-size="11" fill="#b45309">Docling Serve</text>
+    </g>
+    
+    <g transform="translate(305, 28)">
+      <rect x="0" y="0" width="145" height="34" rx="4" fill="#ffffff" stroke="#f59e0b" stroke-width="1"/>
+      <text x="72.5" y="22" text-anchor="middle" font-size="11" fill="#b45309">Embedding Service</text>
+    </g>
+    
+    <g transform="translate(465, 28)">
+      <rect x="0" y="0" width="145" height="34" rx="4" fill="#ffffff" stroke="#f59e0b" stroke-width="1"/>
+      <text x="72.5" y="22" text-anchor="middle" font-size="11" fill="#b45309">Reranker Service</text>
+    </g>
+    
+    <g transform="translate(625, 28)">
+      <rect x="0" y="0" width="125" height="34" rx="4" fill="#ffffff" stroke="#f59e0b" stroke-width="1"/>
+      <text x="62.5" y="22" text-anchor="middle" font-size="11" fill="#b45309">LLM Service</text>
+    </g>
+  </g>
+
+  <!-- Arrows Core -> External (独立箭头，不重叠) -->
+  <!-- Doc Loading -> Docling -->
+  <line x1="212" y1="410" x2="225" y2="468" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow-indigo)"/>
+  <!-- Vectorization -> Embedding -->
+  <line x1="472" y1="410" x2="377" y2="468" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow-indigo)"/>
+  <!-- Search -> Reranker -->
+  <line x1="732" y1="410" x2="537" y2="468" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow-indigo)"/>
+  <!-- Gen -> LLM -->
+  <line x1="855" y1="410" x2="687" y2="468" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow-indigo)"/>
+
+  <!-- ========================================== -->
+  <!-- 5. Data Layer (Bottom) -->
+  <!-- ========================================== -->
+  <g class="layer-data" transform="translate(0, 540)">
+    <text x="130" y="45" text-anchor="end" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#4338ca">Data Layer</text>
+    
+    <!-- Container -->
+    <rect x="140" y="10" width="760" height="70" rx="8" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+    
+    <!-- Data Stores -->
+    <g transform="translate(200, 28)">
+      <path d="M 0 5 Q 0 0 15 0 Q 30 0 30 5 L 30 28 Q 30 33 15 33 Q 0 33 0 28 Z" fill="#c7d2fe" stroke="#4338ca"/>
+      <path d="M 0 5 Q 15 10 30 5" fill="none" stroke="#4338ca"/>
+      <text x="45" y="22" font-size="12" font-weight="600" fill="#3730a3">File Storage</text>
+    </g>
+    
+    <g transform="translate(420, 28)">
+      <path d="M 0 5 Q 0 0 15 0 Q 30 0 30 5 L 30 28 Q 30 33 15 33 Q 0 33 0 28 Z" fill="#c7d2fe" stroke="#4338ca"/>
+      <path d="M 0 5 Q 15 10 30 5" fill="none" stroke="#4338ca"/>
+      <text x="45" y="22" font-size="12" font-weight="600" fill="#3730a3">SQLite / PostgreSQL</text>
+    </g>
+    
+    <g transform="translate(640, 28)">
+      <path d="M 0 5 Q 0 0 15 0 Q 30 0 30 5 L 30 28 Q 30 33 15 33 Q 0 33 0 28 Z" fill="#c7d2fe" stroke="#4338ca"/>
+      <path d="M 0 5 Q 15 10 30 5" fill="none" stroke="#4338ca"/>
+      <text x="45" y="22" font-size="12" font-weight="600" fill="#3730a3">Milvus Vector DB</text>
+    </g>
+  </g>
+
+  <!-- Arrows External -> Data (独立箭头，错开位置) -->
+  <!-- Docling -> File Storage -->
+  <line x1="225" y1="520" x2="230" y2="555" stroke="#6366f1" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow-indigo)"/>
+  <!-- LLM Service -> Milvus -->
+  <line x1="687" y1="520" x2="670" y2="555" stroke="#6366f1" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow-indigo)"/>
+
+</svg>

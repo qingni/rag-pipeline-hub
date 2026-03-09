@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">RAG Pipeline Hub Home Page</title>
+  <desc id="desc">Homepage mockup with sidebar, hero text, pipeline banner and six module cards.</desc>
+
+  <defs>
+    <linearGradient id="logoTextGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="iconBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#e2e8f0" stop-opacity="0.92"/>
+    </linearGradient>
+    <linearGradient id="bannerLineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4A90E2" stop-opacity="0.30"/>
+      <stop offset="20%" stop-color="#9B59B6"/>
+      <stop offset="40%" stop-color="#E91E63"/>
+      <stop offset="60%" stop-color="#F39C12"/>
+      <stop offset="80%" stop-color="#27AE60"/>
+      <stop offset="100%" stop-color="#667EEA" stop-opacity="0.30"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <filter id="bannerGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <style>
+      .ui {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+      }
+      .navText { font-size: 14px; fill: #4b5563; font-weight: 500; }
+      .navTextActive { font-size: 14px; fill: #2563eb; font-weight: 600; }
+      .navIcon {
+        fill: none;
+        stroke: #4b5563;
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .navIconActive {
+        fill: none;
+        stroke: #2563eb;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .heroTitle { font-size: 46px; fill: #111827; font-weight: 700; }
+      .heroDesc { font-size: 16px; fill: #6b7280; }
+      .cnLabel { font-size: 16px; font-weight: 600; text-anchor: middle; }
+      .enLabel { font-size: 10px; fill: #64748b; text-anchor: middle; }
+      .moduleTitle { font-size: 15px; fill: #1f2937; font-weight: 600; }
+      .moduleDesc { font-size: 13px; fill: #9ca3af; font-weight: 400; }
+      .tagText { font-size: 11px; fill: #6b7280; font-weight: 500; }
+      .adminText { font-size: 20px; fill: #9ca3af; font-weight: 500; }
+      .buttonText { font-size: 18px; fill: #4b5563; font-weight: 500; }
+    </style>
+  </defs>
+
+  <g class="ui">
+    <rect x="0" y="0" width="1600" height="900" fill="#f3f4f6"/>
+
+    <!-- Sidebar -->
+    <rect x="0" y="0" width="230" height="900" fill="#ffffff"/>
+    <line x1="230" y1="0" x2="230" y2="900" stroke="#e5e7eb"/>
+    <line x1="0" y1="72" x2="230" y2="72" stroke="#e5e7eb"/>
+
+    <text x="16" y="38" style="font-size:22px; font-weight:800; letter-spacing:-0.4px; fill:url(#logoTextGradient);">RAG</text>
+    <text x="66" y="38" style="font-size:15px; font-weight:500; letter-spacing:0.2px; fill:#6b7280;">Pipeline Hub</text>
+
+    <rect x="12" y="102" width="206" height="38" rx="6" fill="#eef2ff"/>
+
+    <!-- nav row 1: Home -->
+    <g transform="translate(24,112)">
+      <path class="navIconActive" d="M 2 9 L 11 2 L 20 9"/>
+      <path class="navIconActive" d="M 5 9 V 18 H 17 V 9"/>
+      <line class="navIconActive" x1="11" y1="18" x2="11" y2="13"/>
+    </g>
+    <text x="58" y="126" class="navTextActive">&#x9996;&#x9875;</text>
+
+    <!-- nav row 2: FileUp -->
+    <g transform="translate(24,161)">
+      <path class="navIcon" d="M 4 2 H 12 L 18 8 V 20 H 4 Z"/>
+      <path class="navIcon" d="M 12 2 V 8 H 18"/>
+      <line class="navIcon" x1="11" y1="15" x2="11" y2="9"/>
+      <path class="navIcon" d="M 8.5 11.5 L 11 9 L 13.5 11.5"/>
+    </g>
+    <text x="58" y="175" class="navText">&#x6587;&#x6863;&#x52A0;&#x8F7D;</text>
+
+    <!-- nav row 3: SplitSquareHorizontal -->
+    <g transform="translate(24,210)">
+      <rect class="navIcon" x="3.5" y="3.5" width="15" height="15" rx="2"/>
+      <line class="navIcon" x1="1" y1="11" x2="21" y2="11"/>
+      <line class="navIcon" x1="11" y1="4.5" x2="11" y2="17.5"/>
+    </g>
+    <text x="58" y="224" class="navText">&#x6587;&#x6863;&#x5206;&#x5757;</text>
+
+    <!-- nav row 4: Binary -->
+    <g transform="translate(24,259)">
+      <circle class="navIcon" cx="6" cy="6.5" r="2.3"/>
+      <line class="navIcon" x1="11" y1="4.2" x2="11" y2="8.8"/>
+      <circle class="navIcon" cx="6" cy="15.5" r="2.3"/>
+      <line class="navIcon" x1="11" y1="13.2" x2="11" y2="17.8"/>
+      <circle class="navIcon" cx="16" cy="6.5" r="2.3"/>
+      <line class="navIcon" x1="16" y1="13.2" x2="16" y2="17.8"/>
+    </g>
+    <text x="58" y="273" class="navText">&#x6587;&#x6863;&#x5411;&#x91CF;&#x5316;</text>
+
+    <!-- nav row 5: Server -->
+    <g transform="translate(24,308)">
+      <rect class="navIcon" x="2.5" y="3.5" width="17" height="6" rx="2"/>
+      <rect class="navIcon" x="2.5" y="12.5" width="17" height="6" rx="2"/>
+      <circle cx="6" cy="6.5" r="0.9" fill="#4b5563"/>
+      <circle cx="6" cy="15.5" r="0.9" fill="#4b5563"/>
+    </g>
+    <text x="58" y="322" class="navText">&#x5411;&#x91CF;&#x7D22;&#x5F15;</text>
+
+    <!-- nav row 6: SearchCheck -->
+    <g transform="translate(24,357)">
+      <circle class="navIcon" cx="9.5" cy="9.5" r="5.2"/>
+      <line class="navIcon" x1="13.5" y1="13.5" x2="19.5" y2="19.5"/>
+      <path class="navIcon" d="M 6.8 9.6 L 8.7 11.3 L 12.3 7.8"/>
+    </g>
+    <text x="58" y="371" class="navText">&#x641C;&#x7D22;&#x67E5;&#x8BE2;</text>
+
+    <!-- nav row 7: BotMessageSquare -->
+    <g transform="translate(24,406)">
+      <rect class="navIcon" x="2.8" y="3.5" width="17" height="12" rx="3"/>
+      <path class="navIcon" d="M 8 15.5 V 18.5 L 11.2 15.5"/>
+      <circle cx="8.5" cy="9.5" r="1" fill="#4b5563"/>
+      <circle cx="14.1" cy="9.5" r="1" fill="#4b5563"/>
+    </g>
+    <text x="58" y="420" class="navText">&#x6587;&#x672C;&#x751F;&#x6210;</text>
+
+    <!-- Main content -->
+    <g transform="translate(435,82)">
+      <text x="0" y="30" class="heroTitle">RAG &#x5404;&#x73AF;&#x8282;&#x72EC;&#x7ACB;&#x914D;&#x7F6E;&#x4E0E;&#x8C03;&#x8BD5;</text>
+      <text x="0" y="72" class="heroDesc">
+        &#x6DB5;&#x76D6;&#x6587;&#x6863;&#x52A0;&#x8F7D;&#x3001;&#x5206;&#x5757;&#x3001;&#x5411;&#x91CF;&#x5316;&#x3001;&#x7D22;&#x5F15;&#x3001;&#x68C0;&#x7D22;&#x3001;&#x751F;&#x6210;&#x516D;&#x5927;&#x6A21;&#x5757;&#xFF0C;&#x6BCF;&#x4E2A;&#x6A21;&#x5757;&#x53EF;&#x72EC;&#x7ACB;&#x8FD0;&#x884C;&#x3001;&#x53C2;&#x6570;&#x53EF;&#x8C03;&#x3001;&#x7ED3;&#x679C;&#x53EF;&#x67E5;&#x3002;
+      </text>
+
+      <rect x="0" y="102" width="960" height="220" rx="12" fill="#ffffff" stroke="#e5e7eb" filter="url(#cardShadow)"/>
+
+      <!-- Banner nodes -->
+      <g transform="translate(86,152)">
+        <path d="M -10 74 L 774 74" fill="none" stroke="url(#bannerLineGradient)" stroke-width="3.2" stroke-linecap="round"/>
+        <circle cx="0" cy="74" r="3.8" fill="#9B59B6" filter="url(#bannerGlow)">
+          <animate attributeName="cx" from="32" to="732" dur="3.4s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0;1;1;0" dur="3.4s" repeatCount="indefinite"/>
+        </circle>
+
+        <g transform="translate(32,0)">
+          <rect x="-28" y="0" width="56" height="56" rx="12" fill="url(#iconBg)" stroke="#4A90E2" stroke-width="1.7"/>
+          <path d="M -10 14 L 2 14 L 8 20 L 8 42 L -10 42 Z" fill="none" stroke="#4A90E2" stroke-width="2"/>
+          <path d="M 2 14 L 2 20 L 8 20" fill="none" stroke="#4A90E2" stroke-width="2"/>
+          <line x1="-4" y1="29" x2="4" y2="29" stroke="#4A90E2" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="0" cy="74" r="4" fill="#4A90E2"/>
+          <text x="0" y="102" class="cnLabel" fill="#4A90E2">&#x6587;&#x6863;&#x52A0;&#x8F7D;</text>
+          <text x="0" y="121" class="enLabel">Loading</text>
+        </g>
+
+        <g transform="translate(172,0)">
+          <rect x="-28" y="0" width="56" height="56" rx="12" fill="url(#iconBg)" stroke="#9B59B6" stroke-width="1.7"/>
+          <rect x="-11" y="15" width="22" height="26" rx="2" fill="none" stroke="#9B59B6" stroke-width="2"/>
+          <line x1="-15" y1="28" x2="15" y2="28" stroke="#9B59B6" stroke-width="2" stroke-dasharray="3 2"/>
+          <circle cx="0" cy="74" r="4" fill="#9B59B6"/>
+          <text x="0" y="102" class="cnLabel" fill="#9B59B6">&#x6587;&#x6863;&#x5206;&#x5757;</text>
+          <text x="0" y="121" class="enLabel">Chunking</text>
+        </g>
+
+        <g transform="translate(312,0)">
+          <rect x="-28" y="0" width="56" height="56" rx="12" fill="url(#iconBg)" stroke="#E91E63" stroke-width="1.7"/>
+          <rect x="-13" y="12" width="26" height="32" rx="3" fill="none" stroke="#E91E63" stroke-width="1.5"/>
+          <text x="0" y="26" text-anchor="middle" style="font-size:9px; font-family:monospace; fill:#E91E63; font-weight:700;">101</text>
+          <text x="0" y="38" text-anchor="middle" style="font-size:9px; font-family:monospace; fill:#E91E63; font-weight:700;">010</text>
+          <circle cx="0" cy="74" r="4" fill="#E91E63"/>
+          <text x="0" y="102" class="cnLabel" fill="#E91E63">&#x5411;&#x91CF;&#x5316;</text>
+          <text x="0" y="121" class="enLabel">Embedding</text>
+        </g>
+
+        <g transform="translate(452,0)">
+          <rect x="-28" y="0" width="56" height="56" rx="12" fill="url(#iconBg)" stroke="#F39C12" stroke-width="1.7"/>
+          <ellipse cx="0" cy="20" rx="11" ry="4" fill="none" stroke="#F39C12" stroke-width="2"/>
+          <path d="M -11 20 L -11 34 Q 0 40 11 34 L 11 20" fill="none" stroke="#F39C12" stroke-width="2"/>
+          <path d="M -11 28 Q 0 34 11 28" fill="none" stroke="#F39C12" stroke-width="2"/>
+          <circle cx="0" cy="74" r="4" fill="#F39C12"/>
+          <text x="0" y="102" class="cnLabel" fill="#F39C12">&#x5411;&#x91CF;&#x7D22;&#x5F15;</text>
+          <text x="0" y="121" class="enLabel">Indexing</text>
+        </g>
+
+        <g transform="translate(592,0)">
+          <rect x="-28" y="0" width="56" height="56" rx="12" fill="url(#iconBg)" stroke="#27AE60" stroke-width="1.7"/>
+          <circle cx="-2" cy="24" r="8" fill="none" stroke="#27AE60" stroke-width="2"/>
+          <line x1="5" y1="31" x2="10" y2="36" stroke="#27AE60" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="0" cy="74" r="4" fill="#27AE60"/>
+          <text x="0" y="102" class="cnLabel" fill="#27AE60">&#x641C;&#x7D22;&#x67E5;&#x8BE2;</text>
+          <text x="0" y="121" class="enLabel">Retrieval</text>
+        </g>
+
+        <g transform="translate(732,0)">
+          <rect x="-28" y="0" width="56" height="56" rx="12" fill="url(#iconBg)" stroke="#667EEA" stroke-width="1.7"/>
+          <path d="M -10 24 Q -10 14 0 14 Q 10 14 10 24 Q 10 34 0 34 L -4 39 L -4 34 Q -10 34 -10 24"
+            fill="none" stroke="#667EEA" stroke-width="2"/>
+          <circle cx="-3" cy="24" r="1.3" fill="#667EEA"/>
+          <circle cx="3" cy="24" r="1.3" fill="#667EEA"/>
+          <circle cx="0" cy="74" r="4" fill="#667EEA"/>
+          <text x="0" y="102" class="cnLabel" fill="#667EEA">&#x6587;&#x672C;&#x751F;&#x6210;</text>
+          <text x="0" y="121" class="enLabel">Generation</text>
+        </g>
+
+        <g transform="translate(0,-12)">
+          <path d="M 94 86 L 106 86 M 102 82 L 106 86 L 102 90" stroke="#9B59B6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.70"/>
+          <path d="M 234 86 L 246 86 M 242 82 L 246 86 L 242 90" stroke="#E91E63" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.70"/>
+          <path d="M 374 86 L 386 86 M 382 82 L 386 86 L 382 90" stroke="#F39C12" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.70"/>
+          <path d="M 514 86 L 526 86 M 522 82 L 526 86 L 522 90" stroke="#27AE60" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.70"/>
+          <path d="M 654 86 L 666 86 M 662 82 L 666 86 L 662 90" stroke="#667EEA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.70"/>
+        </g>
+      </g>
+
+      <!-- Module cards -->
+      <g transform="translate(0,348)">
+        <rect x="0" y="0" width="309" height="214" rx="12" fill="#ffffff" stroke="#f3f4f6"/>
+        <rect x="20" y="20" width="40" height="40" rx="10" fill="#EFF6FF"/>
+        <path d="M 30 30 L 42 30 L 48 36 L 48 50 L 30 50 Z" fill="none" stroke="#3B82F6" stroke-width="2"/>
+        <path d="M 42 30 L 42 36 L 48 36" fill="none" stroke="#3B82F6" stroke-width="2"/>
+        <text x="20" y="89" class="moduleTitle">&#x6587;&#x6863;&#x52A0;&#x8F7D;</text>
+        <text x="20" y="121" class="moduleDesc">&#x4E0A;&#x4F20;&#x5E76;&#x89E3;&#x6790;&#x591A;&#x683C;&#x5F0F;&#x6587;&#x6863;&#xFF0C;&#x63D0;&#x53D6;&#x7ED3;&#x6784;&#x5316;&#x6587;&#x672C;&#x5185;&#x5BB9;</text>
+        <rect x="20" y="146" width="42" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="31" y="163" class="tagText">PDF</text>
+        <rect x="68" y="146" width="52" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="80" y="163" class="tagText">DOCX</text>
+        <rect x="126" y="146" width="43" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="136" y="163" class="tagText">PPTX</text>
+        <rect x="175" y="146" width="66" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="189" y="163" class="tagText">Markdown</text>
+        <rect x="20" y="174" width="39" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="32" y="191" class="tagText">20+</text>
+
+        <rect x="325" y="0" width="309" height="214" rx="12" fill="#ffffff" stroke="#f3f4f6"/>
+        <rect x="345" y="20" width="40" height="40" rx="10" fill="#F5F3FF"/>
+        <rect x="357" y="30" width="16" height="20" rx="2" fill="none" stroke="#8B5CF6" stroke-width="2"/>
+        <line x1="351" y1="40" x2="379" y2="40" stroke="#8B5CF6" stroke-width="2" stroke-dasharray="3 2"/>
+        <text x="345" y="89" class="moduleTitle">&#x6587;&#x6863;&#x5206;&#x5757;</text>
+        <text x="345" y="121" class="moduleDesc">&#x57FA;&#x4E8E;&#x6587;&#x6863;&#x7279;&#x5F81;&#x667A;&#x80FD;&#x63A8;&#x8350;&#x5206;&#x5757;&#x7B56;&#x7565;&#x4E0E;&#x53C2;&#x6570;&#xFF0C;</text>
+        <text x="345" y="147" class="moduleDesc">&#x652F;&#x6301;&#x4E00;&#x952E;&#x5E94;&#x7528;</text>
+        <rect x="345" y="174" width="75" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="359" y="191" class="tagText">&#x667A;&#x80FD;&#x63A8;&#x8350;</text>
+        <rect x="426" y="174" width="66" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="438" y="191" class="tagText">&#x8BED;&#x4E49;&#x5206;&#x5757;</text>
+        <rect x="498" y="174" width="66" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="510" y="191" class="tagText">&#x6DF7;&#x5408;&#x5206;&#x5757;</text>
+        <rect x="570" y="174" width="58" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="582" y="191" class="tagText">&#x7236;&#x5B50;&#x6587;&#x6863;</text>
+
+        <rect x="651" y="0" width="309" height="214" rx="12" fill="#ffffff" stroke="#f3f4f6"/>
+        <rect x="671" y="20" width="40" height="40" rx="10" fill="#FDF2F8"/>
+        <rect x="682" y="30" width="18" height="20" rx="3" fill="none" stroke="#EC4899" stroke-width="1.5"/>
+        <text x="691" y="39" text-anchor="middle" style="font-size:8px; font-family:monospace; fill:#EC4899; font-weight:700;">101</text>
+        <text x="691" y="48" text-anchor="middle" style="font-size:8px; font-family:monospace; fill:#EC4899; font-weight:700;">010</text>
+        <text x="671" y="89" class="moduleTitle">&#x6587;&#x6863;&#x5411;&#x91CF;&#x5316;</text>
+        <text x="671" y="121" class="moduleDesc">&#x6839;&#x636E;&#x8BED;&#x8A00;&#x3001;&#x9886;&#x57DF;&#x3001;&#x591A;&#x6A21;&#x6001;&#x7279;&#x5F81;&#x667A;&#x80FD;&#x63A8;&#x8350;</text>
+        <text x="671" y="147" class="moduleDesc">Embedding &#x6A21;&#x578B;</text>
+        <rect x="671" y="174" width="75" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="685" y="191" class="tagText">&#x667A;&#x80FD;&#x63A8;&#x8350;</text>
+        <rect x="752" y="174" width="63" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="765" y="191" class="tagText">BGE-M3</text>
+        <rect x="821" y="174" width="48" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="834" y="191" class="tagText">Qwen</text>
+        <rect x="875" y="174" width="58" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="887" y="191" class="tagText">&#x591A;&#x6A21;&#x6001;</text>
+
+        <rect x="0" y="230" width="309" height="214" rx="12" fill="#ffffff" stroke="#f3f4f6"/>
+        <rect x="20" y="250" width="40" height="40" rx="10" fill="#FFFBEB"/>
+        <ellipse cx="40" cy="262" rx="10" ry="4" fill="none" stroke="#F59E0B" stroke-width="2"/>
+        <path d="M 30 262 L 30 276 Q 40 282 50 276 L 50 262" fill="none" stroke="#F59E0B" stroke-width="2"/>
+        <text x="20" y="319" class="moduleTitle">&#x5411;&#x91CF;&#x7D22;&#x5F15;</text>
+        <text x="20" y="351" class="moduleDesc">&#x5C06;&#x5411;&#x91CF;&#x5199;&#x5165;&#x6570;&#x636E;&#x5E93;&#x5E76;&#x521B;&#x5EFA;&#x9AD8;&#x6548;&#x68C0;&#x7D22;&#x7D22;&#x5F15;</text>
+        <rect x="20" y="404" width="65" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="34" y="421" class="tagText">Milvus</text>
+        <rect x="91" y="404" width="100" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="104" y="421" class="tagText">Collection &#x7BA1;&#x7406;</text>
+        <rect x="197" y="404" width="42" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="209" y="421" class="tagText">&#x7EDF;&#x8BA1;</text>
+
+        <rect x="325" y="230" width="309" height="214" rx="12" fill="#ffffff" stroke="#f3f4f6"/>
+        <rect x="345" y="250" width="40" height="40" rx="10" fill="#ECFDF5"/>
+        <circle cx="362" cy="268" r="8" fill="none" stroke="#10B981" stroke-width="2"/>
+        <line x1="369" y1="275" x2="375" y2="281" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+        <text x="345" y="319" class="moduleTitle">&#x641C;&#x7D22;&#x67E5;&#x8BE2;</text>
+        <text x="345" y="351" class="moduleDesc">&#x8BED;&#x4E49;&#x68C0;&#x7D22;&#x3001;&#x6DF7;&#x5408;&#x641C;&#x7D22;&#x4E0E; Rerank &#x7CBE;&#x6392;&#x8C03;&#x8BD5;</text>
+        <rect x="345" y="404" width="74" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="358" y="421" class="tagText">&#x6DF7;&#x5408;&#x68C0;&#x7D22;</text>
+        <rect x="425" y="404" width="56" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="437" y="421" class="tagText">Rerank</text>
+        <rect x="487" y="404" width="66" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="499" y="421" class="tagText">&#x67E5;&#x8BE2;&#x589E;&#x5F3A;</text>
+
+        <rect x="651" y="230" width="309" height="214" rx="12" fill="#ffffff" stroke="#f3f4f6"/>
+        <rect x="671" y="250" width="40" height="40" rx="10" fill="#EEF2FF"/>
+        <path d="M 680 268 Q 680 258 691 258 Q 702 258 702 268 Q 702 278 691 278 L 687 283 L 687 278 Q 680 278 680 268"
+          fill="none" stroke="#6366F1" stroke-width="2"/>
+        <circle cx="688" cy="268" r="1.2" fill="#6366F1"/>
+        <circle cx="694" cy="268" r="1.2" fill="#6366F1"/>
+        <text x="671" y="319" class="moduleTitle">&#x6587;&#x672C;&#x751F;&#x6210;</text>
+        <text x="671" y="351" class="moduleDesc">&#x914D;&#x7F6E; Prompt &#x548C;&#x4E0A;&#x4E0B;&#x6587;&#xFF0C;&#x8C03;&#x8BD5; AI &#x56DE;&#x7B54;&#x751F;&#x6210;</text>
+        <text x="671" y="377" class="moduleDesc">&#x6548;&#x679C;</text>
+        <rect x="671" y="404" width="74" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="684" y="421" class="tagText">DeepSeek</text>
+        <rect x="751" y="404" width="88" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="764" y="421" class="tagText">Prompt &#x6A21;&#x677F;</text>
+        <rect x="845" y="404" width="74" height="24" rx="4" fill="#f9fafb" stroke="#f3f4f6"/>
+        <text x="858" y="421" class="tagText">&#x6D41;&#x5F0F;&#x8F93;&#x51FA;</text>
+      </g>
+
+      <!-- footer admin bar removed as requested -->
+    </g>
+  </g>
+</svg>

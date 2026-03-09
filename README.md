@@ -4,7 +4,11 @@
 
 An end-to-end RAG framework for real-world workflows, covering document ingestion, chunking, embedding, index management, hybrid retrieval, and answer generation. The repository includes a FastAPI backend, a Vue 3 frontend, and a module-oriented documentation system under `documents/` and `specs/`.
 
-![Homepage](docs/images/homepage.png)
+![Homepage](docs/images/homepage_overview.svg)
+
+## Architecture Overview
+
+![Architecture Overview](docs/images/architecture_rag_pipeline_hub.svg)
 
 ## Highlights
 
@@ -44,7 +48,7 @@ Upload documents
   -> Chunk documents (character/paragraph/semantic/heading/hybrid/parent-child + smart recommendation)
   -> Generate embeddings (smart model recommendation + cache + progress)
   -> Manage vector indexes / collections
-  -> Run hybrid retrieval
+  -> Run hybrid retrieval (dense + sparse + RRF + reranker)
   -> Generate answers (SSE / sources / history)
 ```
 
@@ -200,12 +204,12 @@ For the full API reference, check `http://localhost:8000/docs` or the module doc
 
 The current frontend includes these main pages:
 
-- `/documents/load`
-- `/documents/chunk`
-- `/documents/embed`
-- `/index`
-- `/search`
-- `/generation`
+- `/documents/load`: document loading
+- `/documents/chunk`: document chunking
+- `/documents/embed`: vector embedding
+- `/index`: vector index management
+- `/search`: search and retrieval
+- `/generation`: text generation
 
 ## Repository Structure
 

@@ -8,6 +8,17 @@
       </p>
     </section>
 
+    <!-- Pipeline Banner -->
+    <section class="pipeline-overview">
+      <div class="pipeline-card">
+        <img
+          :src="pipelineBanner"
+          alt="RAG Pipeline processing flow"
+          class="pipeline-banner"
+        >
+      </div>
+    </section>
+
     <!-- 功能模块网格 -->
     <section class="modules">
       <div class="module-grid">
@@ -57,6 +68,7 @@
 
 <script setup>
 import { useRouter } from 'vue-router'
+import pipelineBanner from '../assets/images/rag_pipeline_banner.svg'
 import {
   FileUp, SplitSquareHorizontal, Binary,
   Server, SearchCheck, BotMessageSquare,
@@ -156,7 +168,27 @@ function navigateTo(path) {
   color: #6B7280;
   margin: 0;
   line-height: 1.7;
-  max-width: 560px;
+}
+
+/* ===== Pipeline Overview ===== */
+.pipeline-overview {
+  margin-bottom: 24px;
+}
+
+.pipeline-card {
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  background: #FFFFFF;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+
+.pipeline-banner {
+  width: 100%;
+  height: 240px;
+  display: block;
+  object-fit: cover;
+  object-position: center;
 }
 
 /* ===== Modules ===== */
@@ -262,6 +294,15 @@ function navigateTo(path) {
 
   .hero-title {
     font-size: 22px;
+  }
+
+  .pipeline-card {
+    overflow-x: auto;
+  }
+
+  .pipeline-banner {
+    min-width: 760px;
+    height: 220px;
   }
 
   .module-grid {

@@ -4,7 +4,11 @@
 
 一个面向真实业务流程的端到端 RAG 框架，覆盖文档加载、分块、向量化、索引管理、混合检索和答案生成全链路。项目包含 FastAPI 后端、Vue 3 前端，以及按模块拆分的 `documents/` 与 `specs/` 文档体系，适合做产品原型、内部知识库、RAG 技术验证与二次开发。
 
-![首页截图](docs/images/homepage.png)
+![首页截图](docs/images/homepage_overview.svg)
+
+## 架构总览
+
+![架构总览](docs/images/architecture_rag_pipeline_hub.svg)
 
 ## 项目亮点
 
